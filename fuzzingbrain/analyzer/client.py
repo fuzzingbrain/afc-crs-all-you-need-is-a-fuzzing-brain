@@ -32,7 +32,13 @@ class AnalysisClient:
         callees = client.get_callees("png_read_info")
     """
 
-    def __init__(self, socket_path: str, timeout: float = 30.0, client_id: str = None):
+    def __init__(
+        self,
+        socket_path: str,
+        timeout: float = 30.0,
+        client_id: str = None,
+        harness: Optional[str] = None,
+    ):
         """
         Initialize client.
 
@@ -44,6 +50,8 @@ class AnalysisClient:
         self.socket_path = Path(socket_path)
         self.timeout = timeout
         self.client_id = client_id
+        # Graph queries are answered for this harness (what it reaches).
+        self.harness = harness
         self._sock: Optional[socket.socket] = None
         self._lock = threading.Lock()  # Serialize access to socket
 
@@ -97,7 +105,12 @@ class AnalysisClient:
             TimeoutError: If request times out
             RuntimeError: If request fails
         """
-        request = Request(method=method, params=params or {}, source=self.client_id)
+        request = Request(
+            method=method,
+            params=params or {},
+            source=self.client_id,
+            harness=self.harness,
+        )
 
         with self._lock:
             try:

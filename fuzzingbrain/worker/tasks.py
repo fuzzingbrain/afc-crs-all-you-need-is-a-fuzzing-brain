@@ -76,6 +76,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     fuzzer_binary_path = assignment.get("fuzzer_binary_path")
     coverage_fuzzer_path = assignment.get("coverage_fuzzer_path")
     analysis_socket_path = assignment.get("analysis_socket_path")
+    index_path = assignment.get("index_path")
 
     # Scan mode and diff path (for delta mode)
     scan_mode = assignment.get("scan_mode", "full")
@@ -190,6 +191,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             scan_mode=scan_mode,
             fuzzer_binary_path=fuzzer_binary_path,
             analysis_socket_path=analysis_socket_path,
+            index_path=index_path,
             diff_path=diff_path,
             log_dir=log_dir,
             docker_image=pov_docker_image,

@@ -16,7 +16,6 @@ Breadth-First Per-Direction Architecture:
 
 import asyncio
 import time
-from collections import deque
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
@@ -585,10 +584,12 @@ class POVFullscanStrategy(POVBaseStrategy):
         method BFS'd but threw the level away into a plain set, so the big pool
         came out in Python set (hash) order -- neither distance nor random.
 
-        Uses a deque so the frontier is popped in O(1); the old ``list.pop(0)``
-        was O(n) per step, i.e. O(n^2) over a 90k-node Wireshark graph.
+        The walk runs on the in-memory call graph (one shortest-path pass), in
+        the harness's own subgraph when the graph has reachability for it.
         """
-        depth = self._bfs_callees(entry_functions)
+        graph = self.executor.graph
+        harness = self.executor.graph_harness
+        depth = graph.distances(entry_functions, harness)
 
         # Fallback when the entry-name BFS collapses. The planner names a
         # direction's entry_functions by reading source, as fully qualified C++
@@ -600,44 +601,17 @@ class POVFullscanStrategy(POVBaseStrategy):
         # (call_depth == 0, e.g. LLVMFuzzerTestOneInput) — those ARE real graph
         # nodes, so the traversal walks the actual reachable set. C targets whose
         # names already match never collapse, so this never fires for them.
-        node_count = self.repos.callgraph_nodes.count_for_fuzzer(
-            self.run_id, self.fuzzer
-        )
+        node_count = len(graph.reachable_names(harness)) if harness else 0
         if node_count and len(depth) < 0.1 * node_count:
-            fuzzer_entries = self.repos.callgraph_nodes.get_entry_function_names(
-                self.run_id, self.fuzzer
-            )
+            fuzzer_entries = graph.entry_names(harness)
             self.log_warning(
                 f"Entry BFS reached only {len(depth)} of ~{node_count} nodes "
                 f"(entry-name/graph-name mismatch); re-seeding from fuzzer entry "
                 f"{fuzzer_entries}"
             )
             if fuzzer_entries:
-                depth = self._bfs_callees(fuzzer_entries)
+                depth = graph.distances(fuzzer_entries, harness)
 
-        return depth
-
-    def _bfs_callees(self, seeds: List[str]) -> Dict[str, int]:
-        """BFS over callees from `seeds`, returning {function_name: hop distance}.
-
-        deque (O(1) pop) so a 90k-node graph is linear, not quadratic.
-        """
-        depth: Dict[str, int] = {}
-        queue = deque()
-        for s in seeds:
-            if s not in depth:
-                depth[s] = 0
-                queue.append(s)
-        while queue:
-            func_name = queue.popleft()
-            d = depth[func_name]
-            callees = self.repos.callgraph_nodes.find_callees(
-                self.run_id, self.fuzzer, func_name
-            )
-            for callee in callees or []:
-                if callee not in depth:
-                    depth[callee] = d + 1
-                    queue.append(callee)
         return depth
 
     def _resolve_function(self, name: str):
@@ -813,18 +787,9 @@ class POVFullscanStrategy(POVBaseStrategy):
         callers = []
         callees = []
         try:
-            callers = (
-                self.repos.callgraph_nodes.find_callers(
-                    self.run_id, self.fuzzer, func.name
-                )
-                or []
-            )
-            callees = (
-                self.repos.callgraph_nodes.find_callees(
-                    self.run_id, self.fuzzer, func.name
-                )
-                or []
-            )
+            graph = self.executor.graph
+            callers = graph.callers(func.name, self.executor.graph_harness)
+            callees = graph.callees(func.name, self.executor.graph_harness)
         except Exception:
             pass
 

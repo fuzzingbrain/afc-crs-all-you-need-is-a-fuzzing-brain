@@ -658,6 +658,10 @@ def generate(variant: int = 1) -> bytes:
             "analysis_socket_path": self.analyze_result.socket_path
             if self.analyze_result
             else None,
+            # The function index / call graph file, opened in-process.
+            "index_path": self.analyze_result.index_path
+            if self.analyze_result
+            else None,
             # Scan mode and diff path for delta mode
             "scan_mode": self.run.scan_mode.value,
             "diff_path": str(run_workspace / "diff" / "ref.diff")

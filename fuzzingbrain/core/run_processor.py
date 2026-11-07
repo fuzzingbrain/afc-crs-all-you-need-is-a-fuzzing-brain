@@ -787,7 +787,7 @@ class RunProcessor:
                 language="c",  # TODO: detect language
                 ossfuzz_project_name=self.config.ossfuzz_project_name,
                 log_dir=str(log_dir) if log_dir else None,
-                prebuild_dir=self.config.prebuild_graph_dir,
+                graph_path=self.config.graph,
                 fuzzer_sources=self.config.fuzzer_sources,
                 build_coverage=self.config.build_coverage,
                 prebuilt_fuzzers=self.config.prebuilt_binaries,

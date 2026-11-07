@@ -25,14 +25,10 @@ class AnalyzeRequest:
     language: str = "c"  # "c" / "cpp" / "java"
     ossfuzz_project_name: Optional[str] = None  # OSS-Fuzz project name if different
     log_dir: Optional[str] = None  # Log directory path
-    prebuild_dir: Optional[str] = None  # Prebuilt call graph (holds mongodb/)
+    graph_path: Optional[str] = None  # Call graph file (SQLite); None = index the source
     fuzzer_sources: Dict[str, Union[str, List[str]]] = field(
         default_factory=dict
     )  # fuzzer_name -> source_path or list of source_paths
-    # Optional introspector-based static analysis. Off by default: the core
-    # pipeline runs on code-navigation tools, and introspector is a decoupled,
-    # opt-in module (see fuzzingbrain/analyzer).
-    enable_static_analysis: bool = False
     build_coverage: bool = True
     # Prebuilt fuzzer binaries ({sanitizer: {fuzzer_name: path}}). When set, the
     # analyzer copies them into build/out and skips the OSS-Fuzz compile.
@@ -47,9 +43,8 @@ class AnalyzeRequest:
             "language": self.language,
             "ossfuzz_project_name": self.ossfuzz_project_name,
             "log_dir": self.log_dir,
-            "prebuild_dir": self.prebuild_dir,
+            "graph_path": self.graph_path,
             "fuzzer_sources": self.fuzzer_sources,
-            "enable_static_analysis": self.enable_static_analysis,
             "build_coverage": self.build_coverage,
             "prebuilt_fuzzers": self.prebuilt_fuzzers,
         }
@@ -64,9 +59,8 @@ class AnalyzeRequest:
             language=data.get("language", "c"),
             ossfuzz_project_name=data.get("ossfuzz_project_name"),
             log_dir=data.get("log_dir"),
-            prebuild_dir=data.get("prebuild_dir"),
+            graph_path=data.get("graph_path"),
             fuzzer_sources=data.get("fuzzer_sources", {}),
-            enable_static_analysis=data.get("enable_static_analysis", False),
             build_coverage=data.get("build_coverage", True),
             prebuilt_fuzzers=data.get("prebuilt_fuzzers", {}),
         )
@@ -122,13 +116,12 @@ class AnalyzeResult:
     # Coverage fuzzer path (shared by all workers)
     coverage_fuzzer_path: Optional[str] = None
 
-    # Static analysis status
-    # static_analysis_ready means the index holds data, so the tools that read
-    # it are worth offering. It is not "an introspector build happened": a
-    # prebuilt graph fills the collections without one.
-    static_analysis_ready: bool = False
+    # The function index every process reads (a call graph file, or the
+    # functions tree-sitter found when there is none).
+    index_path: Optional[str] = None
+    static_analysis_ready: bool = False  # the index has functions
     reachable_functions_count: int = 0
-    callgraph_nodes_count: int = 0
+    callgraph_nodes_count: int = 0  # call edges
 
     # Timing
     build_duration_seconds: float = 0.0
@@ -151,6 +144,7 @@ class AnalyzeResult:
             "fuzzers": [f.to_dict() for f in self.fuzzers],
             "build_paths": self.build_paths,
             "coverage_fuzzer_path": self.coverage_fuzzer_path,
+            "index_path": self.index_path,
             "static_analysis_ready": self.static_analysis_ready,
             "reachable_functions_count": self.reachable_functions_count,
             "callgraph_nodes_count": self.callgraph_nodes_count,
@@ -172,6 +166,7 @@ class AnalyzeResult:
             fuzzers=[FuzzerInfo.from_dict(f) for f in data.get("fuzzers", [])],
             build_paths=data.get("build_paths", {}),
             coverage_fuzzer_path=data.get("coverage_fuzzer_path"),
+            index_path=data.get("index_path"),
             static_analysis_ready=data.get("static_analysis_ready", False),
             reachable_functions_count=data.get("reachable_functions_count", 0),
             callgraph_nodes_count=data.get("callgraph_nodes_count", 0),

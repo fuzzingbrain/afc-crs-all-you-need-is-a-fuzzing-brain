@@ -306,10 +306,11 @@ FIELDS: Tuple[Field, ...] = (
     Field(("fuzzer", "build", "build_coverage"), "build_coverage", "bool", "Also build the coverage fuzzer"),
     # 5. Analysis data
     Field(
-        ("analysis", "prebuild_graph_dir"),
-        "prebuild_graph_dir",
+        ("analysis", "graph"),
+        "graph",
         "str",
-        "Prebuilt call graph (directory holding mongodb/functions.json, callgraph.json)",
+        "Call graph file (SQLite, from python -m fuzzingbrain.graph.convert); "
+        "without one, the source's functions are indexed and there are no call edges",
         is_path=True,
     ),
     # 6. Concurrency and resources
@@ -338,8 +339,9 @@ _OLD_KEYS = {
     "fuzz_tooling_path": 'moved to "fuzzer.build.fuzz_tooling_path"',
     "ossfuzz_project_name": 'moved to "fuzzer.build.ossfuzz_project_name"',
     "build_coverage": 'moved to "fuzzer.build.build_coverage"',
-    "prebuild_dir": 'renamed to "analysis.prebuild_graph_dir"',
-    "work_id": "removed: the graph is imported from analysis.prebuild_graph_dir alone",
+    "prebuild_dir": 'replaced by "analysis.graph", one SQLite file (python -m fuzzingbrain.graph.convert)',
+    "analysis.prebuild_graph_dir": 'replaced by "analysis.graph", one SQLite file (python -m fuzzingbrain.graph.convert)',
+    "work_id": "removed: the graph is read from analysis.graph alone",
     "enable_static_analysis": "removed: introspector is no longer supported",
     "model_profile": 'removed: name a model for every role in "models", or use "force_model"',
     "strict_models": 'replaced by "allow_fallback" (inverted; default false)',
@@ -431,7 +433,7 @@ class Config:
     build_coverage: bool = True
 
     # 5. Analysis data
-    prebuild_graph_dir: Optional[str] = None
+    graph: Optional[str] = None
 
     # 6. Concurrency and resources
     concurrency: ConcurrencyConfig = field(default_factory=ConcurrencyConfig)
@@ -750,11 +752,8 @@ class Config:
                 e.append(f"fuzzer.build.fuzz_tooling_path is not a directory: {self.fuzz_tooling_path}")
 
         # Analysis data
-        if self.prebuild_graph_dir:
-            mongodb = Path(self.prebuild_graph_dir) / "mongodb"
-            for name in ("functions.json", "callgraph.json"):
-                if not (mongodb / name).is_file():
-                    e.append(f"analysis.prebuild_graph_dir: missing {mongodb / name}")
+        if self.graph and not Path(self.graph).is_file():
+            e.append(f"analysis.graph: no such file {self.graph}")
 
         # Resources
         if self.max_parallel_fuzzers < 1:
@@ -863,7 +862,7 @@ class Config:
             tooling = self.fuzz_tooling_path or self.fuzz_tooling_url
             ref = f"@{self.fuzz_tooling_ref}" if self.fuzz_tooling_ref else ""
             rows.append(("Build", f"{tooling}{ref}"))
-        rows.append(("Call graph", self.prebuild_graph_dir or "none"))
+        rows.append(("Call graph", self.graph or "none (functions indexed from source)"))
         rows.append(("Limits", f"{self.timeout_minutes} min, "
                      f"{'$%.2f' % self.budget_limit if self.budget_limit else 'no budget limit'}, "
                      f"{f'stop after {self.pov_count} PoV' if self.pov_count else 'no PoV limit'}"))

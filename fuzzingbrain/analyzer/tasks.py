@@ -31,9 +31,8 @@ def _run_server_process(
     language: str,
     log_dir: Optional[str],
     result_queue: multiprocessing.Queue,
-    prebuild_dir: Optional[str] = None,
+    graph_path: Optional[str] = None,
     fuzzer_sources: Optional[Dict[str, Union[str, List[str]]]] = None,
-    enable_static_analysis: bool = False,
     build_coverage: bool = True,
     prebuilt_fuzzers: Optional[Dict[str, Dict[str, str]]] = None,
 ):
@@ -43,7 +42,7 @@ def _run_server_process(
     This function is the entry point for the server subprocess.
 
     Args:
-        prebuild_dir: Prebuilt call graph directory (holds mongodb/)
+        graph_path: Call graph file (SQLite); None = index the source
         fuzzer_sources: Dict mapping fuzzer_name -> source_path (relative to fuzz-tooling)
     """
 
@@ -65,9 +64,8 @@ def _run_server_process(
             ossfuzz_project_name=ossfuzz_project_name,
             language=language,
             log_dir=log_dir,
-            prebuild_dir=prebuild_dir,
+            graph_path=graph_path,
             fuzzer_sources=fuzzer_sources,
-            enable_static_analysis=enable_static_analysis,
             build_coverage=build_coverage,
             prebuilt_fuzzers=prebuilt_fuzzers,
         )
@@ -128,8 +126,8 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
     logger.info(f"[Analyzer] Starting Analysis Server for run {run_id}")
     logger.info(f"[Analyzer] Project: {request.project_name}")
     logger.info(f"[Analyzer] Sanitizers: {request.sanitizers}")
-    if request.prebuild_dir:
-        logger.info(f"[Analyzer] Using prebuild data from: {request.prebuild_dir}")
+    if request.graph_path:
+        logger.info(f"[Analyzer] Call graph: {request.graph_path}")
 
     # Create result queue for IPC
     result_queue = multiprocessing.Queue()
@@ -146,9 +144,8 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
             request.language,
             request.log_dir,
             result_queue,
-            request.prebuild_dir,
+            request.graph_path,
             request.fuzzer_sources,
-            request.enable_static_analysis,
             request.build_coverage,
             request.prebuilt_fuzzers,
         ),

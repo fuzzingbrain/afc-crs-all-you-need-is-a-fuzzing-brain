@@ -53,8 +53,8 @@ def test_the_run_id_is_generated_and_unique(tmp_path):
 
 
 def test_relative_paths_resolve_against_the_checkout(tmp_path):
-    cfg = _cfg(tmp_path, analysis={"prebuild_graph_dir": "artifact/g"})
-    assert cfg.prebuild_graph_dir == str(REPO_ROOT / "artifact/g")
+    cfg = _cfg(tmp_path, analysis={"graph": "artifact/g.sqlite"})
+    assert cfg.graph == str(REPO_ROOT / "artifact/g.sqlite")
 
 
 @pytest.mark.parametrize(

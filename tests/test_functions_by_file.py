@@ -10,10 +10,9 @@ changed in diff" against a 24k-function index.
 """
 
 from types import SimpleNamespace
-from unittest.mock import patch
 import re
+from unittest.mock import patch
 
-from bson import ObjectId
 
 from fuzzingbrain.analyzer.server import (
     AnalysisServer,
@@ -59,35 +58,25 @@ def test_suffix_keeps_everything_when_only_basenames_agree():
     assert select_by_path_suffix(docs, "url.c") == docs
 
 
-class _Collection:
-    """Enough of a pymongo collection to answer one regex find."""
+def test_sync_lookup_finds_functions_for_a_repo_relative_diff_path(tmp_path):
+    from fuzzingbrain.graph import CallGraph
+    from fuzzingbrain.graph.schema import create
 
-    def __init__(self, docs):
-        self.docs = docs
-
-    def find(self, query):
-        pat = re.compile(query["file_path"]["$regex"])
-        return [
-            dict(d)
-            for d in self.docs
-            if d["run_id"] == query["run_id"] and pat.search(d["file_path"])
-        ]
-
-
-def test_sync_lookup_finds_functions_for_a_repo_relative_diff_path():
-    tid = ObjectId()
-    docs = [
-        {"_id": 1, "run_id": tid, "name": "Curl_getn_scheme_handler", "file_path": "url.c"},
-        {"_id": 2, "run_id": tid, "name": "curl_url", "file_path": "urlapi.c"},
-        {"_id": 3, "run_id": ObjectId(), "name": "other_run", "file_path": "url.c"},
-    ]
-    server = SimpleNamespace(
-        run_id=tid,
-        repos=SimpleNamespace(functions=SimpleNamespace(collection=_Collection(docs))),
+    db = create(tmp_path / "g.sqlite")
+    db.executemany(
+        "INSERT INTO functions (name, file_path, start_line, end_line) VALUES (?,?,?,?)",
+        [("Curl_getn_scheme_handler", "url.c", 10, 20), ("curl_url", "urlapi.c", 5, 9),
+         ("tests_url", "tests/url.c", 1, 3)],
     )
+    db.commit()
+    db.close()
+    server = SimpleNamespace(graph=CallGraph(tmp_path / "g.sqlite"),
+                             _public=AnalysisServer._public)
     got = AnalysisServer._get_functions_by_file_sync(server, "lib/url.c")
-    assert [f["name"] for f in got] == ["Curl_getn_scheme_handler"]
-    assert "_id" not in got[0]
+    # Same basename, never "urlapi.c"; neither candidate shares "lib/", so the
+    # directory cannot narrow them and both are kept.
+    assert [f["name"] for f in got] == ["Curl_getn_scheme_handler", "tests_url"]
+    assert "id" not in got[0]
     assert AnalysisServer._get_functions_by_file_sync(server, "") == []
 
 

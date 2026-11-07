@@ -44,7 +44,7 @@
     }
   },
   "analysis": {
-    "prebuild_graph_dir": "artifact/aixcc/cu-delta-05/graph/curl_fuzzer_dict"
+    "graph": "artifact/aixcc/cu-delta-05/graph.sqlite"
   },
   "concurrency": 5
 }

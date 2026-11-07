@@ -92,6 +92,8 @@ class Request:
     source: Optional[str] = (
         None  # e.g., "controller", "worker_libpng_read_fuzzer_address"
     )
+    # The harness the caller works for: graph queries see what it reaches.
+    harness: Optional[str] = None
 
     def to_json(self) -> str:
         return json.dumps(
@@ -100,6 +102,7 @@ class Request:
                 "params": self.params,
                 "request_id": self.request_id,
                 "source": self.source,
+                "harness": self.harness,
             },
             cls=MongoJSONEncoder,
         )
@@ -112,6 +115,7 @@ class Request:
             params=obj.get("params", {}),
             request_id=obj.get("request_id", str(uuid.uuid4())[:8]),
             source=obj.get("source"),
+            harness=obj.get("harness"),
         )
 
 

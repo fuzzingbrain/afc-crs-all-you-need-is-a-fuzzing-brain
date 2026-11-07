@@ -174,11 +174,8 @@ class AnalyzerBuilder:
         │   └── ...
         ├── {project}_undefined/
         │   └── ...
-        ├── {project}_coverage/
-        │   └── ...
-        └── {project}_introspector/
-            └── inspector/
-                └── all-fuzz-introspector-functions.json
+        └── {project}_coverage/
+            └── ...
     """
 
     # Files to skip when scanning build output
@@ -227,7 +224,6 @@ class AnalyzerBuilder:
         log_dir: Optional[str] = None,
         parallel: bool = True,
         max_parallel: int = None,
-        skip_introspector: bool = False,
         analyzer_only_log_callback=None,
         prebuilt_fuzzers: Optional[Dict[str, Dict[str, str]]] = None,
     ):
@@ -243,14 +239,12 @@ class AnalyzerBuilder:
             log_dir: Directory for build logs (build output saved here, not to console)
             parallel: Enable parallel builds (default: True)
             max_parallel: Maximum parallel builds (default: auto based on CPU)
-            skip_introspector: Skip introspector build (when using prebuild data)
             analyzer_only_log_callback: Optional callback for analyzer-only logging (not to main log)
         """
         self.workspace_path = Path(workspace_path)
         self.project_name = ossfuzz_project_name or project_name
         self.sanitizers = sanitizers
         self.build_coverage = build_coverage
-        self.skip_introspector = skip_introspector
         self.prebuilt_fuzzers = prebuilt_fuzzers or {}
         self.log_callback = log_callback or self._default_log
         self.analyzer_only_log_callback = analyzer_only_log_callback
@@ -271,7 +265,6 @@ class AnalyzerBuilder:
         self.fuzzers: List[FuzzerInfo] = []
         self.build_paths: Dict[str, str] = {}
         self.coverage_path: Optional[str] = None
-        self.introspector_path: Optional[str] = None
 
     def _default_log(self, msg: str, level: str = "INFO"):
         """Default logging using loguru."""
@@ -301,14 +294,12 @@ class AnalyzerBuilder:
         Build order:
         1. Build with each user-specified sanitizer (parallel if enabled)
         2. Build with coverage (for C/C++)
-        3. Build with introspector (for static analysis)
 
         Returns:
             (success, message)
         """
         # Bring-your-own prebuilt fuzzers: copy them into build/out and skip the
-        # OSS-Fuzz compile entirely. Pair with --prebuild-dir to also skip the
-        # graph build -> the worker starts with no build step at all.
+        # OSS-Fuzz compile entirely.
         if self.prebuilt_fuzzers:
             return self._place_prebuilt()
         if self.parallel:
@@ -323,8 +314,8 @@ class AnalyzerBuilder:
         The map is ``{sanitizer: {fuzzer_name: path_to_built_binary}}``; the
         sanitizers built are exactly its keys. Sibling artifacts next
         to the binary (``<name>.options``, ``<name>_seed_corpus.zip``) are carried
-        over when present. Coverage and introspector builds are skipped; the call
-        graph is expected to come from ``--prebuild-dir`` instead.
+        over when present. The coverage build is skipped; the call
+        graph, if any, comes from ``analysis.graph``.
         """
         start = time.time()
         placed = 0
@@ -361,10 +352,6 @@ class AnalyzerBuilder:
             return False, "prebuilt_fuzzers set but no fuzzers were placed/collected"
         if self.build_coverage:
             self.log("Coverage build skipped (prebuilt_fuzzers set)", "WARN")
-        self.log(
-            "Introspector build skipped (prebuilt_fuzzers set); "
-            "graph is expected from --prebuild-dir"
-        )
         elapsed = time.time() - start
         self.log(
             f"Prebuilt import complete in {elapsed:.1f}s. "
@@ -465,11 +452,7 @@ class AnalyzerBuilder:
         if not helper_path.exists():
             return False, f"helper.py not found: {helper_path}"
 
-        total_steps = (
-            len(self.sanitizers)
-            + (1 if self.build_coverage else 0)
-            + (0 if self.skip_introspector else 1)
-        )  # sanitizers + coverage + introspector
+        total_steps = len(self.sanitizers) + (1 if self.build_coverage else 0)
         current_step = 0
 
         # Step 1-N: Build with each sanitizer
@@ -509,23 +492,6 @@ class AnalyzerBuilder:
         else:
             self.log("Coverage build not requested, skipping")
 
-        # Step N+2: Build introspector (unless skipped)
-        if not self.skip_introspector:
-            current_step += 1
-            self.log(f"[{current_step}/{total_steps}] Building with introspector")
-            introspector_success, _ = self._build_sanitizer("introspector")
-            if introspector_success:
-                self._move_build_output("introspector")
-                self.introspector_path = str(
-                    self.build_out_base / f"{self.project_name}_introspector"
-                )
-            else:
-                self.log(
-                    "Introspector build failed, static analysis will be limited", "WARN"
-                )
-        else:
-            self.log("Skipping introspector build (using prebuild data)")
-
         elapsed = time.time() - start_time
         self.log(
             f"Build completed in {elapsed:.1f}s. {len(self.fuzzers)} fuzzers available."
@@ -562,16 +528,12 @@ class AnalyzerBuilder:
             self.log("Docker image pre-build failed", "ERROR")
             return False, "Docker image pre-build failed"
 
-        # All builds: sanitizers + coverage + introspector (unless skipped)
+        # All builds: sanitizers + coverage
         all_builds = list(self.sanitizers)
         if self.build_coverage:
             all_builds.append("coverage")
         else:
             self.log("Coverage build not requested, skipping")
-        if not self.skip_introspector:
-            all_builds.append("introspector")
-        else:
-            self.log("Skipping introspector build (using prebuild data)")
         total_builds = len(all_builds)
 
         self.log(
@@ -679,19 +641,6 @@ class AnalyzerBuilder:
                 )
             else:
                 self.log("Coverage build failed, continuing without it", "WARN")
-
-        # Handle introspector result
-        if "introspector" in build_results:
-            intro_success, _ = build_results["introspector"]
-            if intro_success:
-                self.introspector_path = str(
-                    self.build_out_base / f"{self.project_name}_introspector"
-                )
-            else:
-                self.log(
-                    "Introspector build failed, static analysis will be limited",
-                    "WARN",
-                )
 
         elapsed = time.time() - start_time
         successful = sum(1 for s, _ in build_results.values() if s)
@@ -999,7 +948,7 @@ class AnalyzerBuilder:
         Build with a specific sanitizer (used by sequential build).
 
         Args:
-            sanitizer: Sanitizer type (address, memory, undefined, coverage, introspector)
+            sanitizer: Sanitizer type (address, memory, undefined, coverage)
 
         Returns:
             (success, message)
@@ -1212,10 +1161,6 @@ class AnalyzerBuilder:
     def get_coverage_path(self) -> Optional[str]:
         """Get path to coverage fuzzer directory."""
         return self.coverage_path
-
-    def get_introspector_path(self) -> Optional[str]:
-        """Get path to introspector output directory."""
-        return self.introspector_path
 
     def get_fuzzer_names(self) -> List[str]:
         """Get unique fuzzer names."""

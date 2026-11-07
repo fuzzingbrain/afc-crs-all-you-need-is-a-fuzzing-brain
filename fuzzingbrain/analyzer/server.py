@@ -30,9 +30,9 @@ from .protocol import (
     decode_message,
 )
 from .builder import AnalyzerBuilder
-from .importer import StaticAnalysisImporter, import_from_prebuild
 from .models import AnalyzeResult, FuzzerInfo
 from ..analysis import extract_functions_from_file
+from ..graph import CallGraph, ConvertedGraph, GraphError, SourceFunctions
 from ..db import connect_repositories
 from ..core.logging import get_analyzer_banner_and_header
 
@@ -174,9 +174,8 @@ class AnalysisServer:
         ossfuzz_project_name: Optional[str] = None,
         language: str = "c",
         log_dir: Optional[str] = None,
-        prebuild_dir: Optional[str] = None,
+        graph_path: Optional[str] = None,
         fuzzer_sources: Optional[Dict[str, Union[str, List[str]]]] = None,
-        enable_static_analysis: bool = False,
         build_coverage: bool = True,
         prebuilt_fuzzers: Optional[Dict[str, Dict[str, str]]] = None,
     ):
@@ -189,10 +188,11 @@ class AnalysisServer:
         self.ossfuzz_project_name = ossfuzz_project_name
         self.language = language
         self.log_dir = log_dir
-        self.prebuild_dir = Path(prebuild_dir) if prebuild_dir else None
+        # The run's call graph file; without one, an index of the functions in
+        # the source is built and there are no call edges.
+        self.graph_path = Path(graph_path) if graph_path else None
+        self.graph: Optional[CallGraph] = None
         self.fuzzer_sources = fuzzer_sources or {}
-        # Introspector static analysis is opt-in; off by default in production.
-        self.enable_static_analysis = enable_static_analysis
         self.build_coverage = build_coverage
         self.prebuilt_fuzzers = prebuilt_fuzzers or {}
 
@@ -210,7 +210,6 @@ class AnalysisServer:
         self.fuzzers: List[FuzzerInfo] = []
         self.build_paths: Dict[str, str] = {}
         self.coverage_path: Optional[str] = None
-        self.introspector_path: Optional[str] = None
 
         # Stats
         self.build_duration: float = 0.0
@@ -296,10 +295,10 @@ class AnalysisServer:
                 build_duration_seconds=self.build_duration,
             )
 
-        # Phase 2: Import static analysis
+        # Phase 2: Load the function index / call graph
         try:
-            await self._import_phase()
-        except RuntimeError as e:
+            await self._index_phase()
+        except (RuntimeError, GraphError, FileNotFoundError) as e:
             return AnalyzeResult(
                 success=False,
                 run_id=self.run_id,
@@ -320,13 +319,10 @@ class AnalysisServer:
             fuzzers=self.fuzzers,
             build_paths=self.build_paths,
             coverage_fuzzer_path=self.coverage_path,
-            # Whether the index actually holds data, not whether a build path
-            # exists: a prebuilt graph populates both collections without ever
-            # producing an introspector directory, and a successful introspector
-            # build can still import nothing.
             static_analysis_ready=self._get_function_count() > 0,
             reachable_functions_count=self._get_function_count(),
             callgraph_nodes_count=self._get_callgraph_count(),
+            index_path=str(self.index_path),
             build_duration_seconds=self.build_duration,
             analysis_duration_seconds=self.analysis_duration,
         )
@@ -367,18 +363,6 @@ class AnalysisServer:
         self._log("Phase 1: Building fuzzers")
         build_start = time.time()
 
-        # Introspector build is opt-in (off by default in production). Skip it
-        # unless static analysis is explicitly enabled; also skip when prebuild
-        # data is available.
-        skip_introspector = not self.enable_static_analysis
-        if skip_introspector:
-            self._log("Static analysis disabled, skipping introspector build")
-        elif self.prebuild_dir:
-            mongodb_dir = self.prebuild_dir / "mongodb"
-            if mongodb_dir.exists() and (mongodb_dir / "functions.json").exists():
-                skip_introspector = True
-                self._log("Prebuild data detected, will skip introspector build")
-
         builder = AnalyzerBuilder(
             workspace_path=str(self.workspace_path),
             project_name=self.project_name,
@@ -387,7 +371,6 @@ class AnalysisServer:
             ossfuzz_project_name=self.ossfuzz_project_name,
             log_callback=self._log,
             log_dir=self.log_dir,
-            skip_introspector=skip_introspector,
             analyzer_only_log_callback=self._log_analyzer_only,
             prebuilt_fuzzers=self.prebuilt_fuzzers,
         )
@@ -406,60 +389,49 @@ class AnalysisServer:
         self.fuzzers = builder.get_fuzzers()
         self.build_paths = builder.get_build_paths()
         self.coverage_path = builder.get_coverage_path()
-        self.introspector_path = builder.get_introspector_path()
 
         self._log(
             f"Build completed: {len(self.fuzzers)} fuzzers in {self.build_duration:.1f}s"
         )
         return True
 
-    async def _import_phase(self):
-        """Run static analysis import phase."""
-        self._log("Phase 2: Importing static analysis data")
-        import_start = time.time()
+    async def _index_phase(self):
+        """Open the call graph, or index the source's functions when there is none.
 
-        # A prebuilt graph the task asked for must load: running on without it
-        # would look like a normal run while the agents work blind.
-        if self.prebuild_dir:
-            self._log(f"Importing prebuilt call graph from {self.prebuild_dir}")
-            loop = asyncio.get_event_loop()
-            success, msg = await loop.run_in_executor(
-                None,
-                import_from_prebuild,
-                self.run_id,
-                self.prebuild_dir,
-                self.repos,
-                self._log,
-            )
-            self.analysis_duration = time.time() - import_start
-            if not success:
-                raise RuntimeError(f"Prebuilt call graph import failed: {msg}")
-            self._log(f"Prebuild import completed: {msg}")
-            return
-
-        # Fallback to introspector import
-        if not self.introspector_path:
-            self._log("No introspector data, skipping import", "WARN")
-            return
-
-        importer = StaticAnalysisImporter(
-            run_id=self.run_id,
-            introspector_path=self.introspector_path,
-            repo_path=str(self.workspace_path / "repo"),
-            repos=self.repos,
-            log_callback=self._log,
-        )
-
-        # Run import in thread pool
+        A graph the task named must open, and must know every harness this run
+        has: answering for a harness from nothing would look like a normal run
+        while the agents work blind.
+        """
+        self._log("Phase 2: Loading the function index")
+        start = time.time()
         loop = asyncio.get_event_loop()
-        success, msg = await loop.run_in_executor(None, importer.import_all)
-
-        self.analysis_duration = time.time() - import_start
-
-        if success:
-            self._log(f"Import completed: {msg}")
+        if self.graph_path:
+            path = ConvertedGraph(self.graph_path).provide()
         else:
-            self._log(f"Import failed: {msg}", "WARN")
+            self._log("No call graph given: indexing the functions in the source")
+            path = await loop.run_in_executor(
+                None,
+                SourceFunctions(
+                    self.workspace_path / "repo",
+                    self.workspace_path / "function_index.sqlite",
+                ).provide,
+            )
+        self.graph = await loop.run_in_executor(None, CallGraph, path)
+        self.index_path = path
+        if self.graph_path:
+            names = {f.name for f in self.fuzzers}
+            missing = sorted(names - set(self.graph.harness_names()))
+            if missing:
+                raise GraphError(
+                    f"call graph {path} has no reachability for harnesses {missing} "
+                    f"(it has {self.graph.harness_names()})"
+                )
+        self.analysis_duration = time.time() - start
+        st = self.graph.stats()
+        self._log(
+            f"Function index ready: {st['functions']} functions, {st['edges']} edges, "
+            f"{len(st['harnesses'])} harnesses ({self.analysis_duration:.1f}s)"
+        )
 
     async def _start_server(self):
         """Start Unix socket server."""
@@ -576,6 +548,7 @@ class AnalysisServer:
         method = request.method
         params = request.params
         req_id = request.request_id
+        harness = request.harness
 
         try:
             # Server control
@@ -592,7 +565,7 @@ class AnalysisServer:
 
             # Function queries
             elif method == Method.GET_FUNCTION:
-                result = await self._get_function(params.get("name"))
+                result = await self._get_function(params.get("name"), harness)
                 return Response.ok(result, req_id)
 
             elif method == Method.GET_FUNCTIONS_BY_FILE:
@@ -607,16 +580,16 @@ class AnalysisServer:
                 return Response.ok(result, req_id)
 
             elif method == Method.GET_FUNCTION_SOURCE:
-                result = await self._get_function_source(params.get("name"))
+                result = await self._get_function_source(params.get("name"), harness)
                 return Response.ok(result, req_id)
 
             # Call graph queries
             elif method == Method.GET_CALLERS:
-                result = await self._get_callers(params.get("function"))
+                result = await self._get_callers(params.get("function"), harness)
                 return Response.ok(result, req_id)
 
             elif method == Method.GET_CALLEES:
-                result = await self._get_callees(params.get("function"))
+                result = await self._get_callees(params.get("function"), harness)
                 return Response.ok(result, req_id)
 
             elif method == Method.GET_CALL_GRAPH:
@@ -632,6 +605,7 @@ class AnalysisServer:
                     params.get("func2"),
                     params.get("max_depth", 10),
                     params.get("max_paths", 100),
+                    harness,
                 )
                 return Response.ok(result, req_id)
 
@@ -735,99 +709,68 @@ class AnalysisServer:
         }
 
     def _get_callgraph_count(self) -> int:
-        """Count call graph nodes in the database."""
-        if not self.repos:
-            return 0
-        try:
-            return self.repos.callgraph_nodes.collection.count_documents(
-                {"run_id": self.run_id}
-            )
-        except Exception:
-            return 0
+        """Call edges in the graph (0 without a call graph)."""
+        return self.graph.n_edges if self.graph else 0
 
     def _get_function_count(self) -> int:
-        """Get count of functions in database."""
-        if not self.repos:
-            return 0
-        try:
-            return self.repos.functions.collection.count_documents(
-                {"run_id": self.run_id}
-            )
-        except Exception:
-            return 0
+        """Functions defined in the analysed code."""
+        return int(self.graph.defined.sum()) if self.graph else 0
+
+    def _scope(self, harness: Optional[str]) -> Optional[str]:
+        """The harness a graph query answers for, if the graph knows it."""
+        if harness and self.graph and harness in self.graph.harnesses:
+            return harness
+        return None
 
     # =========================================================================
     # Query implementations
     # =========================================================================
 
-    def _get_function_sync(self, name: str) -> Optional[dict]:
+    @staticmethod
+    def _public(row: dict) -> dict:
+        row = dict(row)
+        row.pop("id", None)
+        return row
+
+    def _get_function_sync(self, name: str, harness: Optional[str] = None) -> Optional[dict]:
         """Sync implementation of _get_function."""
         # Try function name variants (with/without OSS_FUZZ_ prefix)
         for func_name in _get_function_name_variants(name):
-            func = self.repos.functions.collection.find_one(
-                {
-                    "run_id": self.run_id,
-                    "name": func_name,
-                }
-            )
+            func = self.graph.function(func_name, self._scope(harness))
             if func:
-                func.pop("_id", None)
-                result = _serialize_doc(func)
-                # Add queried_as if name was mapped
+                result = self._public(func)
                 if func_name != name:
                     result["queried_as"] = name
                 return result
         return None
 
-    async def _get_function(self, name: str) -> Optional[dict]:
+    async def _get_function(self, name: str, harness: Optional[str] = None) -> Optional[dict]:
         """Get function by name.
 
         Tries OSS_FUZZ_ prefix variants if exact name not found.
         """
-        if not name or not self.repos:
+        if not name or not self.graph:
             return None
-        return await self._run_sync(self._get_function_sync, name)
+        return await self._run_sync(self._get_function_sync, name, harness)
 
     def _get_functions_by_file_sync(self, file_path: str) -> List[dict]:
         """Sync implementation of _get_functions_by_file."""
-        pattern = file_basename_pattern(file_path)
-        if pattern is None:
-            return []
-        cursor = self.repos.functions.collection.find(
-            {
-                "run_id": self.run_id,
-                "file_path": {"$regex": pattern},
-            }
-        )
-        results = []
-        for func in cursor:
-            func.pop("_id", None)
-            results.append(_serialize_doc(func))
+        results = [self._public(f) for f in self.graph.functions_in_file(file_path)]
         return select_by_path_suffix(results, file_path)
 
     async def _get_functions_by_file(self, file_path: str) -> List[dict]:
         """Get all functions in a file."""
-        if not file_path or not self.repos:
+        if not file_path or not self.graph:
             return []
         return await self._run_sync(self._get_functions_by_file_sync, file_path)
 
     def _search_functions_sync(self, pattern: str, limit: int) -> List[dict]:
         """Sync implementation of _search_functions."""
-        cursor = self.repos.functions.collection.find(
-            {
-                "run_id": self.run_id,
-                "name": {"$regex": pattern, "$options": "i"},
-            }
-        ).limit(limit)
-        results = []
-        for func in cursor:
-            func.pop("_id", None)
-            results.append(_serialize_doc(func))
-        return results
+        return [self._public(f) for f in self.graph.search(pattern, limit)]
 
     async def _search_functions(self, pattern: str, limit: int = 50) -> List[dict]:
         """Search functions by name pattern."""
-        if not pattern or not self.repos:
+        if not pattern or not self.graph:
             return []
         return await self._run_sync(self._search_functions_sync, pattern, limit)
 
@@ -911,16 +854,16 @@ class AnalysisServer:
 
         return None
 
-    async def _get_function_source(self, name: str) -> Optional[str]:
+    async def _get_function_source(self, name: str, harness: Optional[str] = None) -> Optional[str]:
         """Get function source code, with tree-sitter and repo fallbacks.
 
         (1) indexed content; (2) tree-sitter on the indexed file_path when the
         content is empty; (3) a cached tree-sitter parse of the project source
         under repo/ when the function is not indexed at all -- which is what lets
-        a full scan work on an imported prebuilt / CyberGym target that has no
-        introspector index, instead of handing the finder an empty stub.
+        a full scan work on a target whose index has no source for it,
+        instead of handing the finder an empty stub.
         """
-        func = await self._get_function(name)
+        func = await self._get_function(name, harness)
         content = func.get("content", "") if func else ""
 
         if not content and func:
@@ -1144,18 +1087,7 @@ class AnalysisServer:
                 "DEBUG",
             )
 
-        # Priority 3: database
-        if not source_paths and self.repos:
-            try:
-                db_fuzzer = self.repos.fuzzers.find_by_name(
-                    self.run_id, fuzzer_info.name
-                )
-                if db_fuzzer and db_fuzzer.source_path:
-                    source_paths.append(db_fuzzer.source_path)
-            except Exception as e:
-                self._log(f"Failed to query fuzzer from DB: {e}", "DEBUG")
-
-        # Priority 4: the filesystem. All three lookups above need the build to
+        # Priority 3: the filesystem. Both lookups above need the build to
         # have reported a source path, and none of them fires when a run names
         # its fuzzers explicitly (`--fuzzers`, or `fuzzers` in a task file):
         # run_processor creates those records without one. On curl that made
@@ -1219,80 +1151,63 @@ class AnalysisServer:
             "source": separator.join(contents),
         }
 
-    def _get_callers_sync(self, function: str) -> dict:
+    def _first_known(self, function: str, harness: Optional[str]) -> Optional[str]:
+        """`function`, or its OSS_FUZZ_-prefix variant, whichever the graph has."""
+        for name in _get_function_name_variants(function):
+            if self.graph.ids(name, harness):
+                return name
+        return None
+
+    def _get_callers_sync(self, function: str, harness: Optional[str] = None) -> dict:
         """Sync implementation of _get_callers."""
-        for func_name in _get_function_name_variants(function):
-            node = self.repos.callgraph_nodes.collection.find_one(
-                {
-                    "run_id": self.run_id,
-                    "function_name": func_name,
-                }
-            )
-            if node:
-                result = {"callers": node.get("callers", []), "function": func_name}
-                if func_name != function:
-                    result["queried_as"] = function
-                return result
-        return {"callers": [], "function": function}
-
-    async def _get_callers(self, function: str) -> dict:
-        """Get functions that call the given function.
-
-        Tries OSS_FUZZ_ prefix variants if exact name not found.
-        """
-        if not function or not self.repos:
+        scope = self._scope(harness)
+        name = self._first_known(function, scope)
+        if name is None:
             return {"callers": [], "function": function}
-        return await self._run_sync(self._get_callers_sync, function)
+        result = {"callers": self.graph.callers(name, scope), "function": name}
+        if name != function:
+            result["queried_as"] = function
+        return result
 
-    def _get_callees_sync(self, function: str) -> dict:
+    async def _get_callers(self, function: str, harness: Optional[str] = None) -> dict:
+        """Functions that call `function` (that the harness reaches)."""
+        if not function or not self.graph:
+            return {"callers": [], "function": function}
+        return await self._run_sync(self._get_callers_sync, function, harness)
+
+    def _get_callees_sync(self, function: str, harness: Optional[str] = None) -> dict:
         """Sync implementation of _get_callees."""
-        for func_name in _get_function_name_variants(function):
-            node = self.repos.callgraph_nodes.collection.find_one(
-                {
-                    "run_id": self.run_id,
-                    "function_name": func_name,
-                }
-            )
-            if node:
-                result = {"callees": node.get("callees", []), "function": func_name}
-                if func_name != function:
-                    result["queried_as"] = function
-                return result
-        return {"callees": [], "function": function}
-
-    async def _get_callees(self, function: str) -> dict:
-        """Get functions called by the given function.
-
-        Tries OSS_FUZZ_ prefix variants if exact name not found.
-        """
-        if not function or not self.repos:
+        scope = self._scope(harness)
+        name = self._first_known(function, scope)
+        if name is None:
             return {"callees": [], "function": function}
-        return await self._run_sync(self._get_callees_sync, function)
+        result = {"callees": self.graph.callees(name, scope), "function": name}
+        if name != function:
+            result["queried_as"] = function
+        return result
+
+    async def _get_callees(self, function: str, harness: Optional[str] = None) -> dict:
+        """Functions `function` calls."""
+        if not function or not self.graph:
+            return {"callees": [], "function": function}
+        return await self._run_sync(self._get_callees_sync, function, harness)
+
+    def _get_call_graph_sync(self, fuzzer: str, depth: int) -> dict:
+        """{function: [callees]} for everything within `depth` calls of the entry."""
+        scope = self._scope(fuzzer)
+        seeds = self.graph.entry_names(scope) if scope else self.graph.entry_names()
+        dist = self.graph.distances(seeds, scope)
+        return {
+            name: self.graph.callees(name, scope)
+            for name, d in sorted(dist.items(), key=lambda kv: (kv[1], kv[0]))
+            if d <= depth
+        }
 
     async def _get_call_graph(self, fuzzer: str, depth: int = 3) -> dict:
         """Get call graph for a fuzzer up to given depth."""
-        if not fuzzer or not self.repos:
+        if not fuzzer or not self.graph:
             return {}
-
-        # BFS to build call graph
-        graph = {}
-        visited = set()
-        queue = [(fuzzer, 0)]
-
-        while queue:
-            func, d = queue.pop(0)
-            if func in visited or d > depth:
-                continue
-            visited.add(func)
-
-            callees = await self._get_callees(func)
-            graph[func] = callees
-
-            for callee in callees:
-                if callee not in visited:
-                    queue.append((callee, d + 1))
-
-        return graph
+        return await self._run_sync(self._get_call_graph_sync, fuzzer, depth)
 
     def _find_all_paths_sync(
         self,
@@ -1300,104 +1215,24 @@ class AnalysisServer:
         func2: str,
         max_depth: int,
         max_paths: int,
+        harness: Optional[str] = None,
     ) -> dict:
         """Sync implementation of _find_all_paths."""
-        # If func1 is the libfuzzer entry point or not in callgraph,
-        # start from all entry point functions (call_depth=0)
-        start_functions = [func1]
-        use_entry_points = False
-
-        if func1 == "LLVMFuzzerTestOneInput":
-            use_entry_points = True
-        else:
-            # Check if func1 exists in callgraph
-            func1_exists = self.repos.callgraph_nodes.collection.find_one(
-                {
-                    "run_id": self.run_id,
-                    "function_name": func1,
-                }
-            )
-            if not func1_exists:
-                use_entry_points = True
-
-        if use_entry_points:
-            # Find all entry points (call_depth=0)
-            entry_points = list(
-                self.repos.callgraph_nodes.collection.find(
-                    {
-                        "run_id": self.run_id,
-                        "call_depth": 0,
-                    }
-                ).distinct("function_name")
-            )
-            if entry_points:
-                start_functions = entry_points
-
-        # Get target function variants (with/without OSS_FUZZ_ prefix)
-        target_variants = set(_get_function_name_variants(func2))
-        actual_target = func2
-
-        # DFS to find all paths
-        paths = []
-        truncated = False
-
-        def dfs(current: str, path: list, visited: set):
-            nonlocal truncated, actual_target
-
-            if len(paths) >= max_paths:
-                truncated = True
-                return
-
-            if len(path) > max_depth:
-                return
-
-            if current in target_variants:
-                paths.append(path.copy())
-                actual_target = current
-                return
-
-            if current in visited:
-                return
-
-            visited.add(current)
-
-            node = self.repos.callgraph_nodes.collection.find_one(
-                {
-                    "run_id": self.run_id,
-                    "function_name": current,
-                }
-            )
-
-            if node:
-                callees = node.get("callees", [])
-                for callee in callees:
-                    if callee not in visited:
-                        path.append(callee)
-                        dfs(callee, path, visited)
-                        path.pop()
-
-            visited.remove(current)
-
-        # Start DFS from each start function
-        for start_func in start_functions:
-            if len(paths) >= max_paths:
-                truncated = True
-                break
-            dfs(start_func, [start_func], set())
-
+        scope = self._scope(harness)
+        target = self._first_known(func2, scope) or func2
+        found = self.graph.all_paths(func1, target, max_depth, max_paths, scope)
+        paths = found["paths"]
         result = {
             "func1": func1,
-            "func2": actual_target if paths else func2,
+            "func2": target if paths else func2,
             "max_depth": max_depth,
             "path_count": len(paths),
             "paths": paths,
-            "truncated": truncated,
+            "truncated": found["truncated"],
             "cached": False,
         }
-
-        if paths and actual_target != func2:
+        if paths and target != func2:
             result["queried_func2"] = func2
-
         return result
 
     async def _find_all_paths(
@@ -1406,6 +1241,7 @@ class AnalysisServer:
         func2: str,
         max_depth: int = 10,
         max_paths: int = 100,
+        harness: Optional[str] = None,
     ) -> dict:
         """
         Find all call paths from func1 to func2.
@@ -1413,7 +1249,7 @@ class AnalysisServer:
         Uses DFS with depth limiting and path count limiting.
         Results are cached at run level.
         """
-        if not func1 or not func2 or not self.repos:
+        if not func1 or not func2 or not self.graph:
             return {
                 "func1": func1,
                 "func2": func2,
@@ -1424,113 +1260,83 @@ class AnalysisServer:
                 "cached": False,
             }
 
-        # Check cache (fast path, no DB access)
-        cache_key = (func1, func2, max_depth)
+        cache_key = (func1, func2, max_depth, max_paths, self._scope(harness))
         if cache_key in self._path_cache:
             cached_result = self._path_cache[cache_key].copy()
             cached_result["cached"] = True
             return cached_result
 
-        # Run the heavy DFS in thread pool
         result = await self._run_sync(
-            self._find_all_paths_sync, func1, func2, max_depth, max_paths
+            self._find_all_paths_sync, func1, func2, max_depth, max_paths, harness
         )
-
-        # Cache result
         self._path_cache[cache_key] = result.copy()
-
         self._log(
             f"find_all_paths: {func1} -> {result.get('func2')}, found {result['path_count']} paths (truncated={result['truncated']})"
         )
-
         return result
 
     def _get_reachability_sync(self, fuzzer: str, function: str) -> dict:
         """Sync implementation of _get_reachability."""
-        func_variants = _get_function_name_variants(function)
-
-        # If fuzzer is the libfuzzer entry point, search across all fuzzers
+        # The libFuzzer entry point stands for "any harness".
         if fuzzer == "LLVMFuzzerTestOneInput":
-            for func_name in func_variants:
-                node = self.repos.callgraph_nodes.collection.find_one(
-                    {
-                        "run_id": self.run_id,
-                        "function_name": func_name,
-                    }
-                )
-                if node:
-                    result = {
-                        "reachable": True,
-                        "distance": node.get("call_depth", -1),
-                        "fuzzer": node.get("fuzzer_name"),
-                        "function": func_name,
-                    }
-                    if func_name != function:
-                        result["queried_as"] = function
-                    return result
+            harnesses = self.graph.harness_names()
+        elif fuzzer in self.graph.harnesses:
+            harnesses = [fuzzer]
+        else:
             return {"reachable": False}
-
-        # Normal case: search by specific fuzzer name
-        for func_name in func_variants:
-            node = self.repos.callgraph_nodes.collection.find_one(
-                {
-                    "run_id": self.run_id,
-                    "fuzzer_name": fuzzer,
-                    "function_name": func_name,
-                }
-            )
-            if node:
-                result = {
-                    "reachable": True,
-                    "distance": node.get("call_depth", -1),
-                    "function": func_name,
-                }
-                if func_name != function:
-                    result["queried_as"] = function
-                return result
-        return {"reachable": False}
+        best = None
+        for h in harnesses:
+            for name in _get_function_name_variants(function):
+                r = self.graph.reachability(h, name)
+                if r and r["depth"] is None:
+                    r["depth"] = -1  # in the harness's graph, depth unknown
+                if r and (best is None or (r["depth"] >= 0 and not 0 <= best[0]["depth"] <= r["depth"])):
+                    best = (r, h, name)
+                if r:
+                    break
+        if best is None:
+            return {"reachable": False}
+        r, h, name = best
+        result = {"reachable": True, "distance": r["depth"], "function": name}
+        if fuzzer == "LLVMFuzzerTestOneInput":
+            result["fuzzer"] = h
+        if r.get("reached_via"):
+            result["reached_via"] = r["reached_via"]
+        if name != function:
+            result["queried_as"] = function
+        return result
 
     async def _get_reachability(self, fuzzer: str, function: str) -> dict:
         """Check if function is reachable from fuzzer."""
-        if not fuzzer or not function or not self.repos:
+        if not fuzzer or not function or not self.graph:
             return {"reachable": False}
         return await self._run_sync(self._get_reachability_sync, fuzzer, function)
 
-    def _get_reachable_functions_sync(self, fuzzer: str) -> List[str]:
-        """Sync implementation of _get_reachable_functions."""
-        query = {"run_id": self.run_id}
-        if fuzzer != "LLVMFuzzerTestOneInput":
-            query["fuzzer_name"] = fuzzer
-        cursor = self.repos.callgraph_nodes.collection.find(query)
-        return list(set(node["function_name"] for node in cursor))
+    def _harness_or_all(self, fuzzer: str) -> Optional[str]:
+        if fuzzer == "LLVMFuzzerTestOneInput":
+            return None
+        if fuzzer not in self.graph.harnesses:
+            raise GraphError(
+                f"no harness {fuzzer!r} in the call graph "
+                f"(it has {self.graph.harness_names()})"
+            )
+        return fuzzer
 
     async def _get_reachable_functions(self, fuzzer: str) -> List[str]:
         """Get all functions reachable from fuzzer."""
-        if not fuzzer or not self.repos:
+        if not fuzzer or not self.graph or not self.graph.harnesses:
             return []
-        return await self._run_sync(self._get_reachable_functions_sync, fuzzer)
-
-    def _get_unreached_functions_sync(self, fuzzer: str) -> List[str]:
-        """Sync implementation of _get_unreached_functions."""
-        # Get all functions
-        all_functions = set()
-        cursor = self.repos.functions.collection.find(
-            {"run_id": self.run_id},
-            {"name": 1},
+        return await self._run_sync(
+            self.graph.reachable_names, self._harness_or_all(fuzzer)
         )
-        for func in cursor:
-            all_functions.add(func["name"])
-
-        # Get reached functions (call sync version)
-        reached = set(self._get_reachable_functions_sync(fuzzer))
-
-        return list(all_functions - reached)
 
     async def _get_unreached_functions(self, fuzzer: str) -> List[str]:
         """Get functions not yet reached by fuzzer."""
-        if not fuzzer or not self.repos:
+        if not fuzzer or not self.graph or not self.graph.harnesses:
             return []
-        return await self._run_sync(self._get_unreached_functions_sync, fuzzer)
+        return await self._run_sync(
+            self.graph.unreached_names, self._harness_or_all(fuzzer)
+        )
 
     # =========================================================================
     # Suspicious Point Operations

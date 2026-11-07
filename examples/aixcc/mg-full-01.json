@@ -40,7 +40,7 @@
     }
   },
   "analysis": {
-    "prebuild_graph_dir": "artifact/aixcc/mg-full-01/graph/fuzz"
+    "graph": "artifact/aixcc/mg-full-01/graph.sqlite"
   },
   "concurrency": 5
 }

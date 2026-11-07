@@ -67,6 +67,7 @@ class WorkerExecutor:
         scan_mode: str = "full",
         fuzzer_binary_path: str = None,
         analysis_socket_path: str = None,
+        index_path: Optional[str] = None,
         diff_path: str = None,
         log_dir: str = None,
         docker_image: str = "gcr.io/oss-fuzz-base/base-runner",
@@ -91,6 +92,7 @@ class WorkerExecutor:
             scan_mode: Scan mode ("full" or "delta")
             fuzzer_binary_path: Path to pre-built fuzzer binary (from Analyzer)
             analysis_socket_path: Path to Analysis Server socket for code queries
+            index_path: The run's function index / call graph file
             diff_path: Path to diff file (required for delta mode)
             log_dir: Main run log directory for agent logs
             docker_image: Docker image for running fuzzers
@@ -131,6 +133,8 @@ class WorkerExecutor:
         # Analysis Server client for code queries
         self.analysis_socket_path = analysis_socket_path
         self._analysis_client: Optional[AnalysisClient] = None
+        self.index_path = index_path
+        self._graph = None
 
         # FuzzerManager for Global Fuzzer + SP Fuzzer Pool
         self._fuzzer_manager: Optional[FuzzerManager] = None
@@ -503,6 +507,22 @@ def generate(variant: int = 1) -> bytes:
             logger.debug(traceback.format_exc())
 
     @property
+    def graph(self):
+        """The run's function index, opened in this process on first use."""
+        if self._graph is None:
+            from ..graph import CallGraph
+
+            if not self.index_path:
+                raise RuntimeError("the worker was dispatched without an index_path")
+            self._graph = CallGraph(self.index_path)
+        return self._graph
+
+    @property
+    def graph_harness(self) -> Optional[str]:
+        """This worker's harness if the graph has reachability for it."""
+        return self.fuzzer if self.fuzzer in self.graph.harnesses else None
+
+    @property
     def analysis_client(self) -> Optional[AnalysisClient]:
         """
         Get Analysis Server client (lazy initialization).
@@ -515,6 +535,7 @@ def generate(variant: int = 1) -> bytes:
                 self._analysis_client = AnalysisClient(
                     self.analysis_socket_path,
                     client_id=self.worker_id,
+                    harness=self.fuzzer,
                 )
                 if self._analysis_client.ping():
                     logger.info(

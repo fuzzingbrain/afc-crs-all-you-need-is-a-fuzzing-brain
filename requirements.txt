@@ -22,6 +22,8 @@ openai>=1.0.0
 openlit>=1.0.0
 
 # Code Analysis
+numpy>=2.0  # call graph CSR (fuzzingbrain/graph)
+scipy>=1.13
 clang>=14.0
 tree-sitter>=0.21.0
 tree-sitter-c>=0.21.0
