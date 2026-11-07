@@ -519,3 +519,23 @@ def test_a_failing_coverage_export_does_not_kill_the_refresh(tmp_path, monkeypat
     run._coverage_refresh()
     assert rounds["n"] == 3  # it survived the raise and the error
     assert "deflate" in run._queued_fns
+
+
+@pytest.mark.parametrize("afl,expected", [
+    (False, ["fuzzers", "seed"]),   # libFuzzer reloads: no idle fuzzing time
+    (True, ["seed", "fuzzers"]),    # AFL copies its inputs once, at startup
+])
+def test_the_engine_decides_whether_seeds_come_before_the_fuzzer(tmp_path, monkeypatch, afl, expected):
+    run, _, _ = make(tmp_path)
+    order = []
+    monkeypatch.setattr(run, "_prepare", lambda: None)
+    monkeypatch.setattr(run, "_build_function_index", lambda: {})
+    monkeypatch.setattr(run, "_detect_engine", lambda: afl)
+    monkeypatch.setattr(run, "_seed_agent", lambda: order.append("seed"))
+    monkeypatch.setattr(run, "_start_fuzzers", lambda: order.append("fuzzers"))
+    monkeypatch.setattr(run, "_sampler", lambda: None)
+    monkeypatch.setattr(run, "_mapper", lambda: [])
+    monkeypatch.setattr(run, "_schedule", lambda: None)
+    monkeypatch.setattr(run, "_finish", lambda: {})
+    run.run()
+    assert order == expected

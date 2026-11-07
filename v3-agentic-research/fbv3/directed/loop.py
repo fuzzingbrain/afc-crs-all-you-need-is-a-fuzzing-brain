@@ -288,8 +288,11 @@ class DirectedRun:
             engine="afl" if self._afl else "libfuzzer", sanitizer=self.lg.sanitizer,
             memory_mb=self.cfg.fuzzer_memory_mb, cpus=self.cfg.fuzzer_cpus, dict_file=self.lg.dict_file)
 
-    def _start_fuzzers(self) -> None:
+    def _detect_engine(self) -> bool:
         self._afl = is_afl_target(self.ws.path("out/address"), self.lg.binary)
+        return self._afl
+
+    def _start_fuzzers(self) -> None:
         if self._afl:
             logger.info("%s: %s is an AFL build; driving it with /out/afl-fuzz", self.lg.name, self.lg.binary)
         self._monitor = CrashMonitor(
@@ -628,11 +631,20 @@ class DirectedRun:
         try:
             self._prepare()
             summary["coverage_initial"] = self._build_function_index()
-            if self.cfg.mode in ("directed", "legacy"):
+            afl = self._detect_engine()
+            seeding = self.cfg.mode in ("directed", "legacy")
+            # libFuzzer reloads its corpus as it runs (-reload=1), so it starts
+            # now and the seed agent's inputs join a fuzzer already working
+            # instead of leaving the budget idle while the agent reads code. An
+            # AFL build copies its inputs once at startup and syncs nothing
+            # back in, so there the seeds have to come first.
+            if seeding and afl:
                 self._seed_agent()
             self._start_fuzzers()
             sampler = threading.Thread(target=self._sampler, daemon=True, name=f"sample-{self.lg.name}")
             sampler.start()
+            if seeding and not afl:
+                self._seed_agent()
             if self.cfg.mode == "directed":
                 self._fill_queue(self._mapper())
                 summary["functions_queued_initially"] = len(self._queued_fns)
