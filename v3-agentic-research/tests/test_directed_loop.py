@@ -351,3 +351,14 @@ def test_the_baseline_modes_run_no_analysis_agents(tmp_path, mode):
     vh = store.create_vh("fuzz", function_name="f")
     run._fp_seed(vh)
     assert pool.calls == []  # fp seeds belong to the directed mode only
+
+
+def test_the_frontier_lane_is_off_without_a_coverage_build(tmp_path, monkeypatch):
+    """coverage_frontier is the breaker's only tool: without it a session is wasted."""
+    run, pool, _ = make(tmp_path, breaker=True)
+    run._deadline = time.monotonic() + 1  # the scheduler returns at once
+    run._schedule()
+    assert pool.calls == []
+    (run.ws.path("out/coverage")).mkdir(parents=True, exist_ok=True)
+    (run.ws.path("out/coverage") / "fuzz").write_bytes(b"\x7fELF")
+    assert run._has_coverage()

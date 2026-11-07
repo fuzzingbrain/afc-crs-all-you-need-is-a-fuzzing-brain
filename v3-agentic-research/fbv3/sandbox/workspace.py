@@ -200,6 +200,9 @@ def copy_runtime_bundle(src_out: Path, dst: Path, binary: str) -> Path:
         shutil.copytree(src_out, dst, dirs_exist_ok=True, symlinks=True)
         return dst / binary
     shutil.copy2(source, dst / binary)
+    # A prebuilt target handed to us (a benchmark case, an archive) can arrive
+    # without its exec bit; the fuzzer would then fail to start.
+    (dst / binary).chmod((dst / binary).stat().st_mode | 0o111)
     for suffix in (".options", ".dict", "_seed_corpus.zip"):
         side = _in_out(src_out, src_out / f"{binary}{suffix}")
         if side is not None:

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import subprocess
 
+import pytest
+
 from fbv3.fuzz import coverage, symbols
 
 EXPORT = {
@@ -150,3 +152,23 @@ def test_symbols_report_a_failed_command(tmp_path):
     ws = FakeWS(tmp_path, stdout=b"", code=1)
     rows, err = symbols.linked_functions(ws, binary="/ws/b")
     assert rows == [] and "symbol listing failed" in err
+
+
+def test_a_prebuilt_target_is_made_executable(tmp_path):
+    """A benchmark case or an archive can hand us a target with no exec bit."""
+    from fbv3.sandbox.workspace import copy_runtime_bundle
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "fuzz").write_bytes(b"\x7fELF")
+    (src / "fuzz").chmod(0o644)
+    target = copy_runtime_bundle(src, tmp_path / "out" / "address", "fuzz")
+    assert target.stat().st_mode & 0o111
+
+
+def test_a_missing_prebuilt_target_is_reported(tmp_path):
+    from fbv3.sandbox.workspace import copy_runtime_bundle
+
+    (tmp_path / "prebuilt").mkdir()
+    with pytest.raises(FileNotFoundError):
+        copy_runtime_bundle(tmp_path / "prebuilt", tmp_path / "out", "fuzz")

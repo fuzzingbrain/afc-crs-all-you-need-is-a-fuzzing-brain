@@ -211,8 +211,11 @@ class DirectedRun:
         except (zipfile.BadZipFile, OSError) as exc:
             logger.warning("%s: seed corpus %s unreadable: %s", self.lg.name, zip_path, exc)
 
+    def _has_coverage(self) -> bool:
+        return (self.ws.path("out/coverage") / self.lg.binary).is_file()
+
     def _collect_coverage(self, timeout_s: int = 600) -> tuple[list[coverage.FunctionRow], str]:
-        if not (self.ws.path("out/coverage") / self.lg.binary).is_file():
+        if not self._has_coverage():
             return [], "no coverage build"
         return coverage.collect_functions(
             self.ws, coverage_binary="/ws/out/coverage/" + self.lg.binary,
@@ -497,7 +500,10 @@ class DirectedRun:
         sem = {r: threading.Semaphore(n) for r, n in slots.items()}
         role_of = {self._finder: "finder", self._verify: "verifier", self._poc: "poc",
                    self._fp_seed: "fp_seed"}
-        breaker_slots = 1 if self.cfg.breaker else 0
+        breaker_slots = 1 if (self.cfg.breaker and self._has_coverage()) else 0
+        if self.cfg.breaker and not breaker_slots:
+            logger.info("%s: no coverage build, so the frontier lane is off "
+                        "(coverage_frontier is the breaker's only way to see the frontier)", self.lg.name)
         breaker_sem = threading.Semaphore(max(breaker_slots, 1))
         pool = ThreadPoolExecutor(max_workers=sum(slots.values()) + max(breaker_slots, 1),
                                   thread_name_prefix=f"fbv3-{self.lg.name}")
