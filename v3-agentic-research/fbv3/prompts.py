@@ -26,7 +26,13 @@ container with no network:
 - /ws/harness     the fuzz harness source(s)
 - {target_path}
 Read code with rg / sed -n 'a,bp' / grep -n; keep each output small (line
-ranges, not whole files). gdb, python3, file, xxd, binutils are installed."""
+ranges, not whole files). gdb, python3, file, xxd, binutils are installed.
+
+Your session has a limited number of tool calls, and reading is not the work.
+Submit a first answer through your submit tool EARLY -- after you understand
+the input format and one promising place, not after you have read everything --
+and then refine it with further calls. A session that ends without submitting
+has produced nothing at all, however much it learned."""
 
 
 def ws_text(target: str = "") -> str:
@@ -263,7 +269,9 @@ Steps:
    returns a DIFFERENT seed for each seed_num. This is the ONLY way a seed is
    recorded. You may check a seed with `run_target` or `reach_probe` first.
 
-Call `create_seed` at least once. When done, say SEEDS SUBMITTED."""
+Call `create_seed` with a first batch as soon as you know the input format --
+do not survey every code path first -- then read further and call it again
+with better seeds. When done, say SEEDS SUBMITTED."""
 
 SEED_TASK = """\
 ## Logic group: {lg}
@@ -290,7 +298,8 @@ Steps:
    values/guards matter (use the verifier's evidence).
 2. Reason about inputs that reach the flagged code; keep diversity.
 3. Call `create_seed` with `def generate(seed_num: int) -> bytes` returning a
-   different seed each time. This is the only way a seed is recorded.
+   different seed each time. This is the only way a seed is recorded; call it
+   early with a first batch, then refine.
 
 When done, say SEEDS SUBMITTED."""
 

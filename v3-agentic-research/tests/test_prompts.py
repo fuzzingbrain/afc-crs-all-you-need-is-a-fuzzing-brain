@@ -103,3 +103,21 @@ def test_roles_only_get_the_tools_they_need():
 def test_every_tool_is_documented_for_the_agent():
     for name, fn in server.TOOLS.items():
         assert (fn.__doc__ or "").strip(), f"{name} has no docstring; the agent sees it as its description"
+
+
+@pytest.mark.parametrize("role", sorted(DIRECTED_KW))
+def test_every_role_is_told_to_submit_early(role):
+    """A live seed session spent 44 exec calls reading and submitted nothing."""
+    system, _ = prompts.directed(role, harness_src=HARNESS, target="fuzz", **DIRECTED_KW[role])
+    assert "Submit a first answer through your submit tool EARLY" in system
+    assert "A session that ends without submitting" in system
+
+
+def test_the_harness_roles_are_told_the_same():
+    for system, _ in (prompts.harness(project="p", function="f", description="d"),
+                      prompts.reviewer(project="p", function="f", description="d", overlay="/src/x.c",
+                                       binary="b", code="c", notes="n", findings="[]", gate="g",
+                                       round_no=1),
+                      prompts.researcher(project="p", function="f", description="d"),
+                      prompts.discoverer(project="p", max_targets=2)):
+        assert "Submit a first answer" in system
