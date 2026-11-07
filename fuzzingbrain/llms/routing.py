@@ -23,9 +23,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Mapping, Optional
 
-from loguru import logger
+import logging
 
 from .models import ModelInfo, get_model_info
+
+logger = logging.getLogger(__name__)
 
 
 class Role(str, Enum):

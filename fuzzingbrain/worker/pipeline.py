@@ -24,13 +24,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from loguru import logger
+import logging
 
 from ..agents import VHVerifier, POCAgent
 from ..db.store import VH_POC_THRESHOLD, get_store, vh_dict
 from ..tools.analyzer import set_analyzer_context
 from ..fuzzer import FuzzerManager, get_fuzzer_manager
 from ..llms.routing import Role, model_for
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

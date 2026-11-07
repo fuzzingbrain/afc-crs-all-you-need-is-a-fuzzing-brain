@@ -13,7 +13,9 @@ import os
 import subprocess
 from typing import List
 
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Every long-running container a run spawns carries this label, so the
 # controller can find them again without a handle to the process that

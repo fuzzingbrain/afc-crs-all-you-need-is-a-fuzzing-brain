@@ -13,12 +13,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from fastmcp import Client
-from loguru import logger
+import logging
 
 from ..llms import LLMClient, ModelInfo
 from ..tools.mcp_factory import create_isolated_mcp_server
-from ..core.logging import get_agent_banner_and_header, get_agent_log_path
+from ..core.logging import close_file_logger, file_logger, get_agent_banner_and_header, get_log_dir
 from .context import AgentContext
+
+logger = logging.getLogger(__name__)
 
 
 def format_tool_args(args: dict, limit: int = 160) -> str:
@@ -695,73 +697,25 @@ class BaseAgent(ABC):
         except Exception as e:
             return json.dumps({"error": f"recall failed: {e}"})
 
-    def _setup_logging(self) -> None:
-        """Set up agent-specific logging."""
-        # Try new structured path first (if fuzzer/sanitizer available)
-        if self.fuzzer and self.sanitizer:
-            log_path = get_agent_log_path(
-                agent_type=self.agent_type,
-                fuzzer=self.fuzzer,
-                sanitizer=self.sanitizer,
-                index=self.index,
-                target_name=self.target_name,
-                is_delta=self.is_delta,
-            )
-            if log_path:
-                self._log_file = Path(str(log_path) + ".log")
-            else:
-                # Fallback to legacy path if get_agent_log_path returns None
-                self._setup_logging_legacy()
-                return
-        elif self.log_dir:
-            # Fallback to legacy path
-            self._setup_logging_legacy()
+    def _setup_logging(self, agent_id: str) -> None:
+        """This agent's log, <logs>/agents/<agent id>.log, and its transcript
+        <agent id>.jsonl (appended message by message). Nothing without a log dir."""
+        base = get_log_dir() or (Path(self.log_dir) if self.log_dir else None)
+        if base is None:
             return
-        else:
-            return
-
-        # Create unique instance ID for this agent (for log filtering)
-        self._agent_instance_id = f"{self.agent_name}_{self.worker_id}_{id(self)}"
-
-        # Write banner to log file first
-        metadata = self._get_agent_metadata()
-        banner = get_agent_banner_and_header(metadata)
-        self._log_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._log_file, "w", encoding="utf-8") as f:
-            f.write(banner)
-            f.write("\n")
-
-        # Add file handler with agent-specific filter
-        self._agent_logger = logger.bind(
-            agent=self.agent_name,
-            agent_instance_id=self._agent_instance_id,
-            run_id=self.run_id,
-            worker_id=self.worker_id,
-            fuzzer=self.fuzzer,
-            sanitizer=self.sanitizer,
+        agents_dir = Path(base) / "agents"
+        self._log_file = agents_dir / f"{agent_id}.log"
+        self._traj_file = agents_dir / f"{agent_id}.jsonl"
+        metadata = {"Agent ID": agent_id, **self._get_agent_metadata()}
+        self._agent_logger = file_logger(
+            f"agent.{agent_id}", self._log_file, prefix=self._get_log_prefix(),
+            header=get_agent_banner_and_header(metadata),
         )
-
-        # Build format string - simplified with agent prefix
-        # Format: timestamp | level | [Agent-N] | message
-        agent_prefix = self._get_log_prefix()
-        log_format = f"{{time:YYYY-MM-DD HH:mm:ss.SSS}} | {{level: <8}} | {agent_prefix} | {{message}}"
-
-        # Add file sink for this agent - use instance ID for filtering (append mode)
-        instance_id = self._agent_instance_id  # Capture for closure
-        logger.add(
-            self._log_file,
-            level="DEBUG",
-            format=log_format,
-            filter=lambda record: (
-                record["extra"].get("agent_instance_id") == instance_id
-            ),
-            encoding="utf-8",
-            rotation="50 MB",
-            mode="a",  # Append after banner
-        )
-
-        self._log("Logging initialized", level="INFO")
         self._log(f"Log file: {self._log_file}", level="INFO")
+
+    def _close_logging(self) -> None:
+        if self._agent_logger is not None:
+            close_file_logger(self._agent_logger)
 
     def _get_log_prefix(self) -> str:
         """Get the log prefix for this agent (e.g., [VHG-1], [Logic group])."""
@@ -774,95 +728,13 @@ class BaseAgent(ABC):
         }
         return f"[{prefix_map.get(self.agent_type, self.agent_name)}]"
 
-    def _setup_logging_legacy(self) -> None:
-        """Legacy logging setup for backward compatibility."""
-        if not self.log_dir:
-            return
-
-        log_dir = Path(self.log_dir)
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create log file name: {agent_name}_{worker_id}_{timestamp}.log
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        agent_short_name = self.agent_name.replace("Agent", "").lower()
-        if self.worker_id:
-            log_name = f"{agent_short_name}_{self.worker_id}_{timestamp}.log"
-        else:
-            log_name = f"{agent_short_name}_{timestamp}.log"
-
-        self._log_file = log_dir / log_name
-
-        # Create unique instance ID for this agent (for log filtering)
-        self._agent_instance_id = f"{self.agent_name}_{self.worker_id}_{id(self)}"
-
-        # Write banner to log file first
-        metadata = self._get_agent_metadata()
-        banner = get_agent_banner_and_header(metadata)
-        with open(self._log_file, "w", encoding="utf-8") as f:
-            f.write(banner)
-            f.write("\n")
-
-        # Get fuzzer and sanitizer from subclass if available
-        fuzzer = getattr(self, "fuzzer", "") or ""
-        sanitizer = getattr(self, "sanitizer", "") or ""
-
-        # Add file handler with agent-specific filter
-        self._agent_logger = logger.bind(
-            agent=self.agent_name,
-            agent_instance_id=self._agent_instance_id,
-            run_id=self.run_id,
-            worker_id=self.worker_id,
-            fuzzer=fuzzer,
-            sanitizer=sanitizer,
-        )
-
-        # Build format string with context info
-        format_parts = [
-            "{time:YYYY-MM-DD HH:mm:ss.SSS}",
-            "{level: <8}",
-            "{extra[agent]}",
-        ]
-        if self.run_id:
-            format_parts.append("run:{extra[run_id]}")
-        if self.worker_id:
-            format_parts.append("worker:{extra[worker_id]}")
-        if fuzzer:
-            format_parts.append("fuzzer:{extra[fuzzer]}")
-        if sanitizer:
-            format_parts.append("san:{extra[sanitizer]}")
-        format_parts.append("{message}")
-        log_format = " | ".join(format_parts)
-
-        # Add file sink for this agent
-        instance_id = self._agent_instance_id
-        logger.add(
-            self._log_file,
-            level="DEBUG",
-            format=log_format,
-            filter=lambda record: (
-                record["extra"].get("agent_instance_id") == instance_id
-            ),
-            encoding="utf-8",
-            mode="a",
-        )
-
-        self._log("Logging initialized (legacy)", level="INFO")
-        self._log(f"Log file: {self._log_file}", level="INFO")
-
     def _log(self, message: str, level: str = "DEBUG") -> None:
-        """Log a message with agent context."""
+        """Log a message to this agent's file (or the module log without one)."""
         if self._agent_logger:
-            log_func = getattr(
-                self._agent_logger, level.lower(), self._agent_logger.debug
-            )
-            log_func(message)
+            getattr(self._agent_logger, level.lower(), self._agent_logger.debug)(message)
         elif self.verbose:
-            # Fallback to standard logger
-            prefix = f"[{self.agent_name}]"
-            if self.worker_id:
-                prefix = f"[{self.agent_name}:{self.worker_id}]"
-            log_func = getattr(logger, level.lower(), logger.debug)
-            log_func(f"{prefix} {message}")
+            prefix = f"[{self.agent_name}:{self.worker_id}]" if self.worker_id else f"[{self.agent_name}]"
+            getattr(logger, level.lower(), logger.debug)(f"{prefix} {message}")
 
     def _get_summary_table(self) -> str:
         """
@@ -930,44 +802,31 @@ class BaseAgent(ABC):
             tool_name: Tool name (for tool response messages)
             tool_success: Whether tool succeeded (for tool response messages)
         """
-        pass
+        rec = {"ts": datetime.now().isoformat(timespec="milliseconds"), "iteration": iteration,
+               "role": role, "content": content}
+        if tool_calls:
+            rec["tool_calls"] = tool_calls
+        if tool_call_id:
+            rec["tool_call_id"] = tool_call_id
+        if tool_name:
+            rec["tool_name"] = tool_name
+        if tool_success is not None:
+            rec["tool_success"] = tool_success
+        self._append_traj(rec)
+
+    def _append_traj(self, rec: Dict[str, Any]) -> None:
+        """One line of the transcript, appended (never the whole file again)."""
+        if not getattr(self, "_traj_file", None):
+            return
+        try:
+            with open(self._traj_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+        except Exception as e:
+            self._log(f"Could not append to the transcript: {e}", level="ERROR")
 
     def _log_conversation(self) -> None:
-        """Log the full conversation history to file."""
-        if not self._log_file:
-            return
-
-        # Get fuzzer and sanitizer from subclass if available
-        fuzzer = getattr(self, "fuzzer", "") or ""
-        sanitizer = getattr(self, "sanitizer", "") or ""
-
-        conv_file = self._log_file.with_suffix(".conversation.json")
-        try:
-            with open(conv_file, "w", encoding="utf-8") as f:
-                json.dump(
-                    {
-                        "agent": self.agent_name,
-                        "run_id": self.run_id,
-                        "worker_id": self.worker_id,
-                        "fuzzer": fuzzer,
-                        "sanitizer": sanitizer,
-                        "start_time": self.start_time.isoformat()
-                        if self.start_time
-                        else None,
-                        "end_time": self.end_time.isoformat()
-                        if self.end_time
-                        else None,
-                        "total_iterations": self.total_iterations,
-                        "total_tool_calls": self.total_tool_calls,
-                        "messages": self.messages,
-                    },
-                    f,
-                    indent=2,
-                    ensure_ascii=False,
-                )
-            self._log(f"Conversation saved to: {conv_file}", level="INFO")
-        except Exception as e:
-            self._log(f"Failed to save conversation: {e}", level="ERROR")
+        """Nothing to do: the transcript is appended as each message happens."""
+        return
 
     def _convert_mcp_tools_to_openai(
         self, mcp_tools: List[Any]
@@ -1394,8 +1253,11 @@ class BaseAgent(ABC):
         Returns:
             Final agent response
         """
-        # Setup logging
-        self._setup_logging()
+        # The id first: the log files are named by it.
+        import uuid as _uuid
+
+        agent_id = str(_uuid.uuid4())
+        self._setup_logging(agent_id)
 
         self.start_time = datetime.now()
         self._log("Starting agent run", level="INFO")
@@ -1408,6 +1270,7 @@ class BaseAgent(ABC):
         # The agents row is written when the context opens, so what the agent
         # works on (_agent_row) has to be known before it does.
         with AgentContext(
+            agent_id=agent_id,
             run_id=self.run_id,
             worker_id=self.worker_id,
             agent_type=self.agent_name,
@@ -1518,11 +1381,8 @@ class BaseAgent(ABC):
         self._log(f"Total iterations: {self.total_iterations}", level="INFO")
         self._log(f"Total tool calls: {self.total_tool_calls}", level="INFO")
 
-        # Write summary table to log
         self._write_summary_table()
-
-        # Note: conversation log (.json) is saved incrementally after each iteration
-        # No need to save again here
+        self._close_logging()
 
         return result
 
@@ -1557,6 +1417,6 @@ class BaseAgent(ABC):
         if self._log_file:
             stats["log_file"] = str(self._log_file)
             # JSON conversation file is same path with .json extension
-            stats["conversation_file"] = str(self._log_file.with_suffix(".json"))
+            stats["conversation_file"] = str(self._log_file.with_suffix(".jsonl"))
 
         return stats

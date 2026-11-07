@@ -22,12 +22,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastmcp import Client
-from loguru import logger
+import logging
 
 from .base import BaseAgent
 from .prompts import REPORT_SYSTEM_PROMPT, REPORT_USER_TEMPLATE
 from ..llms import LLMClient
 from .types import AgentType
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

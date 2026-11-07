@@ -14,11 +14,8 @@ from .infrastructure import InfrastructureManager, RedisManager, CeleryWorkerMan
 from .logging import (
     logger,
     setup_logging,
-    setup_celery_logging,
-    setup_console_only,
+    file_logger,
     get_log_dir,
-    add_run_log,
-    get_run_logger,
     get_analyzer_banner_and_header,
 )
 
@@ -36,10 +33,7 @@ __all__ = [
     # Logging
     "logger",
     "setup_logging",
-    "setup_celery_logging",
-    "setup_console_only",
+    "file_logger",
     "get_log_dir",
-    "add_run_log",
-    "get_run_logger",
     "get_analyzer_banner_and_header",
 ]

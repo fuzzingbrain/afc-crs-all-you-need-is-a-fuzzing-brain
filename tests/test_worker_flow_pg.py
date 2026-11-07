@@ -257,3 +257,31 @@ def test_agent_vh_needs_a_sink(world):
     vht.set_vh_context(agent_id=_agent(world.store, world, "DeltaVHGenerator"))
     r = vht.create_vulnerability_hypothesis_impl("f", "d")
     assert not r["success"] and "sink_code" in r["error"]
+
+
+def test_store_writes_land_in_events_jsonl(world, tmp_path):
+    import json
+
+    from fuzzingbrain.core import events
+    from fuzzingbrain.core.crashes import record_crash
+
+    st, w = world.store, world
+    events.set_events_path(tmp_path / "events.jsonl")
+    try:
+        aid = _agent(st, w, "DeltaVHGenerator")
+        vid = st.create_vh(w.run_id, w.worker_id, "pngread.c", "png_read_row", "d", 0.8,
+                           agent_id=aid, sink_code="x = row[i];", sink_line=91)
+        assert st.move_vh(vid, "pending_verify", "verifying")
+        assert not st.move_vh(vid, "pending_verify", "verifying")  # no-op: no event
+        g = st.add_poc_attempt(w.run_id, "global_fuzzer", w.harness_id, "address", b"Q")
+        c = record_crash(g, ASAN, "fuzz", b"Q")
+        st.end_agent(aid, "completed", end_reason="work_done", iterations=1)
+    finally:
+        events.set_events_path(None)
+    recs = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    kinds = [r["event"] for r in recs]
+    assert kinds == ["agent_started", "vh_created", "vh_moved", "crash", "agent_ended"], kinds
+    assert recs[1]["vh_id"] == str(vid) and recs[1]["agent_id"] == aid
+    assert recs[2]["to_status"] == "verifying"
+    assert recs[3]["crash_id"] == str(c.crash_id) and recs[3]["new"] is True
+    assert "sink_code" not in recs[1] and "sanitizer_output" not in recs[3]

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from fastmcp import Client
-from loguru import logger
+import logging
 
 from ..agents.base import BaseAgent
 from ..agents.prompts import (
@@ -26,6 +26,8 @@ from ..llms import LLMClient, ModelInfo
 from ..tools.code_viewer import set_code_viewer_context
 from ..agents.types import AgentType
 from .seed_tools import set_seed_context, clear_seed_context, update_seed_context
+
+logger = logging.getLogger(__name__)
 
 
 LOGIC_GROUP_SEED_MSG = """## Logic group Analysis Context

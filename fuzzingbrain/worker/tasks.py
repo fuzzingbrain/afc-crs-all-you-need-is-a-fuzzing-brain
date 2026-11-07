@@ -12,16 +12,16 @@ import traceback
 from datetime import datetime
 from typing import Dict, Any
 
-from loguru import logger
+import logging
+from pathlib import Path
 
 from ..celery_app import app
 from ..core.config import DEFAULT_MAX_PARALLEL_FUZZERS
-from ..core.logging import (
-    set_log_dir,
-    setup_worker_logging,
-)
+from ..core.logging import get_worker_banner_and_header, setup_logging
 from ..db.store import get_store
 from .scope import WorkerScope, set_scope
+
+logger = logging.getLogger(__name__)
 
 
 # Capture any uncaught exceptions at module level
@@ -115,17 +115,17 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         "Celery ID": self.request.id,
     }
 
-    # Setup worker-specific logging with new directory structure
-    # worker/{fuzzer}_{sanitizer}/worker.log and error.log
+    # This process logs to <output>/logs/workers/<worker id>.log only (a
+    # forked pool process starts with its parent's handlers; they are replaced).
     if log_dir:
-        # Remove default handlers (no console output for workers)
-        logger.remove()
-        # Set log directory for this worker process
-        set_log_dir(log_dir)
-        # Setup worker logging with new structure
-        setup_worker_logging(fuzzer, sanitizer, worker_metadata)
-        # Bind logger to this worker for filtering
-        logger.configure(extra={"worker": display_name})
+        setup_logging(
+            log_dir, file_name=f"workers/{worker_id}.log", console=False,
+            header=get_worker_banner_and_header(worker_metadata),
+        )
+    if run_workspace_path:
+        from ..core.events import set_events_path
+
+        set_events_path(Path(run_workspace_path) / "events.jsonl")
 
     logger.info("Worker starting")
     start_time = datetime.now()

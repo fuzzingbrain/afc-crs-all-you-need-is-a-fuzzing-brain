@@ -12,9 +12,10 @@ import sys
 import traceback
 
 from dotenv import load_dotenv
-from loguru import logger
 
 load_dotenv()  # Load .env file for API keys
+
+logger = logging.getLogger(__name__)
 
 from celery import Celery
 from celery.signals import (
@@ -36,47 +37,17 @@ app = Celery(
 )
 
 
-class InterceptHandler(logging.Handler):
-    """Intercept standard logging and redirect to Loguru."""
-
-    def emit(self, record):
-        # Get corresponding Loguru level
-        try:
-            level = logger.level(record.levelname).name
-        except ValueError:
-            level = record.levelno
-
-        # Find caller from where the log originated
-        frame, depth = sys._getframe(6), 6
-        while frame and frame.f_code.co_filename == logging.__file__:
-            frame = frame.f_back
-            depth += 1
-
-        logger.opt(depth=depth, exception=record.exc_info).bind(component="celery").log(
-            level, record.getMessage()
-        )
-
-
 @setup_logging.connect
 def configure_celery_logging(**kwargs):
-    """
-    Redirect Celery logs to Loguru (celery.log via component="celery" filter).
+    """Keep Celery from installing its own handlers.
 
-    This prevents Celery from interfering with console output while
-    still capturing logs to our celery.log file.
+    The Celery main process logs to stderr, which the controller sends to
+    <output>/logs/celery_worker.log; each task process re-configures itself
+    for its worker (worker/tasks.py).
     """
-    # Remove default handlers and redirect to Loguru
-    celery_logger = logging.getLogger("celery")
-    celery_logger.handlers = [InterceptHandler()]
-    celery_logger.setLevel(logging.INFO)
-    celery_logger.propagate = False
+    from .core.logging import setup_logging as fb_setup_logging
 
-    # Also redirect celery.worker and celery.task loggers
-    for name in ["celery.worker", "celery.task", "celery.app.trace"]:
-        log = logging.getLogger(name)
-        log.handlers = [InterceptHandler()]
-        log.setLevel(logging.INFO)
-        log.propagate = False
+    fb_setup_logging(None, console=True)
 
 
 # Signal handlers for better error logging

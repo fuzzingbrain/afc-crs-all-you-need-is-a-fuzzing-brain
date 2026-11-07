@@ -28,12 +28,14 @@ import threading
 import time
 from typing import Optional
 
-from loguru import logger
+import logging
 
 # The cap counts fuzzer instances -- containers -- not the processes inside
 # them: a global fuzzer runs with -fork=2, so ten instances are somewhat more
 # than ten libFuzzer processes.
 from ..core.config import DEFAULT_MAX_PARALLEL_FUZZERS
+
+logger = logging.getLogger(__name__)
 
 # A slot whose holder has been silent this long is presumed lost. Only reached
 # when the holder died on another host, since a dead pid on this host is

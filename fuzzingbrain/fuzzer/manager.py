@@ -12,7 +12,7 @@ import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from loguru import logger
+import logging
 
 from .models import (
     CrashRecord,
@@ -25,6 +25,8 @@ from ..core.fuzzer_spec import is_no_oom
 from .budget import DEFAULT_MAX_PARALLEL_FUZZERS, FuzzerBudget
 from .instance import FuzzerInstance
 from .monitor import FuzzerMonitor
+
+logger = logging.getLogger(__name__)
 
 
 class FuzzerManager:

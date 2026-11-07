@@ -15,13 +15,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from fastmcp import Client
-from loguru import logger
+import logging
 
 from .base import BaseAgent, format_tool_args
 from .prompts import POC_AGENT_SYSTEM_PROMPT
 from ..llms import LLMClient, ModelInfo
 from ..tools.poc import set_poc_context, update_poc_iteration
 from .types import AgentType
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================

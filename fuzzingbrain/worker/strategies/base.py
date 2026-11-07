@@ -8,10 +8,12 @@ Abstract base class for all worker strategies.
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
-from loguru import logger
+import logging
 
 if TYPE_CHECKING:
     from ..executor import WorkerExecutor
+
+logger = logging.getLogger(__name__)
 
 
 class BaseStrategy(ABC):

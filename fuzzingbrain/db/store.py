@@ -1140,6 +1140,77 @@ class Store:
         }
 
 
+# ------------------------------------------------------------------ events
+#
+# The writes that change a run's state also go to <output>/events.jsonl
+# (core/events.py), with the ids of the rows they wrote. Wrapping the methods
+# here keeps the event names and the database in one place.
+
+_EVENTS = {
+    # method: (event, result field, condition on the result)
+    "create_run": ("run_created", None, None),
+    "run_dispatched": ("run_dispatched", None, None),
+    "end_run": ("run_ended", None, bool),
+    "create_worker": ("worker_created", "worker_id", None),
+    "worker_started": ("worker_started", None, bool),
+    "end_worker": ("worker_ended", None, bool),
+    "end_open_workers": ("workers_closed", "count", bool),
+    "start_agent": ("agent_started", None, None),
+    "end_agent": ("agent_ended", None, bool),
+    "end_running_agents": ("agents_closed", "count", bool),
+    "create_logic_group": ("logic_group_created", "lg_id", None),
+    "create_vh": ("vh_created", "vh_id", None),
+    "merge_vh": ("vh_merged", None, None),
+    "move_vh": ("vh_moved", None, bool),
+    "attempt_crashed": ("crash", None, None),
+    "set_crash_package": ("crash_packaged", None, None),
+}
+# Arguments too large or too free-form for the stream; the rows have them.
+_EVENT_SKIP = {
+    "self", "config", "config_given", "description", "sink_code", "important_controlflow",
+    "sanitizer_output", "core_functions", "entry_functions", "summary", "error", "workspace_path",
+    "code_version",
+}
+
+
+def _with_event(name, fn):
+    import functools
+    import inspect
+
+    from ..core import events
+
+    event, result_field, cond = _EVENTS[name]
+    sig = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        result = fn(*args, **kwargs)
+        if events.events_path() is None or (cond is not None and not cond(result)):
+            return result
+        try:
+            a = sig.bind(*args, **kwargs)
+            fields = {k: v for k, v in a.arguments.items() if k not in _EVENT_SKIP}
+            extra = fields.pop("fields", None)
+            if isinstance(extra, dict):
+                fields.update({k: v for k, v in extra.items() if k in ("score", "verifier_reproduced")})
+            if name == "attempt_crashed":
+                fields["crash_id"], fields["new"] = result
+            elif result_field:
+                fields[result_field] = result
+            if name in ("end_run", "end_worker", "end_agent") and a.arguments.get("error"):
+                fields["error"] = str(a.arguments["error"]).strip().splitlines()[-1][:300]
+            events.emit(event, **fields)
+        except Exception:
+            pass
+        return result
+
+    return wrapper
+
+
+for _name in _EVENTS:
+    setattr(Store, _name, _with_event(_name, getattr(Store, _name)))
+
+
 # ---------------------------------------------------------------- process-wide
 
 _store: Optional[Store] = None

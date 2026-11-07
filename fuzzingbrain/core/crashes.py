@@ -12,9 +12,11 @@ import hashlib
 from dataclasses import dataclass
 from typing import Optional
 
-from loguru import logger
+import logging
 
 from ..db.store import get_store
+
+logger = logging.getLogger(__name__)
 
 
 def _sig():

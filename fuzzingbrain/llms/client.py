@@ -15,7 +15,7 @@ from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Union
 
 import litellm
 import openai
-from loguru import logger
+import logging
 
 from .config import LLMConfig, get_default_config
 from .exceptions import (
@@ -39,6 +39,8 @@ from .models import (
     litellm_model_name,
 )
 from .buffer import get_worker_buffer
+
+logger = logging.getLogger(__name__)
 
 
 def _jsonable(params: Dict[str, Any]) -> Dict[str, Any]:

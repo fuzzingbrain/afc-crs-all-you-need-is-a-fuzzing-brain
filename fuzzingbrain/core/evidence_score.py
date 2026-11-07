@@ -23,8 +23,8 @@ Calibration of a real probability + false-positive discrimination are a later st
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
+from dataclasses import dataclass
+from typing import Optional, Dict, Any
 
 CONFIRMED, REFUTED, UNKNOWN = "confirmed", "refuted", "unknown"
 DYN, LLM, RULE = "dyn", "llm", "rule"

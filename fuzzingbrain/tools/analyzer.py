@@ -12,10 +12,12 @@ import threading
 from contextvars import ContextVar
 from typing import Any, Dict, Optional, Tuple
 
-from loguru import logger
+import logging
 
 from . import tools_mcp
 from ..analyzer import AnalysisClient
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================

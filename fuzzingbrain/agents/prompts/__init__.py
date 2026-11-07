@@ -6,7 +6,9 @@ This module loads prompts from markdown files in the prompts directory.
 """
 
 from pathlib import Path
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Get the directory where this __init__.py file is located
 _PROMPTS_DIR = Path(__file__).parent

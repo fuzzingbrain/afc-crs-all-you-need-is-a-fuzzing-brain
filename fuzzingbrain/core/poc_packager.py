@@ -27,7 +27,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class POCPackager:

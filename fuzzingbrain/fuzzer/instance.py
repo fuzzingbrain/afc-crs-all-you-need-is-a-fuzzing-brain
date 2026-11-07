@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from loguru import logger
+import logging
 
 from ..core.docker_limits import docker_resource_args, run_label_args
 from ..core.fuzzer_spec import (
@@ -30,6 +30,8 @@ from .models import (
     VHFuzzerConfig,
     SeedInfo,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class FuzzerInstance:
@@ -430,8 +432,22 @@ class FuzzerInstance:
         if self.process is None or self.process.stdout is None:
             return
 
+        # The raw output, kept: <logs>/fuzzers/<instance id>.out.
+        from ..core.logging import get_log_dir
+
+        raw = None
+        log_dir = get_log_dir()
+        if log_dir:
+            try:
+                p = Path(log_dir) / "fuzzers" / f"{self.instance_id}.out"
+                p.parent.mkdir(parents=True, exist_ok=True)
+                raw = open(p, "ab")
+            except OSError:
+                raw = None
         try:
             async for line in self.process.stdout:
+                if raw is not None:
+                    raw.write(line)
                 line_str = line.decode("utf-8", errors="replace").strip()
 
                 # Parse coverage info
@@ -457,6 +473,9 @@ class FuzzerInstance:
 
         except Exception as e:
             logger.debug(f"[Fuzzer:{self.instance_id}] Output parsing error: {e}")
+        finally:
+            if raw is not None:
+                raw.close()
 
     def __repr__(self) -> str:
         return (

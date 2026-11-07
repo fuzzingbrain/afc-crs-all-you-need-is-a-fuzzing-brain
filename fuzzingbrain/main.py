@@ -26,7 +26,6 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from .core import (  # noqa: E402
     Config,
     setup_logging,
-    setup_celery_logging,
 )
 from .core.banner import show_banner  # noqa: E402
 from .core.config import ConfigError  # noqa: E402
@@ -232,6 +231,18 @@ def code_version() -> Optional[str]:
 def run_task(config: Config) -> dict:
     """Run one task end to end. Every way of starting FuzzingBrain ends here."""
     global _current_run_id
+    # Everything this run writes goes under its output: logs/ and events.jsonl.
+    from .core.events import set_events_path
+    from .core.logging import get_logo
+
+    out = Path(config.workspace)
+    set_events_path(out / "events.jsonl")
+    log_file = setup_logging(
+        out / "logs",
+        header=get_logo("controller") + "\n" + "\n".join(
+            f"  {label:<12} {value}" for label, value in config.summary()),
+    )
+
     store = init_database(config)
     store.create_run(
         run_id=config.run_id,
@@ -245,13 +256,7 @@ def run_task(config: Config) -> dict:
     )
     _current_run_id = config.run_id
 
-    log_dir = setup_logging(
-        config.project_name,
-        config.run_id,
-        metadata={label: value for label, value in config.summary()},
-    )
-    setup_celery_logging()
-    print_info(f"Logs: {log_dir}")
+    print_info(f"Logs: {log_file.parent}")
     print_step("Starting run processing pipeline...")
 
     from .core.run_processor import process_run

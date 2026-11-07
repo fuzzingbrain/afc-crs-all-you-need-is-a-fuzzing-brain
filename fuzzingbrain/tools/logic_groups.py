@@ -10,10 +10,12 @@ run in the worker process (worker/scope.py) and write PostgreSQL directly.
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
-from loguru import logger
+import logging
 
 from ..db.store import get_store, lg_dict
 from ..worker.scope import get_scope
+
+logger = logging.getLogger(__name__)
 
 _logic_group_agent_id: ContextVar[Optional[str]] = ContextVar(
     "logic_group_agent_id", default=None

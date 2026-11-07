@@ -17,7 +17,9 @@ there is no FuzzerManager -- leaves the probe exactly as it was.
 import threading
 from typing import Any, Dict, Optional
 
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 _sinks: Dict[str, Dict[str, Any]] = {}
 _lock = threading.Lock()

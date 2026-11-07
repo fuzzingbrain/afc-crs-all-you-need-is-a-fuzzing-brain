@@ -13,17 +13,14 @@ Context isolation:
 - _current_worker_id: ContextVar for asyncio task isolation (each async task has its own)
 """
 
-import base64
-import os
 import re
 import threading
 import uuid
 from contextvars import ContextVar
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from loguru import logger
+import logging
 
 from . import tools_mcp
 from .coverage import (
@@ -43,6 +40,8 @@ from ..core.fuzzer_spec import (
 from ..core.crashes import is_real_fault, package_crash, record_crash
 from ..db.store import get_store
 from ..worker.scope import get_scope
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================

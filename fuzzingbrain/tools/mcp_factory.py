@@ -18,6 +18,9 @@ from fastmcp import FastMCP
 from typing import Any, Dict, List, Optional
 
 from .utils import async_tool
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def create_isolated_mcp_server(
@@ -139,7 +142,6 @@ def _client_helpers():
     imports from here in turn; resolving them on call keeps that cycle from
     biting at import time.
     """
-    from loguru import logger
 
     from .analyzer import (
         _analysis_socket_path,
@@ -167,7 +169,6 @@ def _client_helpers():
 
 def _register_analyzer_tools(mcp: FastMCP) -> None:
     """Register analyzer tools (code analysis via Analysis Server)."""
-    from loguru import logger
 
     # Import helper functions from analyzer module
     from .analyzer import (

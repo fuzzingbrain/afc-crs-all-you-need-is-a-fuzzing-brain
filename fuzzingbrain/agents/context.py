@@ -19,7 +19,9 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 _agent_contexts: Dict[str, "AgentContext"] = {}
 _agent_contexts_lock = threading.Lock()
@@ -70,8 +72,9 @@ class AgentContext:
         lg_id: Optional[str] = None,
         crash_id: Optional[str] = None,
         function: Optional[Tuple[str, str, int]] = None,
+        agent_id: Optional[str] = None,
     ):
-        self.agent_id = str(uuid.uuid4())
+        self.agent_id = agent_id or str(uuid.uuid4())
         self.run_id = run_id
         self.worker_id = worker_id or None
         self.agent_type = agent_type

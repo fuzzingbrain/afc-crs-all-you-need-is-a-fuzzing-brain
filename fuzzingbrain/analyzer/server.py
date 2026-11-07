@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
-from loguru import logger
+import logging
 
 from .protocol import (
     Request,
@@ -31,7 +31,9 @@ from .builder import AnalyzerBuilder
 from .models import AnalyzeResult, FuzzerInfo
 from ..analysis import extract_functions_from_file
 from ..graph import CallGraph, ConvertedGraph, GraphError, SourceFunctions, file_sha256
-from ..core.logging import get_analyzer_banner_and_header
+from ..core.logging import get_analyzer_banner_and_header, setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 def _path_parts(path: str) -> List[str]:
@@ -292,8 +294,9 @@ class AnalysisServer:
         """Setup server-specific logging."""
 
         log_path = Path(self.log_dir)
-        log_file = log_path / f"analyzer_{self.run_id}.log"
+        log_file = log_path / "analyzer.log"
         self._analyzer_log_file = log_file
+        self._query_log_file = log_path / "analyzer_queries.jsonl"
 
         metadata = {
             "Run ID": self.run_id,
@@ -304,19 +307,12 @@ class AnalysisServer:
             "Start Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-        # Write banner
-        banner = get_analyzer_banner_and_header(metadata)
-        with open(log_file, "w", encoding="utf-8") as f:
-            f.write(banner)
-            f.write("\n")
-
-        # Add loguru handler for this file
-        logger.add(
-            log_file,
-            level="DEBUG",
-            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {message}",
-            encoding="utf-8",
-            mode="a",
+        # This is the analysis server's own process: its records go to
+        # analyzer.log only, not to the controller's console or log it was
+        # forked with.
+        setup_logging(
+            log_path, file_name="analyzer.log", console=False,
+            header=get_analyzer_banner_and_header(metadata),
         )
 
     async def _build_phase(self) -> bool:
@@ -508,16 +504,23 @@ class AnalysisServer:
                     params_str = str(request.params)[:50]
             self._log(f"[Query #{self.query_count}] {source} -> {method}({params_str})")
 
-        self.query_log.append(
-            {
-                "timestamp": datetime.now().isoformat(),
-                "type": "query" if is_query else "management",
-                "source": request.source,  # e.g., "controller", "worker_libpng_read_fuzzer_address"
-                "method": request.method,
-                "params": request.params,
-                "request_id": request.request_id,
-            }
-        )
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "type": "query" if is_query else "management",
+            "source": request.source,
+            "method": request.method,
+            "params": request.params,
+            "request_id": request.request_id,
+        }
+        self.query_log.append(entry)
+        # Appended as it happens: a server that is killed keeps its record.
+        qf = getattr(self, "_query_log_file", None)
+        if qf is not None:
+            try:
+                with open(qf, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry, default=str) + "\n")
+            except Exception:
+                pass
 
     async def _handle_request(self, request: Request) -> Response:
         """Handle an RPC request."""
@@ -1300,13 +1303,6 @@ class AnalysisServer:
 
         # Shutdown thread pool
         self._executor.shutdown(wait=False)
-
-        # Save query log
-        if self.log_dir and self.query_log:
-            log_file = Path(self.log_dir) / f"analyzer_{self.run_id}_queries.json"
-            with open(log_file, "w") as f:
-                json.dump(self.query_log, f, indent=2)
-            self._log(f"Query log saved: {len(self.query_log)} queries")
 
         # Remove socket
         if self.socket_path.exists():

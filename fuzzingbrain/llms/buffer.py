@@ -17,9 +17,11 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from loguru import logger
+import logging
 
 from ..db.store import as_uuid, message_sha256
+
+logger = logging.getLogger(__name__)
 
 
 def _message(m: Dict[str, Any]) -> Tuple[str, str, Dict[str, Any]]:

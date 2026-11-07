@@ -9,7 +9,9 @@ into a single VH with multiple sources instead of creating duplicates.
 
 import json
 from typing import List, Optional, Dict, Any
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Maximum number of existing VHs to compare against in a single LLM call
 VH_DEDUP_MAX_COMPARE = 20

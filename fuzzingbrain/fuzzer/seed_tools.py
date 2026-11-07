@@ -15,10 +15,12 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from loguru import logger
+import logging
 
 from ..tools import tools_mcp
 from .models import SeedInfo
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================

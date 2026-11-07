@@ -20,7 +20,8 @@ from threading import Lock
 from typing import List, Tuple, Dict, Optional
 
 import psutil
-from loguru import logger as loguru_logger
+import logging
+
 
 from .models import FuzzerInfo
 from ..core.docker_limits import docker_resource_args
@@ -267,13 +268,13 @@ class AnalyzerBuilder:
         self.coverage_path: Optional[str] = None
 
     def _default_log(self, msg: str, level: str = "INFO"):
-        """Default logging using loguru."""
+        """Default logging: this module's logger."""
         if level == "ERROR":
-            loguru_logger.error(f"[Builder] {msg}")
+            logging.getLogger(__name__).error(f"[Builder] {msg}")
         elif level == "WARN":
-            loguru_logger.warning(f"[Builder] {msg}")
+            logging.getLogger(__name__).warning(f"[Builder] {msg}")
         else:
-            loguru_logger.info(f"[Builder] {msg}")
+            logging.getLogger(__name__).info(f"[Builder] {msg}")
 
     def log(self, msg: str, level: str = "INFO"):
         """Log a message."""

@@ -15,11 +15,13 @@ import multiprocessing
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-from loguru import logger
+import logging
 
 from ..celery_app import app
 from .models import AnalyzeRequest, AnalyzeResult
 from .server import AnalysisServer
+
+logger = logging.getLogger(__name__)
 
 
 def _run_server_process(

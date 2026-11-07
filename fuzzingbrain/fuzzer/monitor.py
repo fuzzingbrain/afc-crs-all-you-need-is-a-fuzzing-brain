@@ -21,12 +21,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from loguru import logger
+import logging
 
 from ..core.docker_limits import docker_resource_args
 from ..core.fuzzer_spec import asan_options, run_lib_docker_args
 from .models import CRASH_ARTIFACT_PREFIXES, CrashRecord
 from .signature import compute_signature
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -204,20 +206,12 @@ class FuzzerMonitor:
         # Key: "{worker_id}:{source}" -> ActiveFuzzerInfo
         self._active_fuzzers: Dict[str, ActiveFuzzerInfo] = {}
 
-        # Dedicated Loguru logger for FuzzerMonitor
-        self._monitor_logger = logger.bind(monitor=run_id)
-        self._log_sink_id: Optional[int] = None
+        # Its own file, <logs>/fuzzers/monitor_<id>.log, once started.
+        self._monitor_logger = logger
         self._log_path: Optional[Path] = None
-        # Use log_dir if provided, otherwise fall back to workspace_path
-        # New structure: fuzzer/monitor.log
-        if log_dir:
-            fuzzer_log_dir = Path(log_dir) / "fuzzer"
-            fuzzer_log_dir.mkdir(parents=True, exist_ok=True)
-            self._log_path = fuzzer_log_dir / "monitor.log"
-        elif self.workspace_path:
-            fuzzer_log_dir = self.workspace_path / "fuzzer"
-            fuzzer_log_dir.mkdir(parents=True, exist_ok=True)
-            self._log_path = fuzzer_log_dir / "monitor.log"
+        base = Path(log_dir) if log_dir else (self.workspace_path / "logs" if self.workspace_path else None)
+        if base:
+            self._log_path = base / "fuzzers" / f"monitor_{run_id}.log"
 
         logger.debug(
             f"[FuzzerMonitor:{run_id}] Initialized (thread-based, "
@@ -313,22 +307,11 @@ class FuzzerMonitor:
         if self._running:
             return
 
-        # Add dedicated log file sink for FuzzerMonitor
         if self._log_path:
             try:
-                # Filter to only log messages from this monitor
-                def monitor_filter(record):
-                    return record["extra"].get("monitor") == self.run_id
+                from ..core.logging import file_logger
 
-                self._log_sink_id = logger.add(
-                    self._log_path,
-                    format="{time:YYYY-MM-DD HH:mm:ss} | {level:<7} | {message}",
-                    filter=monitor_filter,
-                    level="INFO",
-                    enqueue=True,  # Thread-safe
-                )
-
-                # Log startup info
+                self._monitor_logger = file_logger(f"monitor.{self.run_id}", self._log_path, level=20)
                 self._log("=" * 70)
                 self._log("CRASH MONITOR STARTED")
                 self._log(f"Run ID: {self.run_id}")
@@ -337,10 +320,8 @@ class FuzzerMonitor:
                 self._log(f"Check interval: {self.check_interval}s")
                 self._log("=" * 70)
             except Exception as e:
-                logger.warning(
-                    f"[FuzzerMonitor:{self.run_id}] Failed to setup log file: {e}"
-                )
-                self._log_sink_id = None
+                logger.warning(f"[FuzzerMonitor:{self.run_id}] Failed to set up its log file: {e}")
+                self._monitor_logger = logger
 
         self._running = True
         self._monitor_thread = threading.Thread(
@@ -418,13 +399,11 @@ class FuzzerMonitor:
 
         self._log("=" * 70)
 
-        # Remove the dedicated log sink
-        if self._log_sink_id is not None:
-            try:
-                logger.remove(self._log_sink_id)
-            except Exception:
-                pass
-            self._log_sink_id = None
+        if self._monitor_logger is not logger:
+            from ..core.logging import close_file_logger
+
+            close_file_logger(self._monitor_logger)
+            self._monitor_logger = logger
 
         logger.info(
             f"[FuzzerMonitor:{self.run_id}] Stopped monitoring "

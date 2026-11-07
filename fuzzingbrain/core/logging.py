@@ -1,21 +1,38 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-FuzzingBrain Logging Framework
+Logging for FuzzingBrain, on the standard library.
 
-Centralized logging configuration using loguru.
-Each run creates a dedicated log directory.
+Every module logs through ``logging.getLogger(__name__)``. Each process
+configures its own handlers once (``setup_logging``): the controller writes to
+the console and ``<output>/logs/fuzzingbrain.log``, a worker process to
+``<output>/logs/workers/<worker id>.log``, the analysis server to
+``<output>/logs/analyzer.log``. Nothing filters records by content: an agent or
+the crash monitor that wants a file of its own gets a logger that does not
+propagate (``file_logger``).
+
+Structured records do not go through here: run events are appended to
+``<output>/events.jsonl`` (core/events.py), agent transcripts to
+``<output>/logs/agents/<agent id>.jsonl``.
 """
 
+import logging
 import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, Union
+from typing import Any, Dict, Optional, Union
 
-from loguru import logger
+logger = logging.getLogger("fuzzingbrain")
+
+# Libraries that log every request at INFO.
+_QUIET = ("litellm", "LiteLLM", "httpx", "httpcore", "openai", "anthropic", "urllib3",
+          "asyncio", "docker", "mcp", "fastmcp", "FastMCP", "sse_starlette", "uvicorn",
+          "kombu", "amqp", "redis")
+
+_FILE_FORMAT = "%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s"
+_DATE = "%Y-%m-%d %H:%M:%S"
 
 
-# Sanitize stdout/stderr to avoid stray carriage-return progress output
 class _CRSanitizer:
     """Wrap a stream and replace carriage returns with newlines to keep console alignment."""
 
@@ -31,185 +48,150 @@ class _CRSanitizer:
     def isatty(self):
         return self._wrapped.isatty()
 
+    def fileno(self):
+        return self._wrapped.fileno()
+
     @property
     def encoding(self):
         return getattr(self._wrapped, "encoding", None)
 
 
-# Only wrap once to avoid double replacement
 if not isinstance(sys.stdout, _CRSanitizer):
     sys.stdout = _CRSanitizer(sys.stdout)
 if not isinstance(sys.stderr, _CRSanitizer):
     sys.stderr = _CRSanitizer(sys.stderr)
 
 
-# Global exception handler to ensure all errors are logged
-def _global_exception_handler(exc_type, exc_value, exc_tb):
-    """Handle uncaught exceptions globally."""
-    if issubclass(exc_type, KeyboardInterrupt):
-        # Don't log keyboard interrupts
-        sys.__excepthook__(exc_type, exc_value, exc_tb)
-        return
-
-    error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-    logger.error(f"Uncaught exception:\n{error_msg}")
+def _excepthook(exc_type, exc_value, exc_tb):
+    """An uncaught exception goes to the log files and, always, to stderr."""
+    if not issubclass(exc_type, KeyboardInterrupt):
+        logger.error("Uncaught exception:\n" + "".join(
+            traceback.format_exception(exc_type, exc_value, exc_tb)))
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
 
 
-sys.excepthook = _global_exception_handler
+sys.excepthook = _excepthook
 
 
-# Remove default handler
-logger.remove()
+class ConsoleFormatter(logging.Formatter):
+    """HH:MM:SS | LEVEL | module:function - message, the level coloured on a tty."""
 
-# Global log directory for current run
+    _COLORS = {
+        logging.DEBUG: "\033[34m", logging.INFO: "\033[1m", logging.WARNING: "\033[33m",
+        logging.ERROR: "\033[31m", logging.CRITICAL: "\033[1;31m",
+    }
+
+    def __init__(self, color: bool):
+        super().__init__(datefmt="%H:%M:%S")
+        self.color = color
+
+    def format(self, record: logging.LogRecord) -> str:
+        level = f"{record.levelname:<8}"
+        where = f"{record.name}:{record.funcName}"
+        msg = record.getMessage()
+        if self.color:
+            c = self._COLORS.get(record.levelno, "")
+            line = (f"\033[32m{self.formatTime(record, self.datefmt)}\033[0m | {c}{level}\033[0m | "
+                    f"\033[36m{where}\033[0m - {c}{msg}\033[0m")
+        else:
+            line = f"{self.formatTime(record, self.datefmt)} | {level} | {where} - {msg}"
+        if record.exc_info:
+            line += "\n" + self.formatException(record.exc_info)
+        return line
+
+
+def _file_handler(path: Path, level: int, fmt: str = _FILE_FORMAT) -> logging.FileHandler:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    h = logging.FileHandler(path, mode="a", encoding="utf-8")
+    h.setLevel(level)
+    h.setFormatter(logging.Formatter(fmt, datefmt=_DATE))
+    return h
+
+
+# The current run's log directory (<output>/logs) in this process.
 _current_log_dir: Optional[Path] = None
 
-# =============================================================================
-# Log Path Helpers
-# =============================================================================
 
-# Max length for names in filenames (logic_group_name, function_name)
-MAX_NAME_LENGTH = 20
+def get_log_dir() -> Optional[Path]:
+    return _current_log_dir
 
 
-def truncate_name(name: str, max_len: int = MAX_NAME_LENGTH) -> str:
-    """
-    Truncate a name for use in filenames.
-
-    Args:
-        name: The name to truncate
-        max_len: Maximum length (default: 20)
-
-    Returns:
-        Truncated name
-    """
-    if len(name) <= max_len:
-        return name
-    return name[:max_len]
+def set_log_dir(log_dir: Union[str, Path, None]) -> Optional[Path]:
+    global _current_log_dir
+    _current_log_dir = Path(log_dir) if log_dir else None
+    if _current_log_dir:
+        _current_log_dir.mkdir(parents=True, exist_ok=True)
+    return _current_log_dir
 
 
-def create_log_directories(log_dir: Path, workers: list = None) -> None:
-    """
-    Create the log directory structure.
-
-    Args:
-        log_dir: Base log directory for this run
-        workers: Optional list of (fuzzer, sanitizer) tuples to create worker dirs
-    """
-    # Create top-level directories
-    (log_dir / "build").mkdir(parents=True, exist_ok=True)
-    (log_dir / "analyzer").mkdir(parents=True, exist_ok=True)
-    (log_dir / "fuzzer").mkdir(parents=True, exist_ok=True)
-    (log_dir / "worker").mkdir(parents=True, exist_ok=True)
-
-    # Create worker subdirectories if specified
-    if workers:
-        for fuzzer, sanitizer in workers:
-            worker_dir = log_dir / "worker" / f"{fuzzer}_{sanitizer}"
-            worker_dir.mkdir(parents=True, exist_ok=True)
-            # Create agent subdirectories
-            (worker_dir / "agent" / "logic_group").mkdir(parents=True, exist_ok=True)
-            (worker_dir / "agent" / "seed").mkdir(parents=True, exist_ok=True)
-            (worker_dir / "agent" / "vh" / "generate").mkdir(
-                parents=True, exist_ok=True
-            )
-            (worker_dir / "agent" / "vh" / "verify").mkdir(parents=True, exist_ok=True)
-            (worker_dir / "agent" / "poc").mkdir(parents=True, exist_ok=True)
-
-
-def get_worker_log_dir(fuzzer: str, sanitizer: str) -> Optional[Path]:
-    """
-    Get the log directory for a specific worker.
-
-    Args:
-        fuzzer: Fuzzer name
-        sanitizer: Sanitizer name
-
-    Returns:
-        Path to worker log directory, or None if logging not initialized
-    """
-    if _current_log_dir is None:
-        return None
-    worker_dir = _current_log_dir / "worker" / f"{fuzzer}_{sanitizer}"
-    worker_dir.mkdir(parents=True, exist_ok=True)
-    return worker_dir
-
-
-def get_agent_log_path(
-    agent_type: str,
-    fuzzer: str,
-    sanitizer: str,
-    index: int = 0,
-    target_name: str = "",
-    is_delta: bool = False,
+def setup_logging(
+    log_dir: Optional[Union[str, Path]],
+    file_name: str = "fuzzingbrain.log",
+    console: bool = True,
+    console_level: str = "INFO",
+    header: Optional[str] = None,
 ) -> Optional[Path]:
-    """
-    Get the log file path for an agent.
+    """Configure this process's handlers, replacing any it had (a forked
+    child inherits its parent's). Returns the log file, or None without a dir."""
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        root.removeHandler(h)
+        try:
+            h.close()
+        except Exception:
+            pass
+    root.setLevel(logging.DEBUG)
+    logger.setLevel(logging.DEBUG)
+    for name in _QUIET:
+        logging.getLogger(name).setLevel(logging.WARNING)
+    logging.getLogger("celery").setLevel(logging.INFO)
 
-    Args:
-        agent_type: One of "logic_group", "seed", "vhg", "vhv", "poc"
-        fuzzer: Fuzzer name
-        sanitizer: Sanitizer name
-        index: Agent index (1-based for display, used in filename)
-        target_name: logic_group_name or function_name
-        is_delta: Whether this is delta scan mode (for VHG)
+    if console:
+        ch = logging.StreamHandler(sys.stderr)
+        ch.setLevel(getattr(logging, console_level.upper(), logging.INFO))
+        ch.setFormatter(ConsoleFormatter(color=sys.stderr.isatty()))
+        root.addHandler(ch)
 
-    Returns:
-        Path to agent log file (without extension), or None if logging not initialized.
-        If file already exists, appends timestamp to ensure uniqueness.
-    """
-    if _current_log_dir is None:
-        return None
+    path = None
+    if log_dir:
+        set_log_dir(log_dir)
+        path = Path(log_dir) / file_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if header:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(header.rstrip("\n") + "\n\n")
+        root.addHandler(_file_handler(path, logging.DEBUG))
+    return path
 
-    worker_dir = _current_log_dir / "worker" / f"{fuzzer}_{sanitizer}"
 
-    # Truncate target name for filename
-    name_suffix = f"_{truncate_name(target_name)}" if target_name else ""
+def file_logger(name: str, path: Union[str, Path], level: int = logging.DEBUG,
+                prefix: str = "", header: Optional[str] = None) -> logging.Logger:
+    """A logger writing only to ``path`` (it does not propagate)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if header:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(header.rstrip("\n") + "\n\n")
+    lg = logging.getLogger(f"fb.file.{name}")
+    close_file_logger(lg)
+    lg.setLevel(level)
+    lg.propagate = False
+    fmt = "%(asctime)s.%(msecs)03d | %(levelname)-8s | " + (f"{prefix} | " if prefix else "") + "%(message)s"
+    lg.addHandler(_file_handler(path, level, fmt))
+    return lg
 
-    if agent_type == "logic_group":
-        agent_dir = worker_dir / "agent" / "logic_group"
-        agent_dir.mkdir(parents=True, exist_ok=True)
-        base_path = agent_dir / "D_agent"
 
-    elif agent_type == "seed":
-        agent_dir = worker_dir / "agent" / "seed"
-        agent_dir.mkdir(parents=True, exist_ok=True)
-        base_path = agent_dir / f"Seed_{index}{name_suffix}"
-
-    elif agent_type == "vhg":
-        agent_dir = worker_dir / "agent" / "vh" / "generate"
-        agent_dir.mkdir(parents=True, exist_ok=True)
-        if is_delta:
-            base_path = agent_dir / "VHG_delta"
-        else:
-            base_path = agent_dir / f"VHG_{index}{name_suffix}"
-
-    elif agent_type == "vhv":
-        agent_dir = worker_dir / "agent" / "vh" / "verify"
-        agent_dir.mkdir(parents=True, exist_ok=True)
-        base_path = agent_dir / f"VHV_{index}{name_suffix}"
-
-    elif agent_type == "poc":
-        agent_dir = worker_dir / "agent" / "poc"
-        agent_dir.mkdir(parents=True, exist_ok=True)
-        base_path = agent_dir / f"POC_{index}{name_suffix}"
-
-    else:
-        raise ValueError(f"Unknown agent type: {agent_type}")
-
-    # Check for filename conflict and add timestamp if needed
-    log_file = Path(str(base_path) + ".log")
-    if log_file.exists():
-        import datetime
-
-        timestamp = datetime.datetime.now().strftime("%H%M%S")
-        return Path(str(base_path) + f"_{timestamp}")
-
-    return base_path
+def close_file_logger(lg: logging.Logger) -> None:
+    for h in list(lg.handlers):
+        lg.removeHandler(h)
+        try:
+            h.close()
+        except Exception:
+            pass
 
 
 # =============================================================================
-# Worker Colors
+# Console colours, banners and the end-of-run table
 # =============================================================================
 
 
@@ -512,396 +494,6 @@ def get_agent_banner_and_header(metadata: Dict[str, Any]) -> str:
     return get_logo("agent") + "\n" + _create_agent_header(metadata)
 
 
-def get_log_dir() -> Optional[Path]:
-    """Get current run's log directory"""
-    return _current_log_dir
-
-
-def set_log_dir(log_dir: Union[str, Path]) -> Path:
-    """
-    Set current run's log directory.
-
-    Used by worker processes to set the log directory from assignment.
-    The directory must already exist (created by main process).
-
-    Args:
-        log_dir: Path to the log directory
-
-    Returns:
-        Path to the log directory
-    """
-    global _current_log_dir
-    _current_log_dir = Path(log_dir)
-    return _current_log_dir
-
-
-def setup_logging(
-    project_name: str,
-    run_id: str,
-    base_dir: Optional[Path] = None,
-    console_level: str = "INFO",
-    file_level: str = "DEBUG",
-    metadata: Optional[Dict[str, Any]] = None,
-) -> Path:
-    """
-    Setup logging for a run.
-
-    Creates a log directory: {base_dir}/{project_name}_{run_id}_{timestamp}/
-
-    Args:
-        project_name: Project name (e.g., "libpng")
-        run_id: Run ID (e.g., "abc12345")
-        base_dir: Base directory for logs (default: ./logs)
-        console_level: Log level for console output
-        file_level: Log level for file output
-        metadata: Optional run metadata to include in log header
-
-    Returns:
-        Path to the log directory
-    """
-    global _current_log_dir
-
-    # Clear existing handlers
-    logger.remove()
-
-    # Create log directory
-    if base_dir is None:
-        base_dir = Path(__file__).parent.parent.parent / "logs"
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = base_dir / f"{project_name}_{run_id}_{timestamp}"
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    _current_log_dir = log_dir
-
-    # Create directory structure
-    create_log_directories(log_dir)
-
-    # Write logo and metadata header to controller log
-    log_file = log_dir / "controller.log"
-    with open(log_file, "w", encoding="utf-8") as f:
-        f.write(LOGO)
-        f.write("\n")
-
-        # Build metadata if not provided
-        if metadata is None:
-            metadata = {}
-        # Add default metadata
-        default_metadata = {
-            "Run ID": run_id,
-            "Project": project_name,
-            "Start Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Log Directory": str(log_dir),
-        }
-        # Merge with provided metadata (provided takes precedence)
-        full_metadata = {**default_metadata, **metadata}
-
-        f.write(_create_run_header(full_metadata))
-        f.write("\n")
-
-    # Console handler - colored, concise
-    logger.add(
-        sys.stderr,
-        level=console_level,
-        format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>",
-        colorize=True,
-    )
-
-    # Main log file (controller.log) - append to existing (with header)
-    logger.add(
-        log_file,
-        level=file_level,
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
-        rotation="50 MB",
-        retention="7 days",
-        encoding="utf-8",
-        mode="a",  # Append mode
-    )
-
-    # Note: error.log is now per-worker, created by setup_worker_logging()
-
-    logger.info(f"Logging initialized: {log_dir}")
-
-    return log_dir
-
-
-def setup_worker_logging(
-    fuzzer: str,
-    sanitizer: str,
-    metadata: Optional[Dict[str, Any]] = None,
-) -> Optional[Path]:
-    """
-    Setup logging for a worker process.
-
-    Creates worker.log and error.log in the worker directory.
-
-    Args:
-        fuzzer: Fuzzer name
-        sanitizer: Sanitizer name
-        metadata: Worker metadata for header
-
-    Returns:
-        Path to worker log directory, or None if main logging not initialized
-    """
-    if _current_log_dir is None:
-        return None
-
-    worker_dir = get_worker_log_dir(fuzzer, sanitizer)
-    if worker_dir is None:
-        return None
-
-    # Create agent subdirectories
-    (worker_dir / "agent" / "logic_group").mkdir(parents=True, exist_ok=True)
-    (worker_dir / "agent" / "seed").mkdir(parents=True, exist_ok=True)
-    (worker_dir / "agent" / "vh" / "generate").mkdir(parents=True, exist_ok=True)
-    (worker_dir / "agent" / "vh" / "verify").mkdir(parents=True, exist_ok=True)
-    (worker_dir / "agent" / "poc").mkdir(parents=True, exist_ok=True)
-
-    # Write worker log header
-    worker_log = worker_dir / "worker.log"
-    with open(worker_log, "w", encoding="utf-8") as f:
-        f.write(get_logo("worker"))
-        f.write("\n")
-        if metadata:
-            f.write(_create_worker_header(metadata))
-            f.write("\n")
-
-    # Add worker-specific log handler (with [Worker] prefix per design doc)
-    logger.add(
-        worker_log,
-        level="INFO",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | [Worker] {message}",
-        filter=lambda record: record["extra"].get("worker") == f"{fuzzer}_{sanitizer}",
-        rotation="50 MB",
-        encoding="utf-8",
-        mode="a",
-    )
-
-    # Add worker error log (with [Worker] prefix per design doc)
-    logger.add(
-        worker_dir / "error.log",
-        level="WARNING",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | [Worker] {message}",
-        filter=lambda record: record["extra"].get("worker") == f"{fuzzer}_{sanitizer}",
-        rotation="50 MB",
-        encoding="utf-8",
-    )
-
-    return worker_dir
-
-
-def get_worker_logger(fuzzer: str, sanitizer: str):
-    """
-    Get a logger bound to a specific worker.
-
-    Args:
-        fuzzer: Fuzzer name
-        sanitizer: Sanitizer name
-
-    Returns:
-        Bound logger instance
-    """
-    return logger.bind(worker=f"{fuzzer}_{sanitizer}")
-
-
-def setup_analyzer_logging(metadata: Optional[Dict[str, Any]] = None) -> Optional[Path]:
-    """
-    Setup logging for the analyzer server.
-
-    Creates analyzer/server.log in the log directory.
-
-    Args:
-        metadata: Analyzer metadata for header
-
-    Returns:
-        Path to analyzer log file, or None if main logging not initialized
-    """
-    if _current_log_dir is None:
-        return None
-
-    analyzer_dir = _current_log_dir / "analyzer"
-    analyzer_dir.mkdir(parents=True, exist_ok=True)
-
-    analyzer_log = analyzer_dir / "server.log"
-
-    # Write analyzer log header
-    with open(analyzer_log, "w", encoding="utf-8") as f:
-        f.write(get_logo("analyzer"))
-        f.write("\n")
-        if metadata:
-            f.write(_create_analyzer_header(metadata))
-            f.write("\n")
-
-    # Add analyzer-specific log handler
-    logger.add(
-        analyzer_log,
-        level="INFO",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | [Analyzer] {message}",
-        filter=lambda record: record["extra"].get("component") == "analyzer",
-        rotation="50 MB",
-        encoding="utf-8",
-        mode="a",
-    )
-
-    return analyzer_log
-
-
-def get_analyzer_logger():
-    """
-    Get a logger bound to the analyzer component.
-
-    Returns:
-        Bound logger instance
-    """
-    return logger.bind(component="analyzer")
-
-
-def setup_celery_logging() -> Optional[Path]:
-    """
-    Setup logging for Celery workers.
-
-    Creates celery.log in the root log directory.
-
-    Returns:
-        Path to celery log file, or None if main logging not initialized
-    """
-    if _current_log_dir is None:
-        return None
-
-    celery_log = _current_log_dir / "celery.log"
-
-    # Add celery-specific log handler
-    logger.add(
-        celery_log,
-        level="INFO",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | [Celery] {message}",
-        filter=lambda record: record["extra"].get("component") == "celery",
-        rotation="50 MB",
-        encoding="utf-8",
-    )
-
-    return celery_log
-
-
-def get_celery_logger():
-    """
-    Get a logger bound to the Celery component.
-
-    Returns:
-        Bound logger instance
-    """
-    return logger.bind(component="celery")
-
-
-def setup_fuzzer_instance_logging(
-    fuzzer: str,
-    sanitizer: str,
-) -> Optional[Path]:
-    """
-    Setup logging for a fuzzer instance.
-
-    Creates fuzzer/{fuzzer}_{sanitizer}/instance.log in the log directory.
-
-    Args:
-        fuzzer: Fuzzer name
-        sanitizer: Sanitizer name
-
-    Returns:
-        Path to fuzzer instance log file, or None if main logging not initialized
-    """
-    if _current_log_dir is None:
-        return None
-
-    fuzzer_dir = _current_log_dir / "fuzzer" / f"{fuzzer}_{sanitizer}"
-    fuzzer_dir.mkdir(parents=True, exist_ok=True)
-
-    instance_log = fuzzer_dir / "instance.log"
-
-    # Add fuzzer instance-specific log handler
-    instance_key = f"{fuzzer}_{sanitizer}"
-    logger.add(
-        instance_log,
-        level="DEBUG",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | [Fuzzer] {message}",
-        filter=lambda record: record["extra"].get("fuzzer_instance") == instance_key,
-        rotation="50 MB",
-        encoding="utf-8",
-    )
-
-    return instance_log
-
-
-def get_fuzzer_instance_logger(fuzzer: str, sanitizer: str):
-    """
-    Get a logger bound to a specific fuzzer instance.
-
-    Args:
-        fuzzer: Fuzzer name
-        sanitizer: Sanitizer name
-
-    Returns:
-        Bound logger instance
-    """
-    return logger.bind(fuzzer_instance=f"{fuzzer}_{sanitizer}")
-
-
-def setup_console_only(level: str = "INFO"):
-    """
-    Setup console-only logging (for API/MCP server mode).
-
-    Args:
-        level: Log level
-    """
-    logger.remove()
-
-    logger.add(
-        sys.stderr,
-        level=level,
-        format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>",
-        colorize=True,
-    )
-
-
-def add_run_log(name: str, level: str = "DEBUG") -> Path:
-    """
-    Add a separate log file for a specific component.
-
-    Args:
-        name: Log file name (without extension)
-        level: Log level
-
-    Returns:
-        Path to the log file
-    """
-    if _current_log_dir is None:
-        raise RuntimeError("Logging not initialized. Call setup_logging() first.")
-
-    log_file = _current_log_dir / f"{name}.log"
-
-    logger.add(
-        log_file,
-        level=level,
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {message}",
-        filter=lambda record: record["extra"].get("run_log") == name,
-        encoding="utf-8",
-    )
-
-    return log_file
-
-
-def get_run_logger(name: str):
-    """
-    Get a logger bound to a specific run log.
-
-    Args:
-        name: Run log name
-
-    Returns:
-        Bound logger instance
-    """
-    return logger.bind(run_log=name)
-
-
 def final_summary(
     store,
     run_id: str,
@@ -975,7 +567,7 @@ def final_summary(
 
 def print_run_summary(store, run_id: str, exit_reason: str) -> None:
     """Print the summary for a run that is ending now (e.g. on Ctrl+C)."""
-    from datetime import datetime, timezone
+    from datetime import timezone
 
     run = store.get_run(run_id)
     if run is None:
@@ -989,29 +581,15 @@ def print_run_summary(store, run_id: str, exit_reason: str) -> None:
 __all__ = [
     "logger",
     "setup_logging",
-    "setup_worker_logging",
-    "setup_analyzer_logging",
-    "setup_celery_logging",
-    "setup_fuzzer_instance_logging",
-    "setup_console_only",
+    "file_logger",
+    "close_file_logger",
     "get_log_dir",
     "set_log_dir",
-    "get_worker_log_dir",
-    "get_agent_log_path",
     "get_logo",
     "get_worker_banner_and_header",
     "get_analyzer_banner_and_header",
     "get_agent_banner_and_header",
-    "add_run_log",
-    "get_run_logger",
-    "get_worker_logger",
-    "get_analyzer_logger",
-    "get_celery_logger",
-    "get_fuzzer_instance_logger",
     "final_summary",
     "print_run_summary",
-    "create_log_directories",
-    "truncate_name",
     "WorkerColors",
-    "MAX_NAME_LENGTH",
 ]

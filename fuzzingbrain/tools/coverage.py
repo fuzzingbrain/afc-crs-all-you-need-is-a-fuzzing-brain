@@ -24,10 +24,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple, Set
 
-from loguru import logger
+import logging
 
 from . import tools_mcp
 from ..core.docker_limits import docker_resource_args
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

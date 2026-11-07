@@ -21,9 +21,11 @@ import traceback
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from loguru import logger
+import logging
 
 from ..db.store import get_store
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerContext:
