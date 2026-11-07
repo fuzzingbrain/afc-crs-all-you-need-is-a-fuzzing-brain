@@ -241,11 +241,9 @@ class AnalysisServer:
             AnalyzeResult with build information
         """
         self.start_time = datetime.now()
-        self._log(f"Starting Analysis Server for run {self.run_id}")
-
-        # Setup logging
         if self.log_dir:
             self._setup_logging()
+        self._log(f"Starting Analysis Server for run {self.run_id}")
 
         # Phase 1: Build
         build_success = await self._build_phase()

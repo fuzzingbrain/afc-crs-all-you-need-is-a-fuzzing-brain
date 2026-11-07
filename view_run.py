@@ -86,7 +86,7 @@ def collect(c, rid):
             FROM agents a WHERE a.run_id = :r ORDER BY a.started_at""", **q),
         "logic_groups": rows(c, """
             SELECT left(id::text, 8) AS lg, name, risk_level AS risk,
-                   coalesce(array_length(planned_functions, 1), 0) AS planned
+                   planned_functions AS planned
             FROM logic_groups WHERE run_id = :r ORDER BY created_at""", **q),
         "vhs": rows(c, """
             SELECT left(id::text, 8) AS vh, function_name AS function, sink_line AS line, status,
