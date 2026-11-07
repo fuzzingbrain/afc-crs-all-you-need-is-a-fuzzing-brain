@@ -584,8 +584,27 @@ class DirectedRun:
             summary.update(self._finish())
         return summary
 
+    def _close_open_vhs(self) -> int:
+        """No hypothesis may be left mid-step when the stage ends.
+
+        A verifier that was cut off never produced a verdict, so its VH is
+        pending again; a PoC agent that was cut off has no more attempts
+        coming, so its VH failed. Either way the record says what happened
+        instead of resting in a state nothing will ever leave.
+        """
+        closed = 0
+        for vh in self.store.vhs(self.lg.name):
+            if vh["status"] == "verifying":
+                closed += self.store.move_vh(vh["id"], "pending_verify", frm=("verifying",),
+                                             reason="the stage ended before the verifier reported")
+            elif vh["status"] == "generating_poc":
+                closed += self.store.move_vh(vh["id"], "poc_failed", frm=("generating_poc",),
+                                             reason="the stage ended before the PoC attempt finished")
+        return closed
+
     def _finish(self) -> dict:
         self._stop_threads.set()
+        self._close_open_vhs()
         for fuzzer in self._fuzzers:
             try:
                 fuzzer.stop()

@@ -57,6 +57,7 @@ class FakeMonitor:
         self.crashing = set(crashing)
         self.handled: list[tuple[str, str]] = []
         self.new_crashes = 0
+        self.skipped: dict[str, int] = {}
 
     def handle(self, source, art, vh_id=None, output=None):
         self.handled.append((source, Path(art).name))
@@ -373,3 +374,30 @@ def test_the_summary_separates_skipped_artifacts_from_crashes(tmp_path):
     report = run._finish()
     assert report["crashes"] == 1 and report["crash_signatures"] == ["sig1"]
     assert report["artifacts_skipped"] == {"timeout": 3, "out-of-memory": 1}
+
+
+def test_no_hypothesis_is_left_mid_step_when_the_stage_ends(tmp_path):
+    run, _, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    verifying = store.create_vh("fuzz", function_name="a")
+    store.move_vh(verifying, "verifying")
+    pocing = store.create_vh("fuzz", function_name="b")
+    store.move_vh(pocing, "pending_poc")
+    store.move_vh(pocing, "generating_poc")
+    untouched = store.create_vh("fuzz", function_name="c")
+    run._finish()
+    assert store.get_vh(verifying)["status"] == "pending_verify"  # it never got a verdict
+    assert store.get_vh(pocing)["status"] == "poc_failed"  # no attempt is coming
+    assert store.get_vh(untouched)["status"] == "pending_verify"
+    assert "the stage ended" in store.vh_events(verifying)[-1]["reason"]
+
+
+def test_closing_leaves_a_finished_hypothesis_alone(tmp_path):
+    run, _, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    done = store.create_vh("fuzz", function_name="a")
+    store.move_vh(done, "pending_poc")
+    store.move_vh(done, "generating_poc")
+    store.move_vh(done, "poc_generated")
+    assert run._close_open_vhs() == 0
+    assert store.get_vh(done)["status"] == "poc_generated"
