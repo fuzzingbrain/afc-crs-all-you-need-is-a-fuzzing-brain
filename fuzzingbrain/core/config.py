@@ -38,10 +38,10 @@ class FuzzerWorkerConfig:
     global_max_time: int = 3600  # Max run time (seconds), 0 = unlimited
     global_timeout_per_input: int = 30  # Timeout per input (seconds)
 
-    # SP Fuzzer config
-    sp_fork_level: int = 1  # Single process (lightweight)
-    sp_rss_limit_mb: int = 1024  # Memory limit
-    sp_max_count: int = 5  # Max concurrent SP Fuzzers
+    # VH Fuzzer config
+    vh_fork_level: int = 1  # Single process (lightweight)
+    vh_rss_limit_mb: int = 1024  # Memory limit
+    vh_max_count: int = 5  # Max concurrent VH Fuzzers
 
     # Crash monitoring
     crash_check_interval: float = 5.0  # Seconds between crash directory checks
@@ -66,13 +66,13 @@ class ConcurrencyConfig:
     # Serial by default, so a first run cannot swamp the machine; experiments
     # raise it explicitly.
     celery_workers: int = 1  # Workers running at once
-    sp_find_agents: int = 1  # Concurrent SP-find agents inside a worker
-    verify_agents: int = 1  # Concurrent SP verification agents
-    pov_agents: int = 1  # Concurrent POV generation agents
+    vh_find_agents: int = 1  # Concurrent VH-find agents inside a worker
+    verify_agents: int = 1  # Concurrent VH verification agents
+    poc_agents: int = 1  # Concurrent PoC generation agents
 
     @classmethod
     def from_value(cls, value) -> "ConcurrencyConfig":
-        """Accept `1`, `{"pov_agents": 2}`, or nothing. Values are checked by Config.
+        """Accept `1`, `{"poc_agents": 2}`, or nothing. Values are checked by Config.
 
         A bare integer sets every field, so a task file can say
         `"concurrency": 1` and mean it.
@@ -89,7 +89,7 @@ class ConcurrencyConfig:
 
 @dataclass
 class ScoringConfig:
-    """The numbers the agents judge suspicious points by.
+    """The numbers the agents judge vulnerability hypotheses by.
 
     These were written into the prompt markdown and into four strategy files as
     literals, which had two costs. Tuning one meant editing English text in
@@ -112,7 +112,7 @@ class ScoringConfig:
     moderate: float = 0.6
     uncertain: float = 0.4
 
-    # The bar for is_important, which decides whether a POV is attempted at all.
+    # The bar for is_important, which decides whether a PoC is attempted at all.
     # Delta scans sit lower on purpose: the diff is already evidence.
     important_full: float = 0.5
     important_delta: float = 0.4
@@ -169,7 +169,7 @@ SANITIZERS_ENABLED = ("address", "memory", "undefined")
 SCAN_MODES = ("full", "delta")
 # Accepted so a task can say what it wants and be told it is not there yet,
 # rather than being told the value is invalid.
-TASK_TYPES = ("pov", "patch", "pov-patch", "harness")
+TASK_TYPES = ("poc", "patch", "poc-patch", "harness")
 ENGINES = ("libfuzzer", "afl", "honggfuzz", "centipede")
 
 
@@ -234,10 +234,10 @@ FIELDS: Tuple[Field, ...] = (
         "delta: commit after the change (default HEAD)",
     ),
     # 2. Task and limits
-    Field(("task_type",), "task_type", "str", "pov (the only one implemented)"),
+    Field(("task_type",), "task_type", "str", "poc (the only one implemented)"),
     Field(("timeout_minutes",), "timeout_minutes", "int", "Wall-clock limit in minutes"),
     Field(("budget_limit",), "budget_limit", "float", "LLM budget in dollars; 0 = unlimited"),
-    Field(("pov_count",), "pov_count", "int", "Stop after N verified PoVs; 0 = never"),
+    Field(("poc_count",), "poc_count", "int", "Stop after N verified PoCs; 0 = never"),
     Field(
         ("remove_git",),
         "remove_git",
@@ -341,6 +341,7 @@ _OLD_KEYS = {
     "build_coverage": 'moved to "fuzzer.build.build_coverage"',
     "prebuild_dir": 'replaced by "analysis.graph", one SQLite file (python -m fuzzingbrain.graph.convert)',
     "analysis.prebuild_graph_dir": 'replaced by "analysis.graph", one SQLite file (python -m fuzzingbrain.graph.convert)',
+    "pov_count": 'renamed to "poc_count"',
     "work_id": "removed: the graph is read from analysis.graph alone",
     "enable_static_analysis": "removed: introspector is no longer supported",
     "model_profile": 'removed: name a model for every role in "models", or use "force_model"',
@@ -397,12 +398,12 @@ class Config:
     delta_commit: Optional[str] = None
 
     # 2. Task and limits
-    task_type: str = "pov"
+    task_type: str = "poc"
     timeout_minutes: int = 30
     budget_limit: float = 20.0  # dollars, 0 = unlimited
-    pov_count: int = 1  # stop after N verified PoVs, 0 = never
+    poc_count: int = 1  # stop after N verified PoCs, 0 = never
     # .aixcc is always removed from the workspace and is not a switch: it holds
-    # the vulnerability location, a reference POV and the reference patch.
+    # the vulnerability location, a reference PoC and the reference patch.
     remove_git: bool = False
 
     # 3. Models
@@ -416,7 +417,7 @@ class Config:
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
     detect_leaks: bool = False
     fuzzer_sources: Dict[str, List[str]] = field(default_factory=dict)
-    # Image the fuzzer binaries run in; it supplies their runtime libraries. PoV
+    # Image the fuzzer binaries run in; it supplies their runtime libraries. PoC
     # verification and the fuzzer monitor both run the binary here.
     docker_image: Optional[str] = None
     # {sanitizer: {fuzzer: binary}}. When set, the binaries are copied into
@@ -427,7 +428,7 @@ class Config:
     fuzz_tooling_path: Optional[str] = None
     ossfuzz_project_name: Optional[str] = None
     # Coverage is a separate build from the sanitizers and is usually worth the
-    # ~5s it costs: four agent tools read it, and trace_pov uses it to add
+    # ~5s it costs: four agent tools read it, and trace_poc uses it to add
     # detail. It is optional because a run can be deliberately restricted to
     # what one ASAN build gives.
     build_coverage: bool = True
@@ -438,7 +439,7 @@ class Config:
     # 6. Concurrency and resources
     concurrency: ConcurrencyConfig = field(default_factory=ConcurrencyConfig)
     # How many fuzzer containers the whole run may have at once. Every worker
-    # runs a global fuzzer and every POV agent starts one for its suspicious
+    # runs a global fuzzer and every PoC agent starts one for its suspicious
     # point, so without a ceiling the count is workers x (1 + agents) and the
     # machine spends its cores on context switches instead of on executions.
     max_parallel_fuzzers: int = DEFAULT_MAX_PARALLEL_FUZZERS
@@ -559,7 +560,8 @@ class Config:
                 raise TypeError("expected an object of role -> model id")
             unknown = set(value) - set(ROLES)
             if unknown:
-                raise ValueError(f"unknown roles {sorted(unknown)}; roles are {list(ROLES)}")
+                hint = ' ("pov" is now "poc")' if "pov" in unknown else ""
+                raise ValueError(f"unknown roles {sorted(unknown)}; roles are {list(ROLES)}{hint}")
             return dict(value)
         if spec.attr == "fuzzer_sources":
             if not isinstance(value, dict) or not all(
@@ -709,15 +711,16 @@ class Config:
 
         # Task and limits
         if self.task_type not in TASK_TYPES:
-            e.append(f"task_type must be one of {list(TASK_TYPES)}, not {self.task_type!r}")
-        elif self.task_type != "pov":
-            e.append(f"task_type {self.task_type!r} is not available: this version enables only 'pov'")
+            hint = ' ("pov" is now "poc")' if self.task_type == "pov" else ""
+            e.append(f"task_type must be one of {list(TASK_TYPES)}, not {self.task_type!r}{hint}")
+        elif self.task_type != "poc":
+            e.append(f"task_type {self.task_type!r} is not available: this version enables only 'poc'")
         if self.timeout_minutes <= 0:
             e.append("timeout_minutes must be positive")
         if self.budget_limit < 0:
             e.append("budget_limit must be 0 (unlimited) or positive")
-        if self.pov_count < 0:
-            e.append("pov_count must be 0 (never stop) or positive")
+        if self.poc_count < 0:
+            e.append("poc_count must be 0 (never stop) or positive")
 
         # Models
         if self.force_model and self.models:
@@ -865,9 +868,9 @@ class Config:
         rows.append(("Call graph", self.graph or "none (functions indexed from source)"))
         rows.append(("Limits", f"{self.timeout_minutes} min, "
                      f"{'$%.2f' % self.budget_limit if self.budget_limit else 'no budget limit'}, "
-                     f"{f'stop after {self.pov_count} PoV' if self.pov_count else 'no PoV limit'}"))
+                     f"{f'stop after {self.poc_count} PoC' if self.poc_count else 'no PoC limit'}"))
         c = self.concurrency
         rows.append(("Concurrency", f"workers {c.celery_workers}, agents "
-                     f"{c.sp_find_agents}/{c.verify_agents}/{c.pov_agents}, "
+                     f"{c.vh_find_agents}/{c.verify_agents}/{c.poc_agents}, "
                      f"fuzzers {self.max_parallel_fuzzers}"))
         return rows

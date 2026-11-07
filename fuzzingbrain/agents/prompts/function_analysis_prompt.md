@@ -9,9 +9,9 @@ You are given key context upfront:
 3. The target function's source code
 
 ## Your Task and steps
-You are given one specific function to analyze. Your ONLY goal is to determine if this function contains suspicious code patterns that could crash the sanitizer-instrumented build of the harness. If yes, create suspicious points for each crash-related operation. Both sanitizer configuration, harness source codes and function source code are provided.
+You are given one specific function to analyze. Your ONLY goal is to determine if this function contains suspicious code patterns that could crash the sanitizer-instrumented build of the harness. If yes, create vulnerability hypotheses for each crash-related operation. Both sanitizer configuration, harness source codes and function source code are provided.
 
-One function can have MULTIPLE crash-related operations - create separate suspicious points for each.
+One function can have MULTIPLE crash-related operations - create separate vulnerability hypotheses for each.
 
 ### Step 1: Read sanitizer configuration and harness source codes
 Our goal is to find and reproduce a crash based on the sanitizer and fuzzer.
@@ -37,18 +37,18 @@ You must:
     
 - You can read the project's related source codes to understand the logic by using `Read`/`Grep` to read the source file directly. You should check the related source codes carefully, especially the control flow from the fuzzer entrypoint to this function (top priority).
 
-- If this memory-related operation may cause a crash, you should create a suspicious point.
+- If this memory-related operation may cause a crash, you should create a vulnerability hypothesis.
     - If you think this operation may directly cause a crash, and the crash point is
-    in this function or in the related source codes, you should create a suspicious point with a score of 0.75.
+    in this function or in the related source codes, you should create a vulnerability hypothesis with a score of 0.75.
 
-    - If you cannot determine if this operation will cause a crash and need a more detailed analysis, you should create a suspicious point with a score of 0.5 or 0.25 (based on the confidence level). The score should only be the made by checking the evidence in the code. Should NOT be related to bug type or importance level.
+    - If you cannot determine if this operation will cause a crash and need a more detailed analysis, you should create a vulnerability hypothesis with a score of 0.5 or 0.25 (based on the confidence level). The score should only be the made by checking the evidence in the code. Should NOT be related to bug type or importance level.
 
-    - If you believe this operation will not cause a crash because this is an obvious safe operation, or the dangerous operation is protected by some checks. DON'T create a suspicious point.
+    - If you believe this operation will not cause a crash because this is an obvious safe operation, or the dangerous operation is protected by some checks. DON'T create a vulnerability hypothesis.
 
-    - If you believe this function is safe because all the memory-related operations are safe or there is no memory-related operation in this function. DON'T create a suspicious point. ONLY output ASSESSMENT COMPLETE.
+    - If you believe this function is safe because all the memory-related operations are safe or there is no memory-related operation in this function. DON'T create a vulnerability hypothesis. ONLY output ASSESSMENT COMPLETE.
 
-# Step 3: Create suspicious points
-When you create a suspicious point, you MUST format the parameters as follows:
+# Step 3: Create vulnerability hypotheses
+When you create a vulnerability hypothesis, you MUST format the parameters as follows:
 
 - function_name (str): the name of the function that contains the suspicious pattern. Usually the crash point/dangerous operation is in this function.
 
@@ -56,7 +56,7 @@ When you create a suspicious point, you MUST format the parameters as follows:
     - Crash type: The type of the crash that this operation may cause.
     - Reasoning: Why this operation may cause this crash. What is the root cause?
 
-- score (float): The score of the suspicious point. Should be 0.75 or 0.5.
+- score (float): The score of the vulnerability hypothesis. Should be 0.75 or 0.5.
 
 - important_controlflow (str): the key functions and variables on the path to the bug, one per line, in the format:
     - <function or variable name>: <its role in the bug — e.g. tainted length/index/pointer, or the caller/callee that sets or uses it>

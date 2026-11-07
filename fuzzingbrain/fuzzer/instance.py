@@ -27,7 +27,7 @@ from .models import (
     FuzzerType,
     FuzzerStats,
     GlobalFuzzerConfig,
-    SPFuzzerConfig,
+    VHFuzzerConfig,
     SeedInfo,
 )
 
@@ -42,13 +42,13 @@ class FuzzerInstance:
 
     def __init__(
         self,
-        instance_id: str,  # "global" or sp_id
+        instance_id: str,  # "global" or vh_id
         fuzzer_path: Path,
         docker_image: str,
         corpus_dir: Path,
         crashes_dir: Path,
         fuzzer_type: FuzzerType = FuzzerType.GLOBAL,
-        config: Union[GlobalFuzzerConfig, SPFuzzerConfig] = None,
+        config: Union[GlobalFuzzerConfig, VHFuzzerConfig] = None,
         run_id: str = "",
         no_oom: bool = False,
         sanitizer: str = "address",
@@ -57,12 +57,12 @@ class FuzzerInstance:
         Initialize FuzzerInstance.
 
         Args:
-            instance_id: Unique identifier ("global" or sp_id)
+            instance_id: Unique identifier ("global" or vh_id)
             fuzzer_path: Path to fuzzer binary
             docker_image: Docker image for running fuzzer
             corpus_dir: Directory for corpus seeds
             crashes_dir: Directory for crash outputs
-            fuzzer_type: GLOBAL or SP
+            fuzzer_type: GLOBAL or VH
             config: Fuzzer configuration
             run_id: Owning run; stamped on the container as a label so the
                 controller can kill it after the worker process is gone
@@ -84,7 +84,7 @@ class FuzzerInstance:
             if fuzzer_type == FuzzerType.GLOBAL:
                 config = GlobalFuzzerConfig()
             else:
-                config = SPFuzzerConfig()
+                config = VHFuzzerConfig()
         self.config = config
 
         # Process management

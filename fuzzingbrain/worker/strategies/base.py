@@ -19,8 +19,8 @@ class BaseStrategy(ABC):
     Base class for worker strategies.
 
     Each strategy implements the core logic for a specific job type:
-    - POVDeltaStrategy / POVFullscanStrategy: Find vulnerabilities, generate POVs
-    - PatchStrategy: Generate patches for existing POVs
+    - POCDeltaStrategy / POCFullscanStrategy: Find vulnerabilities, generate PoCs
+    - PatchStrategy: Generate patches for existing PoCs
     - HarnessStrategy: Generate new fuzz harnesses
     """
 
@@ -41,13 +41,13 @@ class BaseStrategy(ABC):
         self.run_id = executor.run_id
         self.worker_id = executor.worker_id
         self.repos = executor.repos
-        # scan_mode is defined as property in POVBaseStrategy
+        # scan_mode is defined as property in POCBaseStrategy
         self.log_dir = executor.log_dir
 
         # Paths
         self.results_path = executor.results_path
         self.crashes_path = executor.crashes_path
-        self.povs_path = executor.povs_path
+        self.pocs_path = executor.pocs_path
         self.patches_path = executor.patches_path
 
     @property

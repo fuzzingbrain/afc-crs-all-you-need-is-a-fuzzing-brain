@@ -2,7 +2,7 @@
 """
 FuzzingBrain Data Models
 
-Models for Run, POV, Patch, Worker, Fuzzer, Function, CallGraphNode, etc.
+Models for Run, PoC, Patch, Worker, Fuzzer, Function, CallGraphNode, etc.
 
 Hierarchy (ObjectId-based):
     Run
@@ -12,14 +12,14 @@ Hierarchy (ObjectId-based):
 """
 
 from .run import Run, RunStatus, JobType, ScanMode
-from .pov import POV
+from .poc import POC
 from .patch import Patch
 from .worker import Worker, WorkerStatus
 from .fuzzer import Fuzzer, FuzzerStatus
 from .function import Function
 from .callgraph import CallGraphNode
-from .suspicious_point import SuspiciousPoint, ControlFlowItem, SPStatus
-from .direction import Direction, DirectionStatus, RiskLevel
+from .vulnerability_hypothesis import VulnerabilityHypothesis, ControlFlowItem, VHStatus
+from .logic_group import LogicGroup, LogicGroupStatus, RiskLevel
 from .llm_call import LLMCall
 from .agent import AgentType
 
@@ -28,7 +28,7 @@ __all__ = [
     "RunStatus",
     "JobType",
     "ScanMode",
-    "POV",
+    "POC",
     "Patch",
     "Worker",
     "WorkerStatus",
@@ -36,11 +36,11 @@ __all__ = [
     "FuzzerStatus",
     "Function",
     "CallGraphNode",
-    "SuspiciousPoint",
+    "VulnerabilityHypothesis",
     "ControlFlowItem",
-    "SPStatus",
-    "Direction",
-    "DirectionStatus",
+    "VHStatus",
+    "LogicGroup",
+    "LogicGroupStatus",
     "RiskLevel",
     "LLMCall",
     "AgentType",

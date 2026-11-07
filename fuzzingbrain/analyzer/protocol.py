@@ -68,18 +68,18 @@ class Method(str, Enum):
     GET_FUZZER_SOURCE = "get_fuzzer_source"
     GET_BUILD_PATHS = "get_build_paths"
 
-    # Suspicious point operations
-    CREATE_SUSPICIOUS_POINT = "create_suspicious_point"
-    UPDATE_SUSPICIOUS_POINT = "update_suspicious_point"
-    LIST_SUSPICIOUS_POINTS = "list_suspicious_points"
-    GET_SUSPICIOUS_POINT = "get_suspicious_point"
+    # Vulnerability hypothesis operations
+    CREATE_VULNERABILITY_HYPOTHESIS = "create_vulnerability_hypothesis"
+    UPDATE_VULNERABILITY_HYPOTHESIS = "update_vulnerability_hypothesis"
+    LIST_VULNERABILITY_HYPOTHESES = "list_vulnerability_hypotheses"
+    GET_VULNERABILITY_HYPOTHESIS = "get_vulnerability_hypothesis"
 
-    # Direction operations (Full-scan)
-    CREATE_DIRECTION = "create_direction"
-    LIST_DIRECTIONS = "list_directions"
-    GET_DIRECTION = "get_direction"
-    CLAIM_DIRECTION = "claim_direction"
-    COMPLETE_DIRECTION = "complete_direction"
+    # Logic group operations (Full-scan)
+    CREATE_LOGIC_GROUP = "create_logic_group"
+    LIST_LOGIC_GROUPS = "list_logic_groups"
+    GET_LOGIC_GROUP = "get_logic_group"
+    CLAIM_LOGIC_GROUP = "claim_logic_group"
+    COMPLETE_LOGIC_GROUP = "complete_logic_group"
 
 
 @dataclass

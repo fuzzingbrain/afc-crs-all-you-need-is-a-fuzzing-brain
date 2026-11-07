@@ -17,7 +17,7 @@
 
 FuzzingBrain is an LLM-powered autonomous system for vulnerability discovery and
 patching, built on the OSS-Fuzz toolchain. It pairs coverage-guided fuzzing with
-a **Suspicious-Point (SP)** reasoning brain: specialized agents partition the
+a **Suspicious-Point (VH)** reasoning brain: specialized agents partition the
 target, reason about where bugs live, build proofs-of-vulnerability, and propose
 patches — with every finding dynamically verified to eliminate hallucinations.
 
@@ -69,13 +69,13 @@ executed against the built fuzzer and kept only if the sanitizer fires.
 ## How it works
 
 ```
-target ─▶ analyze ─▶ build fuzzers ─▶ direction planning ─▶ sp-generate
+target ─▶ analyze ─▶ build fuzzers ─▶ logic group planning ─▶ vh-generate
                                                                   │
-   report ◀─ verify ◀─ triage ◀─ pov ◀─ sp-verify ◀──────────────┘
+   report ◀─ verify ◀─ triage ◀─ poc ◀─ vh-verify ◀──────────────┘
 ```
 
-A scan partitions the codebase into directions, reasons about suspicious points
-(potential vulnerabilities), constructs candidate PoV inputs, and verifies every
+A scan partitions the codebase into logic groups, reasons about vulnerability hypotheses
+(potential vulnerabilities), constructs candidate PoC inputs, and verifies every
 crash before it is reported.
 
 ## Troubleshooting

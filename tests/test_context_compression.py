@@ -95,7 +95,7 @@ def test_eviction_preserves_tool_pairs(tmp_path):
         _tool("c1", "A" * 500),
         _asst("c2", "reach_probe", '{"x":1}'),        # non-idempotent
         _tool("c2", "B" * 500),
-        _asst_multi([("c3", "get_callees", "{}"), ("c4", "create_pov", "{}")]),  # mixed turn
+        _asst_multi([("c3", "get_callees", "{}"), ("c4", "create_poc", "{}")]),  # mixed turn
         _tool("c3", "C" * 500),
         _tool("c4", "D" * 500),
         _asst("c5", "reach_probe", "{}"),
@@ -168,7 +168,7 @@ def test_idempotent_vs_nonidempotent(tmp_path):
 
 def test_two_agents_do_not_collide_in_recall_store(tmp_path):
     """Regression: the recall store dir was keyed on id(self), a memory address
-    reused across GC'd agents, so sequential POV agents overwrote each other's
+    reused across GC'd agents, so sequential PoC agents overwrote each other's
     <ref>.txt files and recall() returned another agent's result. Two agents
     sharing a log_dir must get distinct store dirs and independent refs."""
     a = _make_agent(tmp_path, keep=0)
@@ -182,7 +182,7 @@ def test_two_agents_do_not_collide_in_recall_store(tmp_path):
     ]
     b.messages = [
         {"role": "system", "content": "s"}, {"role": "user", "content": "t"},
-        _asst("y1", "create_pov"), _tool("y1", json.dumps({"pov_ids": ["B"], "who": "B"})),
+        _asst("y1", "create_poc"), _tool("y1", json.dumps({"poc_ids": ["B"], "who": "B"})),
         _asst("y2", "noop"), _tool("y2", "keepB"),
     ]
     asyncio.run(a._compress_context())
@@ -202,19 +202,19 @@ def test_recall_bad_ref(tmp_path):
     assert "no evicted result" in a._handle_recall({"ref": 999})
 
 
-def test_ledger_pins_reach_and_pov_facts(tmp_path):
+def test_ledger_pins_reach_and_poc_facts(tmp_path):
     a = _make_agent(tmp_path, keep=1)
     reach = json.dumps(
         {"sink_reached": True, "asan_margin": 3, "first_unreached": None, "crashed": False}
     )
-    pov = json.dumps({"crashed": True, "crash_matches_sp": True})
+    poc = json.dumps({"crashed": True, "crash_matches_vh": True})
     a.messages = [
         {"role": "system", "content": "FRAME"},
         {"role": "user", "content": "TASK"},
         _asst("c1", "reach_probe"),
         _tool("c1", reach),          # evicted -> fact lifted
-        _asst("c2", "create_pov"),
-        _tool("c2", pov),            # evicted -> fact lifted
+        _asst("c2", "create_poc"),
+        _tool("c2", poc),            # evicted -> fact lifted
         _asst("c3", "reach_probe"),
         _tool("c3", "{}recent"),     # kept (recent)
     ]
@@ -223,7 +223,7 @@ def test_ledger_pins_reach_and_pov_facts(tmp_path):
     led = _ledger_msg(a.messages)
     assert led is not None, "ledger message was not pinned"
     assert "sink_reached=True" in led and "asan_margin=3" in led
-    assert "pov:CRASHED" in led and "create_pov CRASHED" in led
+    assert "poc:CRASHED" in led and "create_poc CRASHED" in led
     # Structure still valid after inserting the ledger message.
     assert _pairs_valid(a.messages)
 

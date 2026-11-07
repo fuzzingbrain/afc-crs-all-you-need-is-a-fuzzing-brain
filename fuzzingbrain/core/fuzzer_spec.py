@@ -7,8 +7,8 @@ A logical fuzzer name can carry ``@``-suffixed directives:
     avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert  -> fuzztest, run one test
 
 The two use the same ``@`` syntax but mean different things, so every place
-that runs a fuzzer -- the continuous global/SP fuzzer, the reach_probe gdb
-trace, and the create_pov verifier -- must parse them the same way. Doing it
+that runs a fuzzer -- the continuous global/VH fuzzer, the reach_probe gdb
+trace, and the create_poc verifier -- must parse them the same way. Doing it
 by hand (``split("@")`` -> ``--fuzz=<rest>``) silently turned ``@NO_OOM`` into
 a bogus ``--fuzz=NO_OOM`` AND never applied the OOM directive, so memory-heavy
 decoders (dav1d) OOM'd before reaching the sink at every stage. Parse here.
@@ -69,7 +69,7 @@ def staged_ld_library_path(
     A NEEDED chain like ``fuzzer -> libsystemd-shared -> libcap.so.2`` is
     transitive, and ``DT_RUNPATH`` is not carried across links, so the loader
     only finds ``libcap`` if the staged dir is on ``LD_LIBRARY_PATH``. Missing it
-    makes the binary abort at load (rc=127) and every PoV read as "no crash".
+    makes the binary abort at load (rc=127) and every PoC read as "no crash".
 
     Returns ``mount_point``-rooted, ``:``-joined paths for every subdirectory of
     ``fuzzer_dir`` that holds a ``.so``, or ``""`` when there are none (so the
@@ -139,8 +139,8 @@ def run_lib_docker_args(
 
 
 # Whether LeakSanitizer reports count as crashes (fuzzer.detect_leaks). Off by
-# default: an incidental leak in a dissector would otherwise verify as a PoV and
-# stop the run. The fuzzer, PoV verification and crash re-verification must agree
+# default: an incidental leak in a dissector would otherwise verify as a PoC and
+# stop the run. The fuzzer, PoC verification and crash re-verification must agree
 # on what a crash is, so all three take ASAN_OPTIONS from asan_options(). Set once
 # per process: by the controller from its config, by a worker from its assignment.
 _detect_leaks = False

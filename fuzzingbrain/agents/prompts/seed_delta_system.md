@@ -37,7 +37,7 @@ Write a Python function `def generate(seed_num: int) -> bytes` and pass its sour
 ## Guidelines for Seed Generation
 1. **Target the change**: design inputs that flow through the harness to the changed functions; use the diff to see the new lines, constants, and buffer sizes that matter.
 2. **Reach first**: seeds must pass the harness's input parsing/format before they reach the changed code. Read the harness source for the exact input layout.
-3. **Vulnerability-focused**: bias toward integer boundaries, oversized/undersized fields, malformed structures, and the specific patterns the suspicious points describe.
+3. **Vulnerability-focused**: bias toward integer boundaries, oversized/undersized fields, malformed structures, and the specific patterns the vulnerability hypotheses describe.
 4. **Use the create_seed tool**: call `create_seed` with Python code that defines `generate(seed_num) -> bytes`.
 
 ## Example

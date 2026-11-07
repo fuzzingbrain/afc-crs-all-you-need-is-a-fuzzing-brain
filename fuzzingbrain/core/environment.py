@@ -25,7 +25,7 @@ def in_docker() -> bool:
 
 
 def check_docker() -> Optional[str]:
-    """Every build, fuzzer and PoV runs in a container."""
+    """Every build, fuzzer and PoC runs in a container."""
     try:
         r = subprocess.run(["docker", "info"], capture_output=True, timeout=30)
     except FileNotFoundError:

@@ -78,7 +78,7 @@ class WorkerContext:
 
     Persistence:
         - Saves on enter (status: running)
-        - Saves on significant events (agent spawn, SP found, etc.)
+        - Saves on significant events (agent spawn, VH found, etc.)
         - Saves periodically if dirty
         - Saves on exit (status: completed/failed)
     """
@@ -93,7 +93,7 @@ class WorkerContext:
         sanitizer: str,
         scan_mode: str = "full",
         project_name: str = "",
-        task_type: str = "pov",
+        task_type: str = "poc",
         workspace_path: str = "",
         celery_job_id: str = None,
     ):
@@ -106,7 +106,7 @@ class WorkerContext:
             sanitizer: Sanitizer type
             scan_mode: Scan mode ("full" or "delta")
             project_name: Project name
-            task_type: Job type (pov, patch, pov-patch, harness)
+            task_type: Job type (poc, patch, poc-patch, harness)
             workspace_path: Worker workspace path
             celery_job_id: Celery task ID (set by tasks.py)
         """
@@ -137,9 +137,9 @@ class WorkerContext:
         self.agents_spawned: int = 0
         self.agents_completed: int = 0
         self.agents_failed: int = 0
-        self.sp_found: int = 0
-        self.sp_verified: int = 0
-        self.pov_generated: int = 0
+        self.vh_found: int = 0
+        self.vh_verified: int = 0
+        self.poc_generated: int = 0
         self.patch_generated: int = 0
 
         # Strategy tracking
@@ -149,9 +149,9 @@ class WorkerContext:
         # Phase timing (seconds) - for performance analysis
         self.phase_build: float = 0.0
         self.phase_reachability: float = 0.0
-        self.phase_find_sp: float = 0.0
+        self.phase_find_vh: float = 0.0
         self.phase_verify: float = 0.0
-        self.phase_pov: float = 0.0
+        self.phase_poc: float = 0.0
         self.phase_save: float = 0.0
 
         # LLM usage aggregates (updated by buffer flush)
@@ -220,7 +220,7 @@ class WorkerContext:
             # The controller revokes every worker once the run is over
             # (target reached, budget, timeout); billiard delivers that as
             # Terminated(-signum). Recording it as "failed: -241" made a run
-            # that had just found its POV read like a crash.
+            # that had just found its PoC read like a crash.
             self.status = "completed"
             self.error = f"Stopped by controller ({exc_type.__name__})"
         elif exc_type:
@@ -314,9 +314,9 @@ class WorkerContext:
                     "agents_spawned": self.agents_spawned,
                     "agents_completed": self.agents_completed,
                     "agents_failed": self.agents_failed,
-                    "sp_found": self.sp_found,
-                    "sp_verified": self.sp_verified,
-                    "pov_generated": self.pov_generated,
+                    "vh_found": self.vh_found,
+                    "vh_verified": self.vh_verified,
+                    "poc_generated": self.poc_generated,
                     "patch_generated": self.patch_generated,
                     # Timestamps
                     "created_at": self.started_at or datetime.now(),
@@ -326,9 +326,9 @@ class WorkerContext:
                     # Phase timing
                     "phase_build": self.phase_build,
                     "phase_reachability": self.phase_reachability,
-                    "phase_find_sp": self.phase_find_sp,
+                    "phase_find_vh": self.phase_find_vh,
                     "phase_verify": self.phase_verify,
-                    "phase_pov": self.phase_pov,
+                    "phase_poc": self.phase_poc,
                     "phase_save": self.phase_save,
                     # NOTE: llm_calls/llm_cost/llm_input_tokens/llm_output_tokens
                     # are managed exclusively by WorkerLLMBuffer via $inc.
@@ -377,22 +377,22 @@ class WorkerContext:
         self.agents_failed += 1
         self._mark_dirty_and_maybe_save()
 
-    def increment_sp_found(self, count: int = 1) -> None:
-        """Increment SP found counter and persist."""
-        self.sp_found += count
-        # SP found is significant - force immediate save
+    def increment_vh_found(self, count: int = 1) -> None:
+        """Increment VH found counter and persist."""
+        self.vh_found += count
+        # VH found is significant - force immediate save
         self._dirty = True
         self._save_to_db(force=True)
 
-    def increment_sp_verified(self, count: int = 1) -> None:
-        """Increment SP verified counter and persist."""
-        self.sp_verified += count
+    def increment_vh_verified(self, count: int = 1) -> None:
+        """Increment VH verified counter and persist."""
+        self.vh_verified += count
         self._mark_dirty_and_maybe_save()
 
-    def increment_pov_generated(self, count: int = 1) -> None:
-        """Increment POV generated counter and persist."""
-        self.pov_generated += count
-        # POV generated is significant - force immediate save
+    def increment_poc_generated(self, count: int = 1) -> None:
+        """Increment PoC generated counter and persist."""
+        self.poc_generated += count
+        # PoC generated is significant - force immediate save
         self._dirty = True
         self._save_to_db(force=True)
 
@@ -438,9 +438,9 @@ class WorkerContext:
         self,
         build: float = None,
         reachability: float = None,
-        find_sp: float = None,
+        find_vh: float = None,
         verify: float = None,
-        pov: float = None,
+        poc: float = None,
         save: float = None,
     ) -> None:
         """Update phase timing values."""
@@ -448,12 +448,12 @@ class WorkerContext:
             self.phase_build = build
         if reachability is not None:
             self.phase_reachability = reachability
-        if find_sp is not None:
-            self.phase_find_sp = find_sp
+        if find_vh is not None:
+            self.phase_find_vh = find_vh
         if verify is not None:
             self.phase_verify = verify
-        if pov is not None:
-            self.phase_pov = pov
+        if poc is not None:
+            self.phase_poc = poc
         if save is not None:
             self.phase_save = save
         self._mark_dirty_and_maybe_save()
@@ -495,15 +495,15 @@ class WorkerContext:
             "agents_spawned": self.agents_spawned,
             "agents_completed": self.agents_completed,
             "agents_failed": self.agents_failed,
-            "sp_found": self.sp_found,
-            "sp_verified": self.sp_verified,
-            "pov_generated": self.pov_generated,
+            "vh_found": self.vh_found,
+            "vh_verified": self.vh_verified,
+            "poc_generated": self.poc_generated,
             "patch_generated": self.patch_generated,
             "phase_build": self.phase_build,
             "phase_reachability": self.phase_reachability,
-            "phase_find_sp": self.phase_find_sp,
+            "phase_find_vh": self.phase_find_vh,
             "phase_verify": self.phase_verify,
-            "phase_pov": self.phase_pov,
+            "phase_poc": self.phase_poc,
             "phase_save": self.phase_save,
             "llm_calls": self.llm_calls,
             "llm_cost": self.llm_cost,

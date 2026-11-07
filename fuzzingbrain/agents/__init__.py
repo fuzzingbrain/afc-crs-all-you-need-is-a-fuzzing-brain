@@ -16,17 +16,17 @@ from .context import (
     get_agents_by_run,
     get_active_agents,
 )
-from .pov_agent import POVAgent, POVResult
-from .direction_planning_agent import DirectionPlanningAgent
+from .poc_agent import POCAgent, POCResult
+from .lg_planning_agent import LGPlanningAgent
 
-# New SP generators and verifier
-from .sp_generators import (
-    SPGeneratorBase,
-    FullSPGenerator,
-    LargeFullSPGenerator,
-    DeltaSPGenerator,
+# New VH generators and verifier
+from .vh_generators import (
+    VHGeneratorBase,
+    FullVHGenerator,
+    LargeFullVHGenerator,
+    DeltaVHGenerator,
 )
-from .sp_verifier import SPVerifier
+from .vh_verifier import VHVerifier
 
 __all__ = [
     # Base
@@ -40,16 +40,16 @@ __all__ = [
     "get_agents_by_worker",
     "get_agents_by_run",
     "get_active_agents",
-    # Direction
-    "DirectionPlanningAgent",
-    # SP Generators
-    "SPGeneratorBase",
-    "FullSPGenerator",
-    "LargeFullSPGenerator",
-    "DeltaSPGenerator",
-    # SP Verifier
-    "SPVerifier",
-    # POV
-    "POVAgent",
-    "POVResult",
+    # Logic group
+    "LGPlanningAgent",
+    # VH Generators
+    "VHGeneratorBase",
+    "FullVHGenerator",
+    "LargeFullVHGenerator",
+    "DeltaVHGenerator",
+    # VH Verifier
+    "VHVerifier",
+    # PoC
+    "POCAgent",
+    "POCResult",
 ]

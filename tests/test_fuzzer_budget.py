@@ -94,7 +94,7 @@ class TestSlotsSurviveTheirHolders:
             b.key,
             "ghost",
             json.dumps(
-                {"pid": 2**22, "host": budget_mod._HOST, "ts": time.time(), "kind": "sp"}
+                {"pid": 2**22, "host": budget_mod._HOST, "ts": time.time(), "kind": "vh"}
             ),
         )
         assert b.in_use() == 1
@@ -186,14 +186,14 @@ class TestTheManagerAsksBeforeItSpends:
         m.budget.clear()
         return m
 
-    def test_a_full_task_starts_no_sp_fuzzer(self, tmp_path):
+    def test_a_full_task_starts_no_vh_fuzzer(self, tmp_path):
         import asyncio
 
         m = self._manager(tmp_path, 1)
         try:
             assert m.budget.acquire("someone-else:global")
-            assert asyncio.run(m.start_sp_fuzzer("sp-1")) is False
-            assert m.sp_fuzzers == {}
+            assert asyncio.run(m.start_vh_fuzzer("vh-1")) is False
+            assert m.vh_fuzzers == {}
         finally:
             m.budget.clear()
 
@@ -213,29 +213,29 @@ class TestTheManagerAsksBeforeItSpends:
         a = self._manager(tmp_path / "a", 10)
         try:
             assert a._slot("global") == "w0:global"
-            assert a._slot("sp-7") == "w0:sp-7"
+            assert a._slot("vh-7") == "w0:vh-7"
         finally:
             a.budget.clear()
 
 
-class TestThePerWorkerSPCeiling:
-    """sp_max_count, which was configurable everywhere and read nowhere.
+class TestThePerWorkerVHCeiling:
+    """vh_max_count, which was configurable everywhere and read nowhere.
 
     It is the per-worker complement to the run-wide budget: one worker with
-    twelve POV agents would otherwise start twelve SP fuzzers and take the
+    twelve PoC agents would otherwise start twelve VH fuzzers and take the
     whole run's allowance for itself.
     """
 
     def test_the_config_reaches_the_fuzzer(self):
-        from fuzzingbrain.fuzzer.models import SPFuzzerConfig
+        from fuzzingbrain.fuzzer.models import VHFuzzerConfig
 
-        assert SPFuzzerConfig().max_count == 5
-        assert SPFuzzerConfig(max_count=2).max_count == 2
+        assert VHFuzzerConfig().max_count == 5
+        assert VHFuzzerConfig(max_count=2).max_count == 2
 
     def test_the_manager_refuses_past_it(self, tmp_path):
         import asyncio
 
-        from fuzzingbrain.fuzzer.models import FuzzerType, SPFuzzerConfig
+        from fuzzingbrain.fuzzer.models import FuzzerType, VHFuzzerConfig
         from fuzzingbrain.fuzzer.manager import FuzzerManager
 
         class _Monitor:
@@ -261,12 +261,12 @@ class TestThePerWorkerSPCeiling:
             docker_image="none",
             workspace_path=tmp_path / "ws",
             crash_monitor=_Monitor(),
-            sp_config=SPFuzzerConfig(max_count=2),
+            vh_config=VHFuzzerConfig(max_count=2),
         )
         m.budget.clear()
         try:
-            m.sp_fuzzers = {"a": _Running(), "b": _Running()}
-            assert asyncio.run(m.start_sp_fuzzer("c")) is False
+            m.vh_fuzzers = {"a": _Running(), "b": _Running()}
+            assert asyncio.run(m.start_vh_fuzzer("c")) is False
         finally:
             m.budget.clear()
 
@@ -275,6 +275,6 @@ class TestThePerWorkerSPCeiling:
 
         from fuzzingbrain.core import dispatcher
 
-        assert "sp_max_count" in inspect.getsource(
+        assert "vh_max_count" in inspect.getsource(
             dispatcher.WorkerDispatcher._dispatch_celery_task
         )

@@ -2,7 +2,7 @@
 """How many fuzzers are allowed to run at once, across the whole run.
 
 Nothing in the system used to count them. A worker starts one global fuzzer, and
-every POV agent that picks up a suspicious point starts another for that SP, so
+every PoC agent that picks up a vulnerability hypothesis starts another for that VH, so
 the total is workers x (1 + agents) -- eight workers with four agents each is
 forty libFuzzer containers on one machine. Past the core count they stop being
 parallelism and become contention: every fuzzer runs slower, the builds that

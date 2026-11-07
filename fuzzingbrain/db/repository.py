@@ -14,15 +14,15 @@ from loguru import logger
 
 from ..core.models import (
     Run,
-    POV,
+    POC,
     Patch,
     Worker,
     Fuzzer,
     Function,
     CallGraphNode,
-    SuspiciousPoint,
-    Direction,
-    DirectionStatus,
+    VulnerabilityHypothesis,
+    LogicGroup,
+    LogicGroupStatus,
 )
 
 
@@ -184,16 +184,16 @@ class RunRepository(BaseRepository[Run]):
             updates["error_msg"] = error_msg
         return self.update(run_id, updates)
 
-    def add_pov(self, run_id: str, pov_id: str) -> bool:
-        """Add POV ID to run"""
+    def add_poc(self, run_id: str, poc_id: str) -> bool:
+        """Add PoC ID to run"""
         try:
             result = self.collection.update_one(
                 {"_id": ObjectId(run_id)},
-                {"$push": {"pov_ids": pov_id}, "$set": {"updated_at": datetime.now()}},
+                {"$push": {"poc_ids": poc_id}, "$set": {"updated_at": datetime.now()}},
             )
             return result.modified_count > 0
         except Exception as e:
-            logger.error(f"Failed to add POV to run: {e}")
+            logger.error(f"Failed to add PoC to run: {e}")
             return False
 
     def add_patch(self, run_id: str, patch_id: str) -> bool:
@@ -212,39 +212,39 @@ class RunRepository(BaseRepository[Run]):
             return False
 
 
-class POVRepository(BaseRepository[POV]):
-    """Repository for POV model"""
+class POCRepository(BaseRepository[POC]):
+    """Repository for PoC model"""
 
     def __init__(self, db: Database):
-        super().__init__(db, "povs", POV)
+        super().__init__(db, "pocs", POC)
 
-    def find_by_run(self, run_id: str) -> List[POV]:
-        """Find all POVs for a run"""
+    def find_by_run(self, run_id: str) -> List[POC]:
+        """Find all PoCs for a run"""
         return self.find_all({"run_id": ObjectId(run_id)})
 
-    def find_active_by_run(self, run_id: str) -> List[POV]:
-        """Find active POVs for a run"""
+    def find_active_by_run(self, run_id: str) -> List[POC]:
+        """Find active PoCs for a run"""
         return self.find_all({"run_id": ObjectId(run_id), "is_active": True})
 
-    def find_successful_by_run(self, run_id: str) -> List[POV]:
-        """Find successful POVs for a run"""
+    def find_successful_by_run(self, run_id: str) -> List[POC]:
+        """Find successful PoCs for a run"""
         return self.find_all(
             {"run_id": ObjectId(run_id), "is_active": True, "is_successful": True}
         )
 
-    def find_by_harness(self, run_id: str, harness_name: str) -> List[POV]:
-        """Find POVs for a specific harness"""
+    def find_by_harness(self, run_id: str, harness_name: str) -> List[POC]:
+        """Find PoCs for a specific harness"""
         return self.find_all(
             {"run_id": ObjectId(run_id), "harness_name": harness_name}
         )
 
-    def deactivate(self, pov_id: str) -> bool:
-        """Mark POV as inactive"""
-        return self.update(pov_id, {"is_active": False})
+    def deactivate(self, poc_id: str) -> bool:
+        """Mark PoC as inactive"""
+        return self.update(poc_id, {"is_active": False})
 
-    def mark_successful(self, pov_id: str) -> bool:
-        """Mark POV as successful"""
-        return self.update(pov_id, {"is_successful": True})
+    def mark_successful(self, poc_id: str) -> bool:
+        """Mark PoC as successful"""
+        return self.update(poc_id, {"is_successful": True})
 
 
 class PatchRepository(BaseRepository[Patch]):
@@ -261,9 +261,9 @@ class PatchRepository(BaseRepository[Patch]):
         """Find active patches for a run"""
         return self.find_all({"run_id": ObjectId(run_id), "is_active": True})
 
-    def find_by_pov(self, pov_id: str) -> List[Patch]:
-        """Find patches for a specific POV"""
-        return self.find_all({"pov_id": pov_id})
+    def find_by_poc(self, poc_id: str) -> List[Patch]:
+        """Find patches for a specific PoC"""
+        return self.find_all({"poc_id": poc_id})
 
     def find_valid_by_run(self, run_id: str) -> List[Patch]:
         """Find valid patches (passes all checks)"""
@@ -273,7 +273,7 @@ class PatchRepository(BaseRepository[Patch]):
                 "is_active": True,
                 "apply_check": True,
                 "compilation_check": True,
-                "pov_check": True,
+                "poc_check": True,
                 "test_check": True,
             }
         )
@@ -283,7 +283,7 @@ class PatchRepository(BaseRepository[Patch]):
         patch_id: str,
         apply: bool = None,
         compile: bool = None,
-        pov: bool = None,
+        poc: bool = None,
         test: bool = None,
     ) -> bool:
         """Update patch verification checks"""
@@ -292,8 +292,8 @@ class PatchRepository(BaseRepository[Patch]):
             updates["apply_check"] = apply
         if compile is not None:
             updates["compilation_check"] = compile
-        if pov is not None:
-            updates["pov_check"] = pov
+        if poc is not None:
+            updates["poc_check"] = poc
         if test is not None:
             updates["test_check"] = test
         if updates:
@@ -301,11 +301,11 @@ class PatchRepository(BaseRepository[Patch]):
         return False
 
 
-class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
-    """Repository for SuspiciousPoint model"""
+class VulnerabilityHypothesisRepository(BaseRepository[VulnerabilityHypothesis]):
+    """Repository for VulnerabilityHypothesis model"""
 
     def __init__(self, db: Database):
-        super().__init__(db, "suspicious_points", SuspiciousPoint)
+        super().__init__(db, "vulnerability_hypotheses", VulnerabilityHypothesis)
         # Create indexes for faster queries
         self._ensure_indexes()
 
@@ -331,68 +331,68 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 ]
             )
         except Exception as e:
-            logger.debug(f"Index creation for suspicious_points: {e}")
+            logger.debug(f"Index creation for vulnerability_hypotheses: {e}")
 
-    def find_by_run(self, run_id: str) -> List[SuspiciousPoint]:
-        """Find all suspicious points for a run"""
+    def find_by_run(self, run_id: str) -> List[VulnerabilityHypothesis]:
+        """Find all vulnerability hypotheses for a run"""
         return self.find_all({"run_id": ObjectId(run_id)})
 
     def find_by_function(
         self, run_id: str, function_name: str
-    ) -> List[SuspiciousPoint]:
-        """Find suspicious points for a specific function"""
+    ) -> List[VulnerabilityHypothesis]:
+        """Find vulnerability hypotheses for a specific function"""
         return self.find_all(
             {"run_id": ObjectId(run_id), "function_name": function_name}
         )
 
-    def find_unchecked(self, run_id: str) -> List[SuspiciousPoint]:
-        """Find unchecked suspicious points for a run"""
+    def find_unchecked(self, run_id: str) -> List[VulnerabilityHypothesis]:
+        """Find unchecked vulnerability hypotheses for a run"""
         return self.find_all({"run_id": ObjectId(run_id), "is_checked_by_verifier": False})
 
-    def find_real(self, run_id: str) -> List[SuspiciousPoint]:
+    def find_real(self, run_id: str) -> List[VulnerabilityHypothesis]:
         """Find verified real vulnerabilities for a run"""
         return self.find_all(
             {"run_id": ObjectId(run_id), "is_checked_by_verifier": True, "is_crash_found": True}
         )
 
-    def find_important(self, run_id: str) -> List[SuspiciousPoint]:
-        """Find important (high priority) suspicious points"""
+    def find_important(self, run_id: str) -> List[VulnerabilityHypothesis]:
+        """Find important (high priority) vulnerability hypotheses"""
         return self.find_all({"run_id": ObjectId(run_id), "proceed": True})
 
     def find_by_score(
         self, run_id: str, min_score: float = 0.0
-    ) -> List[SuspiciousPoint]:
-        """Find suspicious points with score >= min_score, sorted by score descending"""
+    ) -> List[VulnerabilityHypothesis]:
+        """Find vulnerability hypotheses with score >= min_score, sorted by score descending"""
         try:
             cursor = self.collection.find(
                 {"run_id": ObjectId(run_id), "score": {"$gte": min_score}}
             ).sort("score", -1)
             return [self.model_class.from_dict(doc) for doc in cursor]
         except Exception as e:
-            logger.error(f"Failed to find suspicious points by score: {e}")
+            logger.error(f"Failed to find vulnerability hypotheses by score: {e}")
             return []
 
-    def mark_checked(self, sp_id: str, is_crash_found: bool, notes: str = None) -> bool:
-        """Mark a suspicious point as checked"""
+    def mark_checked(self, vh_id: str, is_crash_found: bool, notes: str = None) -> bool:
+        """Mark a vulnerability hypothesis as checked"""
         updates = {"is_checked_by_verifier": True, "is_crash_found": is_crash_found, "checked_at": datetime.now()}
         if notes:
             updates["verification_notes"] = notes
-        return self.update(sp_id, updates)
+        return self.update(vh_id, updates)
 
-    def mark_important(self, sp_id: str) -> bool:
-        """Mark a suspicious point as proceed=True (kept name for compat)."""
-        return self.update(sp_id, {"proceed": True})
+    def mark_important(self, vh_id: str) -> bool:
+        """Mark a vulnerability hypothesis as proceed=True (kept name for compat)."""
+        return self.update(vh_id, {"proceed": True})
 
-    def update_score(self, sp_id: str, score: float) -> bool:
-        """Update the score of a suspicious point"""
-        return self.update(sp_id, {"score": score})
+    def update_score(self, vh_id: str, score: float) -> bool:
+        """Update the score of a vulnerability hypothesis"""
+        return self.update(vh_id, {"score": score})
 
-    def add_source(self, sp_id: str, harness_name: str, sanitizer: str) -> bool:
+    def add_source(self, vh_id: str, harness_name: str, sanitizer: str) -> bool:
         """
-        Add a new source to an existing SP.
+        Add a new source to an existing VH.
 
         Args:
-            sp_id: Suspicious point ID
+            vh_id: Vulnerability hypothesis ID
             harness_name: Harness name to add
             sanitizer: Sanitizer to add
 
@@ -403,16 +403,16 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             new_source = {"harness_name": harness_name, "sanitizer": sanitizer}
             # Use $addToSet to avoid duplicates
             result = self.collection.update_one(
-                {"_id": ObjectId(sp_id)}, {"$addToSet": {"sources": new_source}}
+                {"_id": ObjectId(vh_id)}, {"$addToSet": {"sources": new_source}}
             )
             return result.modified_count > 0
         except Exception as e:
-            logger.error(f"Failed to add source to SP {sp_id}: {e}")
+            logger.error(f"Failed to add source to VH {vh_id}: {e}")
             return False
 
     def add_merged_duplicate(
         self,
-        sp_id: str,
+        vh_id: str,
         description: str,
         harness_name: str,
         sanitizer: str,
@@ -421,12 +421,12 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         """
         Record a merged duplicate for human review.
 
-        When an SP is identified as a duplicate and merged, this records
+        When a VH is identified as a duplicate and merged, this records
         the original description and metadata for later review.
 
         Args:
-            sp_id: Suspicious point ID that the duplicate was merged into
-            description: Description of the duplicate SP
+            vh_id: Vulnerability hypothesis ID that the duplicate was merged into
+            description: Description of the duplicate VH
             harness_name: Harness that discovered the duplicate
             sanitizer: Sanitizer used
             score: Score of the duplicate
@@ -443,20 +443,20 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 "merged_at": datetime.now().isoformat(),
             }
             result = self.collection.update_one(
-                {"_id": ObjectId(sp_id)},
+                {"_id": ObjectId(vh_id)},
                 {"$push": {"merged_duplicates": merged_record}},
             )
             return result.modified_count > 0
         except Exception as e:
-            logger.error(f"Failed to add merged duplicate to SP {sp_id}: {e}")
+            logger.error(f"Failed to add merged duplicate to VH {vh_id}: {e}")
             return False
 
-    def find_with_merged_duplicates(self, run_id: str) -> List[SuspiciousPoint]:
+    def find_with_merged_duplicates(self, run_id: str) -> List[VulnerabilityHypothesis]:
         """
-        Find all SPs that have merged duplicates (for human review).
+        Find all VHs that have merged duplicates (for human review).
 
         Returns:
-            List of SPs with at least one merged duplicate
+            List of VHs with at least one merged duplicate
         """
         return self.find_all(
             {
@@ -473,14 +473,14 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         sanitizer: str = None,
     ) -> int | dict:
         """
-        Get count of suspicious points by status.
+        Get count of vulnerability hypotheses by status.
 
         If status is provided, returns int count for that specific status.
         If status is None, returns dict with all status counts.
 
         Args:
             run_id: Run ID
-            status: Optional status to filter by (pending_verify, verifying, pending_pov, etc.)
+            status: Optional status to filter by (pending_verify, verifying, pending_poc, etc.)
             harness_name: Optional fuzzer/harness name filter
             sanitizer: Optional sanitizer filter
 
@@ -521,7 +521,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 "important": important,
             }
         except Exception as e:
-            logger.error(f"Failed to count suspicious points: {e}")
+            logger.error(f"Failed to count vulnerability hypotheses: {e}")
             if status is not None:
                 return 0
             return {
@@ -543,12 +543,12 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         processor_id: str,
         harness_name: str = None,
         sanitizer: str = None,
-    ) -> Optional[SuspiciousPoint]:
+    ) -> Optional[VulnerabilityHypothesis]:
         """
-        Atomically claim a suspicious point for verification.
+        Atomically claim a vulnerability hypothesis for verification.
 
         Uses find_one_and_update with atomic operation to prevent race conditions.
-        Returns the claimed SP, or None if no SP available.
+        Returns the claimed VH, or None if no VH available.
 
         Args:
             run_id: Run ID to filter
@@ -557,16 +557,16 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             sanitizer: Filter by sanitizer (if provided)
 
         Returns:
-            Claimed SuspiciousPoint, or None if none available
+            Claimed VulnerabilityHypothesis, or None if none available
         """
         try:
             from pymongo import ReturnDocument
-            from ..core.models import SPStatus
+            from ..core.models import VHStatus
 
             # Build filter query
             query = {
                 "run_id": ObjectId(run_id),
-                "status": SPStatus.PENDING_VERIFY.value,
+                "status": VHStatus.PENDING_VERIFY.value,
             }
             # Filter by sources array for worker isolation
             if harness_name and sanitizer:
@@ -579,7 +579,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 query,
                 {
                     "$set": {
-                        "status": SPStatus.VERIFYING.value,
+                        "status": VHStatus.VERIFYING.value,
                         "processor_id": processor_id,
                     }
                 },
@@ -590,59 +590,59 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
             if result:
                 logger.debug(
-                    f"Claimed SP {result['_id']} for verification by {processor_id}"
+                    f"Claimed VH {result['_id']} for verification by {processor_id}"
                 )
                 return self.model_class.from_dict(result)
             return None
 
         except Exception as e:
-            logger.error(f"Failed to claim SP for verification: {e}")
+            logger.error(f"Failed to claim VH for verification: {e}")
             return None
 
-    def claim_for_pov(
+    def claim_for_poc(
         self,
         run_id: str,
         processor_id: str,
         min_score: float = 0.5,
         harness_name: str = None,
         sanitizer: str = None,
-    ) -> Optional[SuspiciousPoint]:
+    ) -> Optional[VulnerabilityHypothesis]:
         """
-        Claim a suspicious point for POV generation (parallel mode).
+        Claim a vulnerability hypothesis for PoC generation (parallel mode).
 
-        Multiple workers can attempt the same SP simultaneously.
-        First to succeed wins and sets pov_success_by.
+        Multiple workers can attempt the same VH simultaneously.
+        First to succeed wins and sets poc_success_by.
 
         Args:
             run_id: Run ID to filter
             processor_id: ID of the agent claiming the task
-            min_score: Minimum score threshold for POV generation
+            min_score: Minimum score threshold for PoC generation
             harness_name: Filter by harness name (if provided)
             sanitizer: Filter by sanitizer (if provided)
 
         Returns:
-            Claimed SuspiciousPoint, or None if none available
+            Claimed VulnerabilityHypothesis, or None if none available
         """
         try:
             from pymongo import ReturnDocument
-            from ..core.models import SPStatus
+            from ..core.models import VHStatus
 
             # Build filter query
             query = {
                 "run_id": ObjectId(run_id),
                 "status": {
-                    "$in": [SPStatus.PENDING_POV.value, SPStatus.GENERATING_POV.value]
+                    "$in": [VHStatus.PENDING_POC.value, VHStatus.GENERATING_POC.value]
                 },
                 "score": {"$gte": min_score},
-                "pov_success_by": None,  # Not already succeeded
+                "poc_success_by": None,  # Not already succeeded
             }
             # Filter by sources array for worker isolation
             if harness_name and sanitizer:
                 query["sources"] = {
                     "$elemMatch": {"harness_name": harness_name, "sanitizer": sanitizer}
                 }
-                # Exclude SPs that this worker has already attempted
-                query["pov_attempted_by"] = {
+                # Exclude VHs that this worker has already attempted
+                query["poc_attempted_by"] = {
                     "$not": {
                         "$elemMatch": {
                             "harness_name": harness_name,
@@ -657,9 +657,9 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 query,
                 {
                     "$set": {
-                        "status": SPStatus.GENERATING_POV.value,
+                        "status": VHStatus.GENERATING_POC.value,
                     },
-                    "$addToSet": {"pov_attempted_by": attempt_record},
+                    "$addToSet": {"poc_attempted_by": attempt_record},
                 },
                 # Priority: priority DESC, score DESC
                 sort=[("priority", -1), ("score", -1)],
@@ -668,48 +668,48 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
             if result:
                 logger.debug(
-                    f"Claimed SP {result['_id']} for POV generation by {harness_name}/{sanitizer}"
+                    f"Claimed VH {result['_id']} for PoC generation by {harness_name}/{sanitizer}"
                 )
                 return self.model_class.from_dict(result)
             return None
 
         except Exception as e:
-            logger.error(f"Failed to claim SP for POV generation: {e}")
+            logger.error(f"Failed to claim VH for PoC generation: {e}")
             return None
 
     def complete_verify(
         self,
-        sp_id: str,
+        vh_id: str,
         is_crash_found: bool,
         score: float,
         notes: str = None,
         proceed: bool = True,
         priority: float = 0.0,
         evidence: str = None,
-        proceed_to_pov: bool = False,
+        proceed_to_poc: bool = False,
     ) -> bool:
         """
-        Complete verification of a suspicious point.
+        Complete verification of a vulnerability hypothesis.
 
         Args:
-            sp_id: Suspicious point ID
+            vh_id: Vulnerability hypothesis ID
             is_crash_found: Whether it's a real vulnerability
             score: Updated score
             notes: Verification notes
-            proceed: recall-first verdict; priority: PoV queue order
-            proceed_to_pov: Whether to proceed to POV generation stage
+            proceed: recall-first verdict; priority: PoC queue order
+            proceed_to_poc: Whether to proceed to PoC generation stage
 
         Returns:
             True if successful
         """
         try:
-            from ..core.models import SPStatus
+            from ..core.models import VHStatus
 
             # Determine next status
-            if proceed_to_pov:
-                next_status = SPStatus.PENDING_POV.value
+            if proceed_to_poc:
+                next_status = VHStatus.PENDING_POC.value
             else:
-                next_status = SPStatus.VERIFIED.value
+                next_status = VHStatus.VERIFIED.value
 
             updates = {
                 "status": next_status,
@@ -725,30 +725,30 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             if notes:
                 updates["verification_notes"] = notes
 
-            return self.update(sp_id, updates)
+            return self.update(vh_id, updates)
 
         except Exception as e:
             logger.error(f"Failed to complete verification: {e}")
             return False
 
-    def complete_pov(
+    def complete_poc(
         self,
-        sp_id: str,
-        pov_id: str = None,
+        vh_id: str,
+        poc_id: str = None,
         success: bool = True,
         harness_name: str = None,
         sanitizer: str = None,
     ) -> bool:
         """
-        Complete POV generation for a suspicious point (parallel mode).
+        Complete PoC generation for a vulnerability hypothesis (parallel mode).
 
-        On success: marks SP as pov_generated, records pov_success_by
-        On failure: worker already in pov_attempted_by, check if others still trying
+        On success: marks VH as poc_generated, records poc_success_by
+        On failure: worker already in poc_attempted_by, check if others still trying
 
         Args:
-            sp_id: Suspicious point ID
-            pov_id: Generated POV ID (if successful)
-            success: Whether POV generation succeeded
+            vh_id: Vulnerability hypothesis ID
+            poc_id: Generated PoC ID (if successful)
+            success: Whether PoC generation succeeded
             harness_name: Worker's harness name
             sanitizer: Worker's sanitizer
 
@@ -756,95 +756,95 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             True if successful
         """
         try:
-            from ..core.models import SPStatus
+            from ..core.models import VHStatus
 
             if success:
                 # Success - record who succeeded
                 success_record = {"harness_name": harness_name, "sanitizer": sanitizer}
                 result = self.collection.update_one(
                     {
-                        "_id": ObjectId(sp_id),
-                        "pov_success_by": None,  # Only if not already succeeded
+                        "_id": ObjectId(vh_id),
+                        "poc_success_by": None,  # Only if not already succeeded
                     },
                     {
                         "$set": {
-                            "status": SPStatus.POV_GENERATED.value,
+                            "status": VHStatus.POC_GENERATED.value,
                             "processor_id": None,
-                            "pov_id": pov_id,
-                            "pov_success_by": success_record,
-                            "pov_generated_at": datetime.now(),
+                            "poc_id": poc_id,
+                            "poc_success_by": success_record,
+                            "poc_generated_at": datetime.now(),
                             "is_crash_found": True,
                         },
                     },
                 )
                 if result.modified_count > 0:
                     logger.info(
-                        f"SP {sp_id}: POV succeeded by {harness_name}/{sanitizer}"
+                        f"VH {vh_id}: PoC succeeded by {harness_name}/{sanitizer}"
                     )
                     return True
                 else:
                     # Someone else already succeeded
                     logger.info(
-                        f"SP {sp_id}: POV succeeded by {harness_name}/{sanitizer} but another worker already won"
+                        f"VH {vh_id}: PoC succeeded by {harness_name}/{sanitizer} but another worker already won"
                     )
                     return False
             else:
                 # Failed - check if all contributors have tried
-                # For now, just log the failure (worker already in pov_attempted_by from claim)
-                logger.info(f"SP {sp_id}: POV failed by {harness_name}/{sanitizer}")
+                # For now, just log the failure (worker already in poc_attempted_by from claim)
+                logger.info(f"VH {vh_id}: PoC failed by {harness_name}/{sanitizer}")
 
                 # Check if we need to mark as failed (all contributors tried)
-                sp = self.find_by_id(sp_id)
-                if sp:
+                vh = self.find_by_id(vh_id)
+                if vh:
                     sources_set = {
-                        (s["harness_name"], s["sanitizer"]) for s in sp.sources
+                        (s["harness_name"], s["sanitizer"]) for s in vh.sources
                     }
                     attempted_set = {
-                        (a["harness_name"], a["sanitizer"]) for a in sp.pov_attempted_by
+                        (a["harness_name"], a["sanitizer"]) for a in vh.poc_attempted_by
                     }
                     if sources_set == attempted_set:
                         # All contributors tried and failed. Guard on
-                        # pov_success_by: None so a worker that raced to a
-                        # verified POV in the meantime is never reverted to
+                        # poc_success_by: None so a worker that raced to a
+                        # verified PoC in the meantime is never reverted to
                         # FAILED (the success path above is likewise guarded).
                         result = self.collection.update_one(
                             {
-                                "_id": ObjectId(sp_id),
-                                "pov_success_by": None,
+                                "_id": ObjectId(vh_id),
+                                "poc_success_by": None,
                             },
                             {
                                 "$set": {
-                                    "status": SPStatus.FAILED.value,
+                                    "status": VHStatus.FAILED.value,
                                     "updated_at": datetime.now(),
                                 }
                             },
                         )
                         if result.modified_count > 0:
                             logger.info(
-                                f"SP {sp_id}: All contributors failed, marking as FAILED"
+                                f"VH {vh_id}: All contributors failed, marking as FAILED"
                             )
                 return True
 
         except Exception as e:
-            logger.error(f"Failed to complete POV generation: {e}")
+            logger.error(f"Failed to complete PoC generation: {e}")
             return False
 
     def release_claim(
         self,
-        sp_id: str,
+        vh_id: str,
         revert_status: str = None,
         harness_name: str = None,
         sanitizer: str = None,
     ) -> bool:
         """
-        Release a claimed SP (e.g., on agent failure).
+        Release a claimed VH (e.g., on agent failure).
 
         Args:
-            sp_id: Suspicious point ID
+            vh_id: Vulnerability hypothesis ID
             revert_status: Status to revert to (if None, keeps current status)
-            harness_name: If provided with sanitizer, also remove from pov_attempted_by
+            harness_name: If provided with sanitizer, also remove from poc_attempted_by
                          so the same worker can retry on crash recovery
-            sanitizer: If provided with harness_name, also remove from pov_attempted_by
+            sanitizer: If provided with harness_name, also remove from poc_attempted_by
 
         Returns:
             True if successful
@@ -853,16 +853,16 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             update_ops = {"$set": {"processor_id": None, "updated_at": datetime.now()}}
             if revert_status:
                 update_ops["$set"]["status"] = revert_status
-            # Clean up pov_attempted_by so same worker can retry after crash
+            # Clean up poc_attempted_by so same worker can retry after crash
             if harness_name and sanitizer:
                 update_ops["$pull"] = {
-                    "pov_attempted_by": {
+                    "poc_attempted_by": {
                         "harness_name": harness_name,
                         "sanitizer": sanitizer,
                     }
                 }
 
-            _id = self._convert_id(sp_id)
+            _id = self._convert_id(vh_id)
             result = self.collection.update_one({"_id": _id}, update_ops)
             return result.modified_count > 0
         except Exception as e:
@@ -870,21 +870,21 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             return False
 
     def count_by_pipeline_status(self, run_id: str) -> dict:
-        """Get count of suspicious points by pipeline status"""
+        """Get count of vulnerability hypotheses by pipeline status"""
         try:
-            from ..core.models import SPStatus
+            from ..core.models import VHStatus
 
             counts = {
                 "pending_verify": 0,
                 "verifying": 0,
                 "verified": 0,
-                "pending_pov": 0,
-                "generating_pov": 0,
-                "pov_generated": 0,
+                "pending_poc": 0,
+                "generating_poc": 0,
+                "poc_generated": 0,
                 "failed": 0,
             }
 
-            for status in SPStatus:
+            for status in VHStatus:
                 counts[status.value] = self.collection.count_documents(
                     {
                         "run_id": ObjectId(run_id),
@@ -906,12 +906,12 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         sanitizer: str = None,
     ) -> bool:
         """
-        Check if all SPs have finished processing for this worker.
+        Check if all VHs have finished processing for this worker.
 
         For verify stage: checks pending_verify and verifying
-        For POV stage (parallel mode): checks if there are SPs that:
+        For PoC stage (parallel mode): checks if there are VHs that:
             - This worker is a contributor (in sources)
-            - Not yet succeeded (pov_success_by is None)
+            - Not yet succeeded (poc_success_by is None)
             - This worker hasn't attempted yet
 
         Args:
@@ -923,14 +923,14 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             True if no more work for this worker
         """
         try:
-            from ..core.models import SPStatus
+            from ..core.models import VHStatus
 
             if harness_name and sanitizer:
-                # Check verify stage SPs
+                # Check verify stage VHs
                 verify_query = {
                     "run_id": ObjectId(run_id),
                     "status": {
-                        "$in": [SPStatus.PENDING_VERIFY.value, SPStatus.VERIFYING.value]
+                        "$in": [VHStatus.PENDING_VERIFY.value, VHStatus.VERIFYING.value]
                     },
                     "sources": {
                         "$elemMatch": {
@@ -941,14 +941,14 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 }
                 verify_pending = self.collection.count_documents(verify_query)
 
-                # Check POV stage SPs (parallel mode)
-                # SP is available if: contributor + not succeeded + not attempted by me
-                pov_query = {
+                # Check PoC stage VHs (parallel mode)
+                # VH is available if: contributor + not succeeded + not attempted by me
+                poc_query = {
                     "run_id": ObjectId(run_id),
                     "status": {
                         "$in": [
-                            SPStatus.PENDING_POV.value,
-                            SPStatus.GENERATING_POV.value,
+                            VHStatus.PENDING_POC.value,
+                            VHStatus.GENERATING_POC.value,
                         ]
                     },
                     "sources": {
@@ -957,8 +957,8 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                             "sanitizer": sanitizer,
                         }
                     },
-                    "pov_success_by": None,  # Not already succeeded
-                    "pov_attempted_by": {
+                    "poc_success_by": None,  # Not already succeeded
+                    "poc_attempted_by": {
                         "$not": {
                             "$elemMatch": {
                                 "harness_name": harness_name,
@@ -967,19 +967,19 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                         }
                     },
                 }
-                pov_pending = self.collection.count_documents(pov_query)
+                poc_pending = self.collection.count_documents(poc_query)
 
-                return verify_pending == 0 and pov_pending == 0
+                return verify_pending == 0 and poc_pending == 0
             else:
                 # No worker filter - check all pending/in-progress
                 query = {
                     "run_id": ObjectId(run_id),
                     "status": {
                         "$in": [
-                            SPStatus.PENDING_VERIFY.value,
-                            SPStatus.VERIFYING.value,
-                            SPStatus.PENDING_POV.value,
-                            SPStatus.GENERATING_POV.value,
+                            VHStatus.PENDING_VERIFY.value,
+                            VHStatus.VERIFYING.value,
+                            VHStatus.PENDING_POC.value,
+                            VHStatus.GENERATING_POC.value,
                         ]
                     },
                 }
@@ -991,11 +991,11 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             return False
 
 
-class DirectionRepository(BaseRepository[Direction]):
-    """Repository for Direction model (Full-scan analysis directions)"""
+class LogicGroupRepository(BaseRepository[LogicGroup]):
+    """Repository for Logic group model (Full-scan analysis logic groups)"""
 
     def __init__(self, db: Database):
-        super().__init__(db, "directions", Direction)
+        super().__init__(db, "logic_groups", LogicGroup)
         # Create indexes for faster queries
         self._ensure_indexes()
 
@@ -1009,25 +1009,25 @@ class DirectionRepository(BaseRepository[Direction]):
             self.collection.create_index([("run_id", 1), ("status", 1)])
             self.collection.create_index([("run_id", 1), ("fuzzer", 1), ("status", 1)])
         except Exception as e:
-            logger.debug(f"Index creation for directions: {e}")
+            logger.debug(f"Index creation for logic groups: {e}")
 
-    def find_by_run(self, run_id: str) -> List[Direction]:
-        """Find all directions for a run"""
+    def find_by_run(self, run_id: str) -> List[LogicGroup]:
+        """Find all logic groups for a run"""
         return self.find_all({"run_id": ObjectId(run_id)})
 
-    def find_by_fuzzer(self, run_id: str, fuzzer: str) -> List[Direction]:
-        """Find all directions for a specific fuzzer"""
+    def find_by_fuzzer(self, run_id: str, fuzzer: str) -> List[LogicGroup]:
+        """Find all logic groups for a specific fuzzer"""
         return self.find_all({"run_id": ObjectId(run_id), "fuzzer": fuzzer})
 
-    def find_pending(self, run_id: str, fuzzer: str = None) -> List[Direction]:
-        """Find pending directions"""
-        query = {"run_id": ObjectId(run_id), "status": DirectionStatus.PENDING.value}
+    def find_pending(self, run_id: str, fuzzer: str = None) -> List[LogicGroup]:
+        """Find pending logic groups"""
+        query = {"run_id": ObjectId(run_id), "status": LogicGroupStatus.PENDING.value}
         if fuzzer:
             query["fuzzer"] = fuzzer
         return self.find_all(query)
 
-    def find_by_priority(self, run_id: str, fuzzer: str = None) -> List[Direction]:
-        """Find directions sorted by priority (high risk first)"""
+    def find_by_priority(self, run_id: str, fuzzer: str = None) -> List[LogicGroup]:
+        """Find logic groups sorted by priority (high risk first)"""
         try:
             query = {"run_id": ObjectId(run_id)}
             if fuzzer:
@@ -1042,20 +1042,20 @@ class DirectionRepository(BaseRepository[Direction]):
                     ("created_at", 1),
                 ]
             )
-            directions = [self.model_class.from_dict(doc) for doc in cursor]
+            logic_groups = [self.model_class.from_dict(doc) for doc in cursor]
             # Custom sort by priority score (descending)
             return sorted(
-                directions, key=lambda d: d.get_priority_score(), reverse=True
+                logic_groups, key=lambda d: d.get_priority_score(), reverse=True
             )
         except Exception as e:
-            logger.error(f"Failed to find directions by priority: {e}")
+            logger.error(f"Failed to find logic groups by priority: {e}")
             return []
 
     def claim(
         self, run_id: str, fuzzer: str, processor_id: str
-    ) -> Optional[Direction]:
+    ) -> Optional[LogicGroup]:
         """
-        Atomically claim a direction for analysis.
+        Atomically claim a logic group for analysis.
 
         Args:
             run_id: Run ID
@@ -1063,12 +1063,12 @@ class DirectionRepository(BaseRepository[Direction]):
             processor_id: ID of the agent claiming
 
         Returns:
-            Claimed Direction, or None if none available
+            Claimed Logic group, or None if none available
         """
         try:
             from pymongo import ReturnDocument
 
-            # Find pending directions, prioritize high risk
+            # Find pending logic groups, prioritize high risk
             # Custom sort needed because risk_level is string
             pending = self.find_pending(run_id, fuzzer)
             if not pending:
@@ -1081,12 +1081,12 @@ class DirectionRepository(BaseRepository[Direction]):
             # Atomic claim
             result = self.collection.find_one_and_update(
                 {
-                    "_id": ObjectId(target.direction_id),
-                    "status": DirectionStatus.PENDING.value,
+                    "_id": ObjectId(target.lg_id),
+                    "status": LogicGroupStatus.PENDING.value,
                 },
                 {
                     "$set": {
-                        "status": DirectionStatus.IN_PROGRESS.value,
+                        "status": LogicGroupStatus.IN_PROGRESS.value,
                         "processor_id": processor_id,
                         "started_at": datetime.now(),
                     }
@@ -1095,66 +1095,66 @@ class DirectionRepository(BaseRepository[Direction]):
             )
 
             if result:
-                logger.debug(f"Claimed direction {result['_id']} by {processor_id}")
+                logger.debug(f"Claimed logic group {result['_id']} by {processor_id}")
                 return self.model_class.from_dict(result)
             return None
 
         except Exception as e:
-            logger.error(f"Failed to claim direction: {e}")
+            logger.error(f"Failed to claim logic group: {e}")
             return None
 
     def complete(
         self,
-        direction_id: str,
-        sp_count: int = 0,
+        lg_id: str,
+        vh_count: int = 0,
         functions_analyzed: int = 0,
     ) -> bool:
         """
-        Mark direction as completed.
+        Mark logic group as completed.
 
         Args:
-            direction_id: Direction ID
-            sp_count: Number of SPs found
+            lg_id: Logic group ID
+            vh_count: Number of VHs found
             functions_analyzed: Number of functions analyzed
 
         Returns:
             True if successful
         """
         return self.update(
-            direction_id,
+            lg_id,
             {
-                "status": DirectionStatus.COMPLETED.value,
+                "status": LogicGroupStatus.COMPLETED.value,
                 "processor_id": None,
-                "sp_count": sp_count,
+                "vh_count": vh_count,
                 "functions_analyzed": functions_analyzed,
                 "completed_at": datetime.now(),
             },
         )
 
-    def skip(self, direction_id: str, reason: str = "") -> bool:
-        """Mark direction as skipped"""
+    def skip(self, lg_id: str, reason: str = "") -> bool:
+        """Mark logic group as skipped"""
         updates = {
-            "status": DirectionStatus.SKIPPED.value,
+            "status": LogicGroupStatus.SKIPPED.value,
             "processor_id": None,
             "completed_at": datetime.now(),
         }
         if reason:
             updates["risk_reason"] = f"Skipped: {reason}"
-        return self.update(direction_id, updates)
+        return self.update(lg_id, updates)
 
-    def release_claim(self, direction_id: str) -> bool:
-        """Release a claimed direction (e.g., on agent failure)"""
+    def release_claim(self, lg_id: str) -> bool:
+        """Release a claimed logic group (e.g., on agent failure)"""
         return self.update(
-            direction_id,
+            lg_id,
             {
-                "status": DirectionStatus.PENDING.value,
+                "status": LogicGroupStatus.PENDING.value,
                 "processor_id": None,
                 "started_at": None,
             },
         )
 
     def count_by_status(self, run_id: str, fuzzer: str = None) -> dict:
-        """Get count of directions by status"""
+        """Get count of logic groups by status"""
         try:
             query = {"run_id": ObjectId(run_id)}
             if fuzzer:
@@ -1167,7 +1167,7 @@ class DirectionRepository(BaseRepository[Direction]):
                 "skipped": 0,
             }
 
-            for status in DirectionStatus:
+            for status in LogicGroupStatus:
                 q = {**query, "status": status.value}
                 counts[status.value] = self.collection.count_documents(q)
 
@@ -1175,29 +1175,29 @@ class DirectionRepository(BaseRepository[Direction]):
             return counts
 
         except Exception as e:
-            logger.error(f"Failed to count directions by status: {e}")
+            logger.error(f"Failed to count logic groups by status: {e}")
             return {"total": 0}
 
     def is_all_complete(self, run_id: str, fuzzer: str = None) -> bool:
-        """Check if all directions are completed or skipped"""
+        """Check if all logic groups are completed or skipped"""
         try:
             query = {"run_id": ObjectId(run_id)}
             if fuzzer:
                 query["fuzzer"] = fuzzer
             query["status"] = {
                 "$in": [
-                    DirectionStatus.PENDING.value,
-                    DirectionStatus.IN_PROGRESS.value,
+                    LogicGroupStatus.PENDING.value,
+                    LogicGroupStatus.IN_PROGRESS.value,
                 ]
             }
             pending = self.collection.count_documents(query)
             return pending == 0
         except Exception as e:
-            logger.error(f"Failed to check direction completion: {e}")
+            logger.error(f"Failed to check logic group completion: {e}")
             return False
 
     def get_stats(self, run_id: str, fuzzer: str = None) -> dict:
-        """Get statistics for directions"""
+        """Get statistics for logic groups"""
         try:
             query = {"run_id": ObjectId(run_id)}
             if fuzzer:
@@ -1208,8 +1208,8 @@ class DirectionRepository(BaseRepository[Direction]):
                 {
                     "$group": {
                         "_id": None,
-                        "total_directions": {"$sum": 1},
-                        "total_sp_count": {"$sum": "$sp_count"},
+                        "total_logic_groups": {"$sum": 1},
+                        "total_vh_count": {"$sum": "$vh_count"},
                         "total_functions_analyzed": {"$sum": "$functions_analyzed"},
                         "completed": {
                             "$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}
@@ -1235,8 +1235,8 @@ class DirectionRepository(BaseRepository[Direction]):
                 del stats["_id"]
                 return stats
             return {
-                "total_directions": 0,
-                "total_sp_count": 0,
+                "total_logic_groups": 0,
+                "total_vh_count": 0,
                 "total_functions_analyzed": 0,
                 "completed": 0,
                 "high_risk": 0,
@@ -1245,16 +1245,16 @@ class DirectionRepository(BaseRepository[Direction]):
             }
 
         except Exception as e:
-            logger.error(f"Failed to get direction stats: {e}")
+            logger.error(f"Failed to get logic group stats: {e}")
             return {}
 
     def delete_by_run(self, run_id: str) -> int:
-        """Delete all directions for a run"""
+        """Delete all logic groups for a run"""
         try:
             result = self.collection.delete_many({"run_id": ObjectId(run_id)})
             return result.deleted_count
         except Exception as e:
-            logger.error(f"Failed to delete directions for run: {e}")
+            logger.error(f"Failed to delete logic groups for run: {e}")
             return 0
 
 
@@ -1367,10 +1367,10 @@ class WorkerRepository(BaseRepository[Worker]):
             updates["error_msg"] = error_msg
         return self.update(worker_id, updates)
 
-    def update_results(self, worker_id: str, povs: int = 0, patches: int = 0) -> bool:
+    def update_results(self, worker_id: str, pocs: int = 0, patches: int = 0) -> bool:
         """Update worker results"""
         return self.update(
-            worker_id, {"pov_generated": povs, "patch_generated": patches}
+            worker_id, {"poc_generated": pocs, "patch_generated": patches}
         )
 
     def update_strategy(self, worker_id: str, strategy: str) -> bool:
@@ -1441,9 +1441,9 @@ class FunctionRepository(BaseRepository[Function]):
             self.collection.create_index("name")
             self.collection.create_index([("run_id", 1), ("name", 1)])
             self.collection.create_index([("run_id", 1), ("file_path", 1)])
-            # SP Find v2: Index for analysis tracking
+            # VH Find v2: Index for analysis tracking
             self.collection.create_index(
-                [("run_id", 1), ("analyzed_by_directions", 1)]
+                [("run_id", 1), ("analyzed_by_logic_groups", 1)]
             )
             self.collection.create_index([("run_id", 1), ("reached_by_fuzzers", 1)])
         except Exception as e:
@@ -1501,18 +1501,18 @@ class FunctionRepository(BaseRepository[Function]):
             return 0
 
     # =========================================================================
-    # SP Find v2: Analysis Tracking Methods
+    # VH Find v2: Analysis Tracking Methods
     # =========================================================================
 
-    def mark_analyzed_by_direction(self, function_id: str, direction_id: str) -> bool:
+    def mark_analyzed_by_logic_group(self, function_id: str, lg_id: str) -> bool:
         """
-        Mark a function as analyzed by a specific direction.
+        Mark a function as analyzed by a specific logic group.
 
         Uses $addToSet to prevent duplicates.
 
         Args:
             function_id: Function ID
-            direction_id: Direction ID that analyzed this function
+            lg_id: Logic group ID that analyzed this function
 
         Returns:
             True if successful
@@ -1520,20 +1520,20 @@ class FunctionRepository(BaseRepository[Function]):
         try:
             result = self.collection.update_one(
                 {"_id": function_id},
-                {"$addToSet": {"analyzed_by_directions": ObjectId(direction_id)}},
+                {"$addToSet": {"analyzed_by_logic_groups": ObjectId(lg_id)}},
             )
             return result.modified_count > 0 or result.matched_count > 0
         except Exception as e:
             logger.error(f"Failed to mark function as analyzed: {e}")
             return False
 
-    def mark_many_analyzed(self, function_ids: List[str], direction_id: str) -> int:
+    def mark_many_analyzed(self, function_ids: List[str], lg_id: str) -> int:
         """
-        Mark multiple functions as analyzed by a direction.
+        Mark multiple functions as analyzed by a logic group.
 
         Args:
             function_ids: List of function IDs
-            direction_id: Direction ID
+            lg_id: Logic group ID
 
         Returns:
             Number of functions updated
@@ -1543,7 +1543,7 @@ class FunctionRepository(BaseRepository[Function]):
         try:
             result = self.collection.update_many(
                 {"_id": {"$in": function_ids}},
-                {"$addToSet": {"analyzed_by_directions": ObjectId(direction_id)}},
+                {"$addToSet": {"analyzed_by_logic_groups": ObjectId(lg_id)}},
             )
             return result.modified_count
         except Exception as e:
@@ -1554,23 +1554,23 @@ class FunctionRepository(BaseRepository[Function]):
         self,
         run_id: str,
         fuzzer_name: str,
-        direction_id: str,
+        lg_id: str,
         function_names: List[str] = None,
         prioritize_unanalyzed: bool = True,
         limit: int = 0,
     ) -> List[Function]:
         """
-        Get functions for SP Find analysis with priority ordering.
+        Get functions for VH Find analysis with priority ordering.
 
         Priority order (when prioritize_unanalyzed=True):
-        1. Functions not analyzed by ANY direction
-        2. Functions not analyzed by THIS direction
-        3. Functions already analyzed by this direction (if exhausted)
+        1. Functions not analyzed by ANY logic group
+        2. Functions not analyzed by THIS logic group
+        3. Functions already analyzed by this logic group (if exhausted)
 
         Args:
             run_id: Run ID
             fuzzer_name: Fuzzer name (to filter reachable functions)
-            direction_id: Current direction ID
+            lg_id: Current logic group ID
             function_names: Optional list of function names (small pool)
                            If None, uses all reachable functions (big pool)
             prioritize_unanalyzed: Whether to prioritize unanalyzed functions
@@ -1597,19 +1597,19 @@ class FunctionRepository(BaseRepository[Function]):
                     cursor = cursor.limit(limit)
                 return [self.model_class.from_dict(doc) for doc in cursor]
 
-            # Priority 1: Not analyzed by ANY direction
+            # Priority 1: Not analyzed by ANY logic group
             query_p1 = {
                 **base_query,
                 "$or": [
-                    {"analyzed_by_directions": {"$exists": False}},
-                    {"analyzed_by_directions": {"$size": 0}},
+                    {"analyzed_by_logic_groups": {"$exists": False}},
+                    {"analyzed_by_logic_groups": {"$size": 0}},
                 ],
             }
 
-            # Priority 2: Not analyzed by THIS direction
+            # Priority 2: Not analyzed by THIS logic group
             query_p2 = {
                 **base_query,
-                "analyzed_by_directions": {"$nin": [ObjectId(direction_id)]},
+                "analyzed_by_logic_groups": {"$nin": [ObjectId(lg_id)]},
             }
 
             # Priority 3: All functions (including already analyzed)
@@ -1640,7 +1640,7 @@ class FunctionRepository(BaseRepository[Function]):
         self,
         run_id: str,
         fuzzer_name: str = None,
-        direction_id: str = None,
+        lg_id: str = None,
     ) -> dict:
         """
         Get count of unanalyzed functions.
@@ -1648,13 +1648,13 @@ class FunctionRepository(BaseRepository[Function]):
         Args:
             run_id: Run ID
             fuzzer_name: Optional fuzzer name filter
-            direction_id: Optional direction ID to check
+            lg_id: Optional logic group ID to check
 
         Returns:
             Dict with counts:
             - total: Total functions
-            - unanalyzed_by_any: Not analyzed by any direction
-            - unanalyzed_by_direction: Not analyzed by specific direction (if provided)
+            - unanalyzed_by_any: Not analyzed by any logic group
+            - unanalyzed_by_logic_group: Not analyzed by specific logic group (if provided)
         """
         try:
             base_query = {"run_id": ObjectId(run_id)}
@@ -1663,12 +1663,12 @@ class FunctionRepository(BaseRepository[Function]):
 
             total = self.collection.count_documents(base_query)
 
-            # Count not analyzed by any direction
+            # Count not analyzed by any logic group
             query_unanalyzed = {
                 **base_query,
                 "$or": [
-                    {"analyzed_by_directions": {"$exists": False}},
-                    {"analyzed_by_directions": {"$size": 0}},
+                    {"analyzed_by_logic_groups": {"$exists": False}},
+                    {"analyzed_by_logic_groups": {"$size": 0}},
                 ],
             }
             unanalyzed_by_any = self.collection.count_documents(query_unanalyzed)
@@ -1679,15 +1679,15 @@ class FunctionRepository(BaseRepository[Function]):
                 "analyzed_by_any": total - unanalyzed_by_any,
             }
 
-            # If direction specified, count for that direction
-            if direction_id:
+            # If logic group specified, count for that logic group
+            if lg_id:
                 query_not_by_dir = {
                     **base_query,
-                    "analyzed_by_directions": {"$nin": [ObjectId(direction_id)]},
+                    "analyzed_by_logic_groups": {"$nin": [ObjectId(lg_id)]},
                 }
                 unanalyzed_by_dir = self.collection.count_documents(query_not_by_dir)
-                result["unanalyzed_by_direction"] = unanalyzed_by_dir
-                result["analyzed_by_direction"] = total - unanalyzed_by_dir
+                result["unanalyzed_by_logic_group"] = unanalyzed_by_dir
+                result["analyzed_by_logic_group"] = total - unanalyzed_by_dir
 
             return result
 
@@ -1706,9 +1706,9 @@ class FunctionRepository(BaseRepository[Function]):
         Returns:
             Dict with coverage stats:
             - total_functions: Total function count
-            - analyzed_functions: Functions analyzed by at least one direction
+            - analyzed_functions: Functions analyzed by at least one logic group
             - coverage_percent: Percentage of functions analyzed
-            - by_direction: Dict mapping direction_id to count
+            - by_logic_group: Dict mapping lg_id to count
         """
         try:
             base_query = {"run_id": ObjectId(run_id)}
@@ -1721,25 +1721,25 @@ class FunctionRepository(BaseRepository[Function]):
                     "total_functions": 0,
                     "analyzed_functions": 0,
                     "coverage_percent": 0.0,
-                    "by_direction": {},
+                    "by_logic_group": {},
                 }
 
-            # Count analyzed (has at least one direction)
+            # Count analyzed (has at least one logic group)
             query_analyzed = {
                 **base_query,
-                "analyzed_by_directions": {"$exists": True, "$ne": []},
+                "analyzed_by_logic_groups": {"$exists": True, "$ne": []},
             }
             analyzed = self.collection.count_documents(query_analyzed)
 
-            # Aggregate by direction
+            # Aggregate by logic group
             pipeline = [
                 {"$match": base_query},
-                {"$unwind": "$analyzed_by_directions"},
-                {"$group": {"_id": "$analyzed_by_directions", "count": {"$sum": 1}}},
+                {"$unwind": "$analyzed_by_logic_groups"},
+                {"$group": {"_id": "$analyzed_by_logic_groups", "count": {"$sum": 1}}},
             ]
-            by_direction = {}
+            by_logic_group = {}
             for doc in self.collection.aggregate(pipeline):
-                by_direction[doc["_id"]] = doc["count"]
+                by_logic_group[doc["_id"]] = doc["count"]
 
             return {
                 "total_functions": total,
@@ -1747,7 +1747,7 @@ class FunctionRepository(BaseRepository[Function]):
                 "coverage_percent": round(analyzed / total * 100, 2)
                 if total > 0
                 else 0.0,
-                "by_direction": by_direction,
+                "by_logic_group": by_logic_group,
             }
 
         except Exception as e:
@@ -1756,7 +1756,7 @@ class FunctionRepository(BaseRepository[Function]):
                 "total_functions": 0,
                 "analyzed_functions": 0,
                 "coverage_percent": 0.0,
-                "by_direction": {},
+                "by_logic_group": {},
             }
 
 
@@ -1900,10 +1900,10 @@ class RepositoryManager:
     def __init__(self, db: Database):
         self.db = db
         self._runs: Optional[RunRepository] = None
-        self._povs: Optional[POVRepository] = None
+        self._pocs: Optional[POCRepository] = None
         self._patches: Optional[PatchRepository] = None
-        self._suspicious_points: Optional[SuspiciousPointRepository] = None
-        self._directions: Optional[DirectionRepository] = None
+        self._vulnerability_hypotheses: Optional[VulnerabilityHypothesisRepository] = None
+        self._logic_groups: Optional[LogicGroupRepository] = None
         self._workers: Optional[WorkerRepository] = None
         self._fuzzers: Optional[FuzzerRepository] = None
         self._functions: Optional[FunctionRepository] = None
@@ -1917,11 +1917,11 @@ class RepositoryManager:
         return self._runs
 
     @property
-    def povs(self) -> POVRepository:
-        """Get POVRepository"""
-        if self._povs is None:
-            self._povs = POVRepository(self.db)
-        return self._povs
+    def pocs(self) -> POCRepository:
+        """Get POCRepository"""
+        if self._pocs is None:
+            self._pocs = POCRepository(self.db)
+        return self._pocs
 
     @property
     def patches(self) -> PatchRepository:
@@ -1931,18 +1931,18 @@ class RepositoryManager:
         return self._patches
 
     @property
-    def suspicious_points(self) -> SuspiciousPointRepository:
-        """Get SuspiciousPointRepository"""
-        if self._suspicious_points is None:
-            self._suspicious_points = SuspiciousPointRepository(self.db)
-        return self._suspicious_points
+    def vulnerability_hypotheses(self) -> VulnerabilityHypothesisRepository:
+        """Get VulnerabilityHypothesisRepository"""
+        if self._vulnerability_hypotheses is None:
+            self._vulnerability_hypotheses = VulnerabilityHypothesisRepository(self.db)
+        return self._vulnerability_hypotheses
 
     @property
-    def directions(self) -> DirectionRepository:
-        """Get DirectionRepository"""
-        if self._directions is None:
-            self._directions = DirectionRepository(self.db)
-        return self._directions
+    def logic_groups(self) -> LogicGroupRepository:
+        """Get LogicGroupRepository"""
+        if self._logic_groups is None:
+            self._logic_groups = LogicGroupRepository(self.db)
+        return self._logic_groups
 
     @property
     def workers(self) -> WorkerRepository:

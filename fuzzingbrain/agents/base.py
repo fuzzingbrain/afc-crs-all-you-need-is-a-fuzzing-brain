@@ -26,7 +26,7 @@ def format_tool_args(args: dict, limit: int = 160) -> str:
 
     Every MCP call is logged with its arguments so a run can be audited from the
     log alone -- which files an agent read, what it searched for -- without
-    opening the conversation JSON. Long values are clipped: a POV blob or a file
+    opening the conversation JSON. Long values are clipped: a PoC blob or a file
     body has no business in a log line.
     """
     if not args:
@@ -112,7 +112,7 @@ class BaseAgent(ABC):
             worker_id: Worker ID for logging context
             log_dir: Directory for log files
             index: Agent index for numbered log files (1-based)
-            target_name: Target name (direction_name or function_name) for log filename
+            target_name: Target name (logic_group_name or function_name) for log filename
             fuzzer: Fuzzer name for log path
             sanitizer: Sanitizer name for log path
         """
@@ -146,7 +146,7 @@ class BaseAgent(ABC):
         self._last_input_tokens: int = 0  # updated after each LLM response
         self._evict_seq: int = 0  # monotonic ref id for stored evicted results
         # Unique-per-instance token for the recall store dir. MUST NOT be id(self):
-        # a memory address is reused after an agent is GC'd, so sequential POV
+        # a memory address is reused after an agent is GC'd, so sequential PoC
         # agents collided on one dir and overwrote each other's recall files
         # (recall then returned another agent's result).
         import uuid as _uuid
@@ -154,7 +154,7 @@ class BaseAgent(ABC):
         self._evict_token: str = _uuid.uuid4().hex[:12]
         # Pinned ledger of verified facts, keyed so it stays bounded (overwrite,
         # never grow unboundedly). Populated deterministically when known tool
-        # results (reach_probe / create_pov) are evicted, and rendered into a
+        # results (reach_probe / create_poc) are evicted, and rendered into a
         # single pinned message that is never evicted.
         self._ledger: Dict[str, str] = {}
 
@@ -193,20 +193,20 @@ class BaseAgent(ABC):
         """
         Get agent type for log path generation.
 
-        Override in subclasses. Valid values: "direction", "seed", "spg", "spv", "pov"
+        Override in subclasses. Valid values: "logic_group", "seed", "vhg", "vhv", "poc"
         """
-        return "direction"  # Default, subclasses should override
+        return "logic_group"  # Default, subclasses should override
 
     @property
     def is_delta(self) -> bool:
-        """Whether this is a delta scan agent (for SPG log naming)."""
+        """Whether this is a delta scan agent (for VHG log naming)."""
         return False
 
     @property
-    def include_pov_tools(self) -> bool:
-        """Whether to include POV tools in MCP server.
+    def include_poc_tools(self) -> bool:
+        """Whether to include PoC tools in MCP server.
 
-        Override to True in POVAgent. Other agents don't need POV tools.
+        Override to True in POCAgent. Other agents don't need PoC tools.
         """
         return False
 
@@ -222,47 +222,47 @@ class BaseAgent(ABC):
     def include_reach_probe_tools(self) -> bool:
         """Whether to include the verify-stage dynamic reach-probe tool.
 
-        Override to True in SPVerifier so verification gets execution evidence
+        Override to True in VHVerifier so verification gets execution evidence
         (reach / crash / margin) by running an LLM-authored candidate input
         through the ASan binary under gdb-15. Other agents don't need it.
         """
         return False
 
     @property
-    def include_sp_tools(self) -> bool:
-        """Whether to include suspicious point tools in MCP server.
+    def include_vh_tools(self) -> bool:
+        """Whether to include vulnerability hypothesis tools in MCP server.
 
-        Override to False in DirectionPlanningAgent (it only needs direction tools).
+        Override to False in LGPlanningAgent (it only needs logic group tools).
         Default True for other agents.
         """
         return True
 
     @property
-    def include_sp_create_tools(self) -> bool:
-        """Whether to include SP creation tool in MCP server.
+    def include_vh_create_tools(self) -> bool:
+        """Whether to include VH creation tool in MCP server.
 
-        Override to False in SPVerifier and POVAgent — they should only
-        read/update SPs, not create new ones. Only SP Finding agents create SPs.
+        Override to False in VHVerifier and POCAgent — they should only
+        read/update VHs, not create new ones. Only VH Finding agents create VHs.
         """
         return True
 
     @property
-    def include_direction_tools(self) -> bool:
-        """Whether to include direction tools (create/get/list_direction).
+    def include_logic_group_tools(self) -> bool:
+        """Whether to include logic group tools (create/get/list_logic_group).
 
-        Only the DirectionPlanningAgent creates and manages directions; every
-        other agent is dispatched under a direction and does not touch them, so
-        this defaults to False (a leaked create_direction had the full-scan
-        finder inventing 9 spurious directions in one run). Override True only in
-        DirectionPlanningAgent.
+        Only the LGPlanningAgent creates and manages logic groups; every
+        other agent is dispatched under a logic group and does not touch them, so
+        this defaults to False (a leaked create_logic_group had the full-scan
+        finder inventing 9 spurious logic groups in one run). Override True only in
+        LGPlanningAgent.
         """
         return False
 
     @property
     def include_diff_tool(self) -> bool:
         """Whether to include get_diff. It reads the delta diff, so only the
-        delta SP finder needs it; every other agent (full finder, verifier, POV,
-        direction, seed, report) works from source/SPs, not the raw diff."""
+        delta VH finder needs it; every other agent (full finder, verifier, PoC,
+        logic group, seed, report) works from source/VHs, not the raw diff."""
         return False
 
     @property
@@ -293,7 +293,7 @@ class BaseAgent(ABC):
         has no coverage" rather than "coverage was never built" -- the same
         shape of silent misdirection as an empty function index.
 
-        trace_pov is deliberately not gated with them: it traces with gdb
+        trace_poc is deliberately not gated with them: it traces with gdb
         against the ASAN binary and only falls back to coverage, so losing
         coverage costs it detail rather than breaking it.
         """
@@ -307,7 +307,7 @@ class BaseAgent(ABC):
         agent reading it.
 
         A failed read returns ``{}``, and the two gates then read that empty
-        dict in opposite directions -- deliberately. The index tools speak to
+        dict in opposite logic groups -- deliberately. The index tools speak to
         this same socket, so a server that cannot be reached is a server whose
         index tools could not have answered anyway, and their gate closes. The
         coverage tools read the coverage build directly and never touch this
@@ -389,7 +389,7 @@ class BaseAgent(ABC):
 
         Returns:
             Dict with keys like: Agent, Scan Mode, Phase, Fuzzer, Sanitizer,
-            Worker ID, Direction, Target Function, SP ID, Vulnerability Type, Goal
+            Worker ID, Logic group, Target Function, VH ID, Vulnerability Type, Goal
         """
         return {
             "Agent": self.agent_name,
@@ -400,15 +400,15 @@ class BaseAgent(ABC):
     def _configure_context(self, ctx: AgentContext) -> None:
         """
         Configure agent context after creation. Subclasses should override to set
-        specific fields like sp_id, direction_id, delta_id.
+        specific fields like vh_id, lg_id, delta_id.
 
         Args:
             ctx: The AgentContext instance to configure
         """
         # Default implementation does nothing
         # Subclasses can override to set:
-        #   ctx.sp_id = self.suspicious_point_id
-        #   ctx.direction_id = self.direction_id
+        #   ctx.vh_id = self.vulnerability_hypothesis_id
+        #   ctx.lg_id = self.lg_id
         #   ctx.delta_id = self.delta_id
         pass
 
@@ -442,8 +442,8 @@ class BaseAgent(ABC):
         """Always-on budget line so the model paces itself.
 
         Every agent gets this each turn -- a reasoning model (o3) otherwise keeps
-        exploring until the hard iteration cap and records nothing (the direction
-        agent hit 100/100 with 0 directions). Escalates to a finalize order once
+        exploring until the hard iteration cap and records nothing (the logic group
+        agent hit 100/100 with 0 logic groups). Escalates to a finalize order once
         the budget runs low.
         """
         msg = (
@@ -567,7 +567,7 @@ class BaseAgent(ABC):
         being evicted. Returns a list of (key, value); keys are a small fixed set
         so the ledger stays bounded (later facts overwrite earlier ones under the
         same key). No LLM, no guessing — only structured fields we know the shape
-        of (reach_probe / create_pov, per gdb_trace.py / pov.py)."""
+        of (reach_probe / create_poc, per gdb_trace.py / poc.py)."""
         if not isinstance(content, str):
             return []
         s = content.lstrip()
@@ -605,17 +605,17 @@ class BaseAgent(ABC):
                 else:
                     key = "reach:last"
                 facts.append((key, "reach_probe: " + " ".join(parts)))
-        elif tool_name == "create_pov":
+        elif tool_name == "create_poc":
             if data.get("crashed"):
                 facts.append(
                     (
-                        "pov:CRASHED",
-                        f"create_pov CRASHED (crash_matches_sp={data.get('crash_matches_sp')})",
+                        "poc:CRASHED",
+                        f"create_poc CRASHED (crash_matches_vh={data.get('crash_matches_vh')})",
                     )
                 )
             elif data.get("asan_margin") is not None:
                 facts.append(
-                    ("pov:closest", f"create_pov not-crashed asan_margin={data.get('asan_margin')}")
+                    ("poc:closest", f"create_poc not-crashed asan_margin={data.get('asan_margin')}")
                 )
             # Crashes into already-found bugs: one fact per signature, so the agent
             # still knows what not to resubmit after the result itself is evicted.
@@ -623,8 +623,8 @@ class BaseAgent(ABC):
                 if isinstance(d, dict) and d.get("duplicate") and d.get("signature"):
                     facts.append(
                         (
-                            f"pov:dup:{d['signature'][:80]}",
-                            "create_pov crashed into an ALREADY-FOUND bug "
+                            f"poc:dup:{d['signature'][:80]}",
+                            "create_poc crashed into an ALREADY-FOUND bug "
                             f"(duplicate, does not count): {d['signature']}",
                         )
                     )
@@ -739,13 +739,13 @@ class BaseAgent(ABC):
         self._log(f"Log file: {self._log_file}", level="INFO")
 
     def _get_log_prefix(self) -> str:
-        """Get the log prefix for this agent (e.g., [SPG-1], [Direction])."""
+        """Get the log prefix for this agent (e.g., [VHG-1], [Logic group])."""
         prefix_map = {
-            "direction": "Direction",
+            "logic_group": "LogicGroup",
             "seed": f"Seed-{self.index}",
-            "spg": "SPG-Delta" if self.is_delta else f"SPG-{self.index}",
-            "spv": f"SPV-{self.index}",
-            "pov": f"POV-{self.index}",
+            "vhg": "VHG-Delta" if self.is_delta else f"VHG-{self.index}",
+            "vhv": f"VHV-{self.index}",
+            "poc": f"PoC-{self.index}",
         }
         return f"[{prefix_map.get(self.agent_type, self.agent_name)}]"
 
@@ -1386,7 +1386,7 @@ class BaseAgent(ABC):
             ctx.agent = self  # Back-reference for cancellation
             agent_id = ctx.agent_id  # Use ObjectId from context
 
-            # Allow subclasses to configure context (set sp_id, direction_id, etc.)
+            # Allow subclasses to configure context (set vh_id, lg_id, etc.)
             self._configure_context(ctx)
 
             # Record the log location now, not at the end: the dashboard reads the
@@ -1398,12 +1398,12 @@ class BaseAgent(ABC):
             # Update LLMClient with agent_id for call tracking
             self.llm_client.agent_id = agent_id
 
-            # Update SP context with agent_id for tracking SP creator/verifier
-            from ..tools.suspicious_points import set_sp_agent_id
-            from ..tools.directions import set_direction_agent_id
+            # Update VH context with agent_id for tracking VH creator/verifier
+            from ..tools.vulnerability_hypotheses import set_vh_agent_id
+            from ..tools.logic_groups import set_logic_group_agent_id
 
-            set_sp_agent_id(agent_id)
-            set_direction_agent_id(agent_id)
+            set_vh_agent_id(agent_id)
+            set_logic_group_agent_id(agent_id)
 
             self._log(f"Agent context created: {agent_id}", level="DEBUG")
 
@@ -1415,7 +1415,7 @@ class BaseAgent(ABC):
                 coverage_tools = self.include_coverage_tools
                 # RQ4 dynamic-analysis ablation. FB_ABLATE env gates the
                 # query-driven dynamic-feedback tools (reach_probe / check_clamp).
-                # "coarse"/"static": remove query-driven feedback; create_pov's
+                # "coarse"/"static": remove query-driven feedback; create_poc's
                 # crash + sanitizer backtrace (the coarse execution signal) stays.
                 # Single consumption point, so it uniformly affects every agent.
                 import os as _os
@@ -1431,11 +1431,11 @@ class BaseAgent(ABC):
                 mcp_server = create_isolated_mcp_server(
                     agent_id=agent_id,
                     worker_id=agent_id,  # Use agent_id for context isolation
-                    include_pov_tools=self.include_pov_tools,
+                    include_poc_tools=self.include_poc_tools,
                     include_seed_tools=self.include_seed_tools,
-                    include_sp_tools=self.include_sp_tools,
-                    include_sp_create_tools=self.include_sp_create_tools,
-                    include_direction_tools=self.include_direction_tools,
+                    include_vh_tools=self.include_vh_tools,
+                    include_vh_create_tools=self.include_vh_create_tools,
+                    include_logic_group_tools=self.include_logic_group_tools,
                     include_static_analysis_tools=static_analysis_tools,
                     include_coverage_tools=coverage_tools,
                     include_reach_probe_tools=_reach_tools,
@@ -1443,9 +1443,9 @@ class BaseAgent(ABC):
                 )
                 self._log(
                     f"Created isolated MCP server: {agent_id} "
-                    f"(pov_tools={self.include_pov_tools}, "
+                    f"(poc_tools={self.include_poc_tools}, "
                     f"seed_tools={self.include_seed_tools}, "
-                    f"sp_tools={self.include_sp_tools}, "
+                    f"vh_tools={self.include_vh_tools}, "
                     f"static_analysis_tools={static_analysis_tools}, "
                     f"coverage_tools={coverage_tools})",
                     level="DEBUG",

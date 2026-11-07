@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fuzzingbrain.worker.strategies.pov_delta import POVDeltaStrategy
+from fuzzingbrain.worker.strategies.poc_delta import POCDeltaStrategy
 
 DIFF = """diff --git a/pngrutil.c b/pngrutil.c
 --- a/pngrutil.c
@@ -24,7 +24,7 @@ DIFF = """diff --git a/pngrutil.c b/pngrutil.c
 """
 
 
-class _Strategy(POVDeltaStrategy):
+class _Strategy(POCDeltaStrategy):
     """Only the diff plumbing; nothing else in the strategy is exercised."""
 
     def __init__(self, diff_path):
@@ -72,26 +72,26 @@ def test_the_hunk_header_names_the_function_the_index_would_have_found(diff_file
 def test_generator_prompt_survives_an_empty_change_list():
     """The changed-functions section renders empty rather than breaking, and the
     prompt still tells the agent to call get_diff first."""
-    from fuzzingbrain.agents.sp_generators import DeltaSPGenerator
+    from fuzzingbrain.agents.vh_generators import DeltaVHGenerator
 
-    section = DeltaSPGenerator._format_changed_functions_section(SimpleNamespace(), [])
+    section = DeltaVHGenerator._format_changed_functions_section(SimpleNamespace(), [])
     assert section == ""
 
 
 # ------------------------------------------------------------------ seeding
 
 
-def test_seeding_falls_back_to_suspicious_points(diff_file):
+def test_seeding_falls_back_to_vulnerability_hypotheses(diff_file):
     """Seed generation used to require the mapped function list, so a run
     without an index produced no diff-guided seeds even after the find phase
-    had produced suspicious points -- which name a function, a vulnerability
+    had produced vulnerability hypotheses -- which name a function, a vulnerability
     type and a description, and are richer seeding context than that list."""
     import inspect
 
-    from fuzzingbrain.worker.strategies import pov_delta
+    from fuzzingbrain.worker.strategies import poc_delta
 
-    src = inspect.getsource(pov_delta.POVDeltaStrategy._generate_delta_seeds)
-    assert "not changed_functions and not suspicious_points" in src, (
+    src = inspect.getsource(poc_delta.POCDeltaStrategy._generate_delta_seeds)
+    assert "not changed_functions and not vulnerability_hypotheses" in src, (
         "seeding must give up only when there is no lead at all"
     )
 
@@ -112,16 +112,16 @@ def test_seed_agent_tolerates_an_empty_change_list():
 # Degrading to the raw diff made the scan possible; it did not make it
 # affordable. On curl-delta-02 the agent made 51 tool calls mapping a 17-file
 # diff by hand, hit the cap of 50 iterations still exploring, and recorded no
-# suspicious point -- while 97% of the run's dollar budget went unspent. The
+# vulnerability hypothesis -- while 97% of the run's dollar budget went unspent. The
 # binding constraint was the iteration count, not the money.
 
 
 def test_an_unmapped_diff_gets_the_larger_budget():
-    from fuzzingbrain.worker.strategies.pov_delta import POVDeltaStrategy
+    from fuzzingbrain.worker.strategies.poc_delta import POCDeltaStrategy
 
     assert (
-        POVDeltaStrategy.SP_ITERATIONS_NO_INDEX
-        > POVDeltaStrategy.SP_ITERATIONS_WITH_INDEX
+        POCDeltaStrategy.VH_ITERATIONS_NO_INDEX
+        > POCDeltaStrategy.VH_ITERATIONS_WITH_INDEX
     )
 
 
@@ -130,18 +130,18 @@ def test_the_generator_starts_on_the_mapped_budget():
     not the default for every delta scan."""
     import inspect
 
-    from fuzzingbrain.worker.strategies import pov_delta
+    from fuzzingbrain.worker.strategies import poc_delta
 
-    src = inspect.getsource(pov_delta.POVDeltaStrategy)
-    assert "max_iterations=self.SP_ITERATIONS_WITH_INDEX" in src
-    assert "max_iterations = self.SP_ITERATIONS_NO_INDEX" in src
+    src = inspect.getsource(poc_delta.POCDeltaStrategy)
+    assert "max_iterations=self.VH_ITERATIONS_WITH_INDEX" in src
+    assert "max_iterations = self.VH_ITERATIONS_NO_INDEX" in src
 
 
 def test_the_raise_is_conditioned_on_having_no_function_list():
     import inspect
 
-    from fuzzingbrain.worker.strategies import pov_delta
+    from fuzzingbrain.worker.strategies import poc_delta
 
-    src = inspect.getsource(pov_delta.POVDeltaStrategy)
-    i = src.index("max_iterations = self.SP_ITERATIONS_NO_INDEX")
+    src = inspect.getsource(poc_delta.POCDeltaStrategy)
+    i = src.index("max_iterations = self.VH_ITERATIONS_NO_INDEX")
     assert "if not all_changes:" in src[max(0, i - 400) : i]

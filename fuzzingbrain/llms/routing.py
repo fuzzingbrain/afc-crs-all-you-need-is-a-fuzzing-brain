@@ -39,11 +39,11 @@ from .models import (
 class Role(str, Enum):
     """Every distinct LLM job in the pipeline. Agents declare a role, not a model."""
 
-    FINDER = "finder"          # SP discovery (SPGenerator)
-    VERIFIER = "verifier"      # SP verification + direction planning (reasoning)
-    POC = "poc"                # PoV synthesis (POVAgent)
+    FINDER = "finder"          # VH discovery (VHGenerator)
+    VERIFIER = "verifier"      # VH verification + logic group planning (reasoning)
+    POC = "poc"                # PoC synthesis (POCAgent)
     SEED = "seed"              # seed generation (SeedAgent)
-    UTILITY = "utility"        # PoV report + aux summaries (low stakes)
+    UTILITY = "utility"        # PoC report + aux summaries (low stakes)
     COMPRESSION = "compression"  # context compression, every agent, high volume
 
 
@@ -65,7 +65,7 @@ class Profile:
 
 PROFILES: Dict[str, Profile] = {
     # AIxCC finals code-freeze era (pre 2025-06-07): a fast non-reasoning finder,
-    # a reasoning model for verify/PoV, a cheap model for utility.
+    # a reasoning model for verify/PoC, a cheap model for utility.
     "period-correct": Profile(
         finder=GPT_4_1,
         seed=GPT_4_1,
@@ -86,7 +86,7 @@ PROFILES: Dict[str, Profile] = {
     "current": Profile(
         finder=CLAUDE_SONNET_4_5,
         verifier=CLAUDE_SONNET_4_5,
-        poc=CLAUDE_OPUS_4_5,  # PoV synthesis = flagship, matching o3's role in period-correct
+        poc=CLAUDE_OPUS_4_5,  # PoC synthesis = flagship, matching o3's role in period-correct
         seed=CLAUDE_OPUS_4_5,
         utility=CLAUDE_OPUS_4_5,
         compression=CLAUDE_HAIKU_4_5,

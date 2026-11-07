@@ -26,9 +26,9 @@ class RunStatus(str, Enum):
 class JobType(str, Enum):
     """Job type enum"""
 
-    POV = "pov"
+    POC = "poc"
     PATCH = "patch"
-    POV_PATCH = "pov-patch"
+    POC_PATCH = "poc-patch"
     HARNESS = "harness"
 
 
@@ -46,15 +46,15 @@ class Run:
     attempt at it, with its own id, workspace, status and results.
 
     What it does is the task's task_type:
-    - Finding POVs (proof-of-vulnerability)
+    - Finding PoCs (proof-of-vulnerability)
     - Generating patches
-    - POV + Patch combo
+    - PoC + Patch combo
     - Generating harnesses
     """
 
     # Core identifiers
     run_id: str = field(default_factory=generate_id)
-    task_type: JobType = JobType.POV_PATCH
+    task_type: JobType = JobType.POC_PATCH
     scan_mode: ScanMode = ScanMode.FULL
     status: RunStatus = RunStatus.PENDING
 
@@ -70,7 +70,7 @@ class Run:
     ossfuzz_project_name: Optional[str] = None
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
     timeout_minutes: int = 30
-    pov_count: int = 1
+    poc_count: int = 1
     budget_limit: float = 50.0
 
     # Commit configuration
@@ -90,8 +90,8 @@ class Run:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
-    # Results (IDs of related POVs/Patches)
-    pov_ids: List[str] = field(default_factory=list)
+    # Results (IDs of related POCs/Patches)
+    poc_ids: List[str] = field(default_factory=list)
     patch_ids: List[str] = field(default_factory=list)
 
     # Error info
@@ -119,7 +119,7 @@ class Run:
             "ossfuzz_project_name": self.ossfuzz_project_name,
             "sanitizers": self.sanitizers,
             "timeout_minutes": self.timeout_minutes,
-            "pov_count": self.pov_count,
+            "poc_count": self.poc_count,
             "budget_limit": self.budget_limit,
             "target_commit": self.target_commit,
             "base_commit": self.base_commit,
@@ -130,7 +130,7 @@ class Run:
             "is_fuzz_tooling_provided": self.is_fuzz_tooling_provided,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "pov_ids": [ObjectId(pid) for pid in self.pov_ids] if self.pov_ids else [],
+            "poc_ids": [ObjectId(pid) for pid in self.poc_ids] if self.poc_ids else [],
             "patch_ids": [ObjectId(pid) for pid in self.patch_ids]
             if self.patch_ids
             else [],
@@ -151,7 +151,7 @@ class Run:
 
         return cls(
             run_id=run_id,
-            task_type=JobType(data.get("task_type", "pov-patch")),
+            task_type=JobType(data.get("task_type", "poc-patch")),
             scan_mode=ScanMode(data.get("scan_mode", "full")),
             status=RunStatus(data.get("status", "pending")),
             workspace_path=data.get("workspace_path"),
@@ -163,7 +163,7 @@ class Run:
             ossfuzz_project_name=data.get("ossfuzz_project_name"),
             sanitizers=data.get("sanitizers", ["address"]),
             timeout_minutes=data.get("timeout_minutes", 30),
-            pov_count=data.get("pov_count", 1),
+            poc_count=data.get("poc_count", 1),
             budget_limit=data.get("budget_limit", 50.0),
             target_commit=data.get("target_commit"),
             base_commit=data.get("base_commit"),
@@ -174,9 +174,9 @@ class Run:
             is_fuzz_tooling_provided=data.get("is_fuzz_tooling_provided", False),
             created_at=data.get("created_at", datetime.now()),
             updated_at=data.get("updated_at", datetime.now()),
-            pov_ids=[
+            poc_ids=[
                 str(pid) if isinstance(pid, ObjectId) else pid
-                for pid in data.get("pov_ids", [])
+                for pid in data.get("poc_ids", [])
             ],
             patch_ids=[
                 str(pid) if isinstance(pid, ObjectId) else pid

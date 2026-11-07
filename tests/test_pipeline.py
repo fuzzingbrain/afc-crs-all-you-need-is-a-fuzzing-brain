@@ -10,9 +10,9 @@ import pytest
 from unittest.mock import MagicMock
 from bson import ObjectId
 
-from fuzzingbrain.agents import SPVerifier, POVAgent
+from fuzzingbrain.agents import VHVerifier, POCAgent
 from fuzzingbrain.agents.context import AgentContext
-from fuzzingbrain.core.models import SuspiciousPoint
+from fuzzingbrain.core.models import VulnerabilityHypothesis
 
 
 class TestAgentContext:
@@ -26,12 +26,12 @@ class TestAgentContext:
         ctx = AgentContext(
             run_id=run_id,
             worker_id=worker_id,
-            agent_type="SPVerifier",
+            agent_type="VHVerifier",
         )
 
         assert ctx.run_id == run_id
         assert ctx.worker_id == worker_id
-        assert ctx.agent_type == "SPVerifier"
+        assert ctx.agent_type == "VHVerifier"
         # agent_id should be auto-generated ObjectId
         assert ObjectId.is_valid(ctx.agent_id)
 
@@ -40,7 +40,7 @@ class TestAgentContext:
         ctx = AgentContext(
             run_id=str(ObjectId()),
             worker_id=str(ObjectId()),
-            agent_type="SPVerifier",
+            agent_type="VHVerifier",
         )
 
         result = ctx.to_dict()
@@ -50,15 +50,15 @@ class TestAgentContext:
         assert "agent_type" in result
 
 
-class TestSPVerifier:
-    """Tests for SPVerifier agent."""
+class TestVHVerifier:
+    """Tests for VHVerifier agent."""
 
     def test_instantiation_with_valid_worker_id(self):
-        """SPVerifier should accept valid ObjectId worker_id."""
+        """VHVerifier should accept valid ObjectId worker_id."""
         worker_id = str(ObjectId())
         run_id = str(ObjectId())
 
-        verifier = SPVerifier(
+        verifier = VHVerifier(
             fuzzer="test_fuzzer",
             sanitizer="address",
             run_id=run_id,
@@ -69,8 +69,8 @@ class TestSPVerifier:
         assert verifier.run_id == run_id
 
     def test_set_context_method_exists(self):
-        """SPVerifier should have set_context method (not set_verify_context)."""
-        verifier = SPVerifier(
+        """VHVerifier should have set_context method (not set_verify_context)."""
+        verifier = VHVerifier(
             fuzzer="test_fuzzer",
             sanitizer="address",
         )
@@ -79,35 +79,35 @@ class TestSPVerifier:
         assert hasattr(verifier, "set_context")
         assert not hasattr(verifier, "set_verify_context")
 
-    def test_set_context_with_suspicious_point(self):
-        """set_context should accept suspicious_point dict."""
-        verifier = SPVerifier(
+    def test_set_context_with_vulnerability_hypothesis(self):
+        """set_context should accept vulnerability_hypothesis dict."""
+        verifier = VHVerifier(
             fuzzer="test_fuzzer",
             sanitizer="address",
         )
 
-        sp_dict = {
-            "suspicious_point_id": str(ObjectId()),
+        vh_dict = {
+            "vulnerability_hypothesis_id": str(ObjectId()),
             "function_name": "test_func",
         }
 
         # Should not raise
-        verifier.set_context(suspicious_point=sp_dict)
-        assert verifier.suspicious_point == sp_dict
+        verifier.set_context(vulnerability_hypothesis=vh_dict)
+        assert verifier.vulnerability_hypothesis == vh_dict
 
 
-class TestPOVAgent:
-    """Tests for POVAgent."""
+class TestPOCAgent:
+    """Tests for POCAgent."""
 
     def test_instantiation_with_valid_worker_id(self):
-        """POVAgent should accept valid ObjectId worker_id."""
+        """POCAgent should accept valid ObjectId worker_id."""
         worker_id = str(ObjectId())
         run_id = str(ObjectId())
 
         # Mock repos to avoid database dependency
         mock_repos = MagicMock()
 
-        agent = POVAgent(
+        agent = POCAgent(
             fuzzer="test_fuzzer",
             sanitizer="address",
             run_id=run_id,
@@ -119,45 +119,45 @@ class TestPOVAgent:
         assert agent.run_id == run_id
 
 
-class TestSuspiciousPointToDict:
-    """Tests for SuspiciousPoint.to_dict with various processor_id values."""
+class TestVulnerabilityHypothesisToDict:
+    """Tests for VulnerabilityHypothesis.to_dict with various processor_id values."""
 
     def test_with_objectid_processor(self):
         """Should handle valid ObjectId processor_id."""
-        sp = SuspiciousPoint(
-            suspicious_point_id=str(ObjectId()),
+        vh = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=str(ObjectId()),
             run_id=str(ObjectId()),
             function_name="test_func",
             processor_id=str(ObjectId()),
         )
 
         # Should not raise
-        result = sp.to_dict()
+        result = vh.to_dict()
         assert isinstance(result["processor_id"], ObjectId)
 
     def test_with_string_processor(self):
         """Should handle non-ObjectId processor_id like 'verify_1'."""
-        sp = SuspiciousPoint(
-            suspicious_point_id=str(ObjectId()),
+        vh = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=str(ObjectId()),
             run_id=str(ObjectId()),
             function_name="test_func",
             processor_id="verify_1",
         )
 
         # Should not raise - safe_object_id handles it
-        result = sp.to_dict()
+        result = vh.to_dict()
         assert result["processor_id"] == "verify_1"
 
     def test_with_none_processor(self):
         """Should handle None processor_id."""
-        sp = SuspiciousPoint(
-            suspicious_point_id=str(ObjectId()),
+        vh = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=str(ObjectId()),
             run_id=str(ObjectId()),
             function_name="test_func",
             processor_id=None,
         )
 
-        result = sp.to_dict()
+        result = vh.to_dict()
         assert result["processor_id"] is None
 
 
@@ -171,15 +171,15 @@ class TestAgentImports:
         # These should NOT exist
         assert not hasattr(agents, "FunctionAnalysisAgent")
         assert not hasattr(agents, "LargeFunctionAnalysisAgent")
-        assert not hasattr(agents, "SuspiciousPointAgent")
+        assert not hasattr(agents, "VulnerabilityHypothesisAgent")
 
         # These SHOULD exist
-        assert hasattr(agents, "FullSPGenerator")
-        assert hasattr(agents, "LargeFullSPGenerator")
-        assert hasattr(agents, "DeltaSPGenerator")
-        assert hasattr(agents, "SPVerifier")
-        assert hasattr(agents, "POVAgent")
-        assert hasattr(agents, "DirectionPlanningAgent")
+        assert hasattr(agents, "FullVHGenerator")
+        assert hasattr(agents, "LargeFullVHGenerator")
+        assert hasattr(agents, "DeltaVHGenerator")
+        assert hasattr(agents, "VHVerifier")
+        assert hasattr(agents, "POCAgent")
+        assert hasattr(agents, "LGPlanningAgent")
 
 
 if __name__ == "__main__":

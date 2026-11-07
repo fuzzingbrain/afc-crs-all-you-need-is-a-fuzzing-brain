@@ -32,7 +32,7 @@ class FuzzerBuilder:
     The goal is simply to know how many fuzzers are successfully built.
 
     Also builds a shared coverage fuzzer that all Workers can use for
-    dynamic analysis (e.g., verifying if POV reaches target functions).
+    dynamic analysis (e.g., verifying if PoC reaches target functions).
     """
 
     # Files to skip when scanning build output

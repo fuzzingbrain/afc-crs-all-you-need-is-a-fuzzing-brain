@@ -57,7 +57,7 @@ class AgentContext:
     - Real-time status updates
 
     Usage:
-        with AgentContext(run_id, worker_id, "POVAgent") as ctx:
+        with AgentContext(run_id, worker_id, "POCAgent") as ctx:
             # ctx.agent_id is unique
             # Tools can look up ctx by agent_id
             ctx.increment_iteration()  # Auto-persists periodically
@@ -67,7 +67,7 @@ class AgentContext:
     Persistence:
         - Saves on enter (status: running)
         - Saves every 5 iterations
-        - Saves on significant events (SP created, POV generated)
+        - Saves on significant events (VH created, PoC generated)
         - Saves on exit (status: completed/failed)
     """
 
@@ -91,8 +91,8 @@ class AgentContext:
         Args:
             run_id: Run ID (MongoDB ObjectId string)
             worker_id: Worker ID (MongoDB ObjectId string)
-            agent_type: Agent class name (e.g., "POVAgent", "FullSPGenerator")
-            target: Target being analyzed (function_name or sp_id)
+            agent_type: Agent class name (e.g., "POCAgent", "FullVHGenerator")
+            target: Target being analyzed (function_name or vh_id)
             fuzzer: Fuzzer name
             sanitizer: Sanitizer type
         """
@@ -123,23 +123,23 @@ class AgentContext:
 
         # === Tool-specific state ===
 
-        # POV Agent state
-        self.pov_iteration: int = 0
-        self.pov_attempt: int = 0
+        # PoC Agent state
+        self.poc_iteration: int = 0
+        self.poc_attempt: int = 0
         self.fuzzer_path: Optional[str] = None
-        self.sp_id: Optional[str] = None
+        self.vh_id: Optional[str] = None
 
         # Seed Agent state
-        self.direction_id: Optional[str] = None
+        self.lg_id: Optional[str] = None
         self.delta_id: Optional[str] = None
         self.seeds_generated: int = 0
         self.fuzzer_manager: Any = None  # FuzzerManager instance
 
-        # SP Generator state
-        self.sp_created: bool = False
-        self.sp_details: Optional[Dict[str, Any]] = None
+        # VH Generator state
+        self.vh_created: bool = False
+        self.vh_details: Optional[Dict[str, Any]] = None
 
-        # SP Verifier state
+        # VH Verifier state
         self.verify_result: Optional[Dict[str, Any]] = None
 
         # LLM usage aggregates (updated by flush)
@@ -262,13 +262,13 @@ class AgentContext:
                     "result_summary": self.result_summary,
                     "log_path": self.log_path,
                     # Tool-specific state (for recovery/debugging)
-                    "sp_id": self.sp_id,  # SP being processed (POV Agent)
-                    "direction_id": self.direction_id,  # Direction being processed (Seed Agent)
+                    "vh_id": self.vh_id,  # VH being processed (PoC Agent)
+                    "lg_id": self.lg_id,  # Logic group being processed (Seed Agent)
                     "delta_id": self.delta_id,  # Delta scan ID
-                    "sp_created": self.sp_created,
+                    "vh_created": self.vh_created,
                     "seeds_generated": self.seeds_generated,
-                    "pov_iteration": self.pov_iteration,
-                    "pov_attempt": self.pov_attempt,
+                    "poc_iteration": self.poc_iteration,
+                    "poc_attempt": self.poc_attempt,
                     # NOTE: llm_calls/llm_cost/llm_input_tokens/llm_output_tokens
                     # are managed exclusively by WorkerLLMBuffer via $inc.
                     # Do NOT $set them here — it would overwrite the buffer's increments.
@@ -312,12 +312,12 @@ class AgentContext:
         self._dirty = True
         # Don't save on every tool call, let iteration handle it
 
-    def set_sp_created(self, sp_details: Dict[str, Any]) -> None:
-        """Mark SP as created and persist immediately."""
-        self.sp_created = True
-        self.sp_details = sp_details
-        self.result_summary["sp_created"] = True
-        self.result_summary["sp_details"] = sp_details
+    def set_vh_created(self, vh_details: Dict[str, Any]) -> None:
+        """Mark VH as created and persist immediately."""
+        self.vh_created = True
+        self.vh_details = vh_details
+        self.result_summary["vh_created"] = True
+        self.result_summary["vh_details"] = vh_details
         self._dirty = True
         self._save_to_db(force=True)
 
@@ -336,10 +336,10 @@ class AgentContext:
         self.log_path = log_path
         self._save_to_db(force=True)
 
-    def set_pov_progress(self, iteration: int, attempt: int) -> None:
-        """Update POV progress and persist."""
-        self.pov_iteration = iteration
-        self.pov_attempt = attempt
+    def set_poc_progress(self, iteration: int, attempt: int) -> None:
+        """Update PoC progress and persist."""
+        self.poc_iteration = iteration
+        self.poc_attempt = attempt
         self._mark_dirty_and_maybe_save()
 
     def set_verify_result(self, result: Dict[str, Any]) -> None:
@@ -387,13 +387,13 @@ class AgentContext:
             "result_summary": self.result_summary,
             "log_path": self.log_path,
             # Tool-specific state
-            "sp_id": self.sp_id,
-            "direction_id": self.direction_id,
+            "vh_id": self.vh_id,
+            "lg_id": self.lg_id,
             "delta_id": self.delta_id,
-            "sp_created": self.sp_created,
+            "vh_created": self.vh_created,
             "seeds_generated": self.seeds_generated,
-            "pov_iteration": self.pov_iteration,
-            "pov_attempt": self.pov_attempt,
+            "poc_iteration": self.poc_iteration,
+            "poc_attempt": self.poc_attempt,
             # LLM usage
             "llm_calls": self.llm_calls,
             "llm_cost": self.llm_cost,

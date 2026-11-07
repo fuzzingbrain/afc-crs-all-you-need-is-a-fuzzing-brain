@@ -24,7 +24,7 @@ def _instance(tmp_path):
 def test_prefixes_cover_libfuzzer_artifact_kinds():
     # "timeout-" is not among them on purpose: a hang is about how long the
     # harness took, against a threshold we chose, and one on the empty input
-    # once ended a scan two minutes in as a "POV".
+    # once ended a scan two minutes in as a "POC".
     assert set(CRASH_ARTIFACT_PREFIXES) == {"crash-", "oom-", "leak-"}
 
 

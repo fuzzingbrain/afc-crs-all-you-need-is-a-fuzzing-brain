@@ -2,9 +2,9 @@
 """
 Recall-first evidence scorer for the evidence-bounded verifier (fixed design).
 
-Objective for the true-SP set: 57/57 — a real SP must NOT be rejected. So the
+Objective for the true-VH set: 57/57 — a real VH must NOT be rejected. So the
 PROCEED gate is recall-first: reject ONLY on strong disconfirmation. Everything
-else proceeds. Dynamic evidence does NOT gate — it only orders the PoV queue.
+else proceeds. Dynamic evidence does NOT gate — it only orders the PoC queue.
 
 Two separable outputs, so no magic constant is needed to decide proceed:
   1. proceed (bool)  — a boolean of NECESSARY-condition disconfirmation:
@@ -16,7 +16,7 @@ Two separable outputs, so no magic constant is needed to decide proceed:
      with near/over margin > reached > read-only; ties by count of confirmed read
      conditions. Never decides proceed; needs no calibration to be usable.
 
-The verifier's OUTPUT is a *modified SP*: the same candidate, enriched/corrected
+The verifier's OUTPUT is a *modified VH*: the same candidate, enriched/corrected
 with evidence, corrected description, control-flow, and the reaching generator code.
 Calibration of a real probability + false-positive discrimination are a later step
 (need negatives); they are intentionally NOT here.
@@ -32,7 +32,7 @@ DYN, LLM, RULE = "dyn", "llm", "rule"
 
 @dataclass
 class Evidence:
-    """Evidence vector the agent reports for one SP. Each read field is
+    """Evidence vector the agent reports for one VH. Each read field is
     confirmed/refuted/unknown; dynamic fields come from execution."""
     # Stage-1 gates
     sanitizer_match: str = UNKNOWN          # rule+llm: can this sanitizer see the class?
@@ -42,13 +42,13 @@ class Evidence:
     taint: str = UNKNOWN                    # dangerous operand derives from input
     suppressed_upstream: str = UNKNOWN      # error handled/suppressed before the site (REFUTES)
     control_flow_correct: str = UNKNOWN     # the path harness->site is right
-    # Stage-3 dynamic facts (upgrade / override; NEVER floor a real SP)
+    # Stage-3 dynamic facts (upgrade / override; NEVER floor a real VH)
     reached: str = UNKNOWN                  # dyn: an input reached the site
     margin_value: Optional[float] = None    # dyn: bound-index / capacity-size at sink
     margin_source: str = UNKNOWN            # confirmed only when a real operand dump gave it
     clamp_observed_dyn: str = UNKNOWN       # dyn: value seen clamped at runtime (REFUTES)
     crashed: str = UNKNOWN                  # dyn: sanitizer fired (CONFIRMS)
-    # audit / carried into the modified SP
+    # audit / carried into the modified VH
     corrected_description: str = ""
     control_flow_to_bug: str = ""
     operand_readout: str = ""               # the raw gdb values behind margin
@@ -59,7 +59,7 @@ NEAR_MARGIN = 8.0  # element/byte units; only splits reached-near vs reached in 
 
 # ---- sanitizer-class rule (NOT the LLM's merits call) ----------------------
 # The sanitizer gate must be a RULE on the bug CLASS, never the LLM's "I read it
-# and don't think it's a bug". Data: 2/57 gold SPs were real heap-overflow / UAF
+# and don't think it's a bug". Data: 2/57 gold VHs were real heap-overflow / UAF
 # that the LLM misread as "no bug"; letting that reading hard-reject drops recall.
 # So: class observable by ASan/UBSan -> CONFIRMED; otherwise UNKNOWN (still proceeds,
 # never a hard reject on a merits read).
@@ -104,7 +104,7 @@ _TIER_ORDER = {  # higher = processed earlier
     "REACHED_VIOLATION": 4,   # reached + margin <= 0
     "REACHED_NEAR": 3,        # reached + 0 < margin <= NEAR
     "REACHED": 2,             # reached, margin unknown or large
-    "READ_ONLY": 1,           # not dynamically reached (a real SP still lives here — not floored)
+    "READ_ONLY": 1,           # not dynamically reached (a real VH still lives here — not floored)
     "REJECTED": 0,
 }
 
@@ -144,9 +144,9 @@ def priority(ev: Evidence) -> float:
     return round((base + frac) / (max(_TIER_ORDER.values()) + 1), 4)
 
 
-# ---- the verifier's output: a MODIFIED SP ----------------------------------
+# ---- the verifier's output: a MODIFIED VH ----------------------------------
 @dataclass
-class ModifiedSP:
+class ModifiedVH:
     proceed: bool
     reject_reason: Optional[str]
     tier: str
@@ -158,9 +158,9 @@ class ModifiedSP:
     operand_readout: str = ""
 
 
-def to_modified_sp(ev: Evidence, generator_code: str = "") -> ModifiedSP:
+def to_modified_vh(ev: Evidence, generator_code: str = "") -> ModifiedVH:
     t = _tier(ev)
-    return ModifiedSP(
+    return ModifiedVH(
         proceed=proceeds(ev),
         reject_reason=_reject_reason(ev) if ev.crashed != CONFIRMED else None,
         tier=t,
@@ -186,21 +186,21 @@ def to_modified_sp(ev: Evidence, generator_code: str = "") -> ModifiedSP:
 # ---- self-test: the 57/57 property + ordering ------------------------------
 if __name__ == "__main__":
     def show(name, ev):
-        m = to_modified_sp(ev)
+        m = to_modified_vh(ev)
         print(f"{name:34s} proceed={str(m.proceed):5s} tier={m.tier:17s} "
               f"prio={m.priority:.3f}  {m.reject_reason or ''}")
 
-    # A real SP the LLM read correctly but could NOT reach — MUST proceed (57/57).
+    # A real VH the LLM read correctly but could NOT reach — MUST proceed (57/57).
     show("real, read-only, not reached", Evidence(
         sanitizer_match=CONFIRMED, statically_reachable=CONFIRMED,
         pattern=CONFIRMED, taint=CONFIRMED, control_flow_correct=CONFIRMED,
         reached=UNKNOWN))
-    # Real SP, reached, operand over boundary, no crash -> proceeds, high prio.
+    # Real VH, reached, operand over boundary, no crash -> proceeds, high prio.
     show("real, reached, margin<=0", Evidence(
         sanitizer_match=CONFIRMED, pattern=CONFIRMED, taint=CONFIRMED,
         control_flow_correct=CONFIRMED, reached=CONFIRMED,
         margin_value=-1.0, margin_source=CONFIRMED))
-    # Real SP, crashed -> proceeds, top.
+    # Real VH, crashed -> proceeds, top.
     show("real, crashed", Evidence(crashed=CONFIRMED, reached=CONFIRMED,
         sanitizer_match=CONFIRMED, pattern=CONFIRMED, taint=CONFIRMED))
     # Only strong disconfirmation rejects:
@@ -213,12 +213,12 @@ if __name__ == "__main__":
     show("read-only, unsure clamp", Evidence(sanitizer_match=CONFIRMED,
         pattern=CONFIRMED, taint=UNKNOWN, control_flow_correct=UNKNOWN))
 
-    # 57/57 property: any SP that is not strongly disconfirmed proceeds.
+    # 57/57 property: any VH that is not strongly disconfirmed proceeds.
     real_variants = [
         Evidence(sanitizer_match=CONFIRMED, pattern=CONFIRMED, taint=CONFIRMED,
                  control_flow_correct=CONFIRMED, reached=UNKNOWN),
         Evidence(sanitizer_match=UNKNOWN, pattern=CONFIRMED),          # sanitizer unknown -> still proceed
         Evidence(sanitizer_match=CONFIRMED, pattern=UNKNOWN, taint=UNKNOWN),  # weak read -> still proceed
     ]
-    assert all(proceeds(e) for e in real_variants), "recall-first broken: a real SP was rejected"
-    print("\n57/57 property OK: no real SP is rejected unless strongly disconfirmed.")
+    assert all(proceeds(e) for e in real_variants), "recall-first broken: a real VH was rejected"
+    print("\n57/57 property OK: no real VH is rejected unless strongly disconfirmed.")

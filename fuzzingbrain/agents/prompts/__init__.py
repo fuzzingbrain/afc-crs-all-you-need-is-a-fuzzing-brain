@@ -60,7 +60,7 @@ def _load_prompt_from_markdown(filename: str) -> str:
     Load a prompt from a markdown file.
 
     Args:
-        filename: Name of the markdown file (e.g., "direction_planning_prompt.md")
+        filename: Name of the markdown file (e.g., "lg_planning_prompt.md")
 
     Returns:
         The prompt content as a string
@@ -81,24 +81,24 @@ def _load_prompt_from_markdown(filename: str) -> str:
 
 
 # Load prompts from markdown files
-DIRECTION_PLANNING_PROMPT = _load_prompt_from_markdown("direction_planning_prompt.md")
-FULLSCAN_SP_FIND_PROMPT = _load_prompt_from_markdown("fullscan_sp_find_prompt.md")
+LG_PLANNING_PROMPT = _load_prompt_from_markdown("lg_planning_prompt.md")
+FULLSCAN_VH_FIND_PROMPT = _load_prompt_from_markdown("fullscan_vh_find_prompt.md")
 FUNCTION_ANALYSIS_PROMPT = _load_prompt_from_markdown("function_analysis_prompt.md")
-POV_AGENT_SYSTEM_PROMPT = _load_prompt_from_markdown("pov_agent_prompt.md")
-REPORT_SYSTEM_PROMPT = _load_prompt_from_markdown("pov_report_prompt.md")
-REPORT_USER_TEMPLATE = _load_prompt_from_markdown("pov_report_user_template.md")
-FIND_SUSPICIOUS_POINTS_PROMPT = _load_prompt_from_markdown(
-    "find_suspicious_points_prompt.md"
+POC_AGENT_SYSTEM_PROMPT = _load_prompt_from_markdown("poc_agent_prompt.md")
+REPORT_SYSTEM_PROMPT = _load_prompt_from_markdown("poc_report_prompt.md")
+REPORT_USER_TEMPLATE = _load_prompt_from_markdown("poc_report_user_template.md")
+FIND_VULNERABILITY_HYPOTHESES_PROMPT = _load_prompt_from_markdown(
+    "find_vulnerability_hypotheses_prompt.md"
 )
-VERIFY_SUSPICIOUS_POINTS_PROMPT = _load_prompt_from_markdown(
-    "verify_suspicious_points_prompt.md"
+VERIFY_VULNERABILITY_HYPOTHESES_PROMPT = _load_prompt_from_markdown(
+    "verify_vulnerability_hypotheses_prompt.md"
 )
-VERIFY_SUSPICIOUS_POINTS_DELTA_PROMPT = _load_prompt_from_markdown(
-    "verify_suspicious_points_delta_prompt.md"
+VERIFY_VULNERABILITY_HYPOTHESES_DELTA_PROMPT = _load_prompt_from_markdown(
+    "verify_vulnerability_hypotheses_delta_prompt.md"
 )
 # Seed agent: one static system prompt per mode (dynamic data stays in the
 # per-mode user message built by SeedAgent.get_initial_message).
-SEED_DIRECTION_SYSTEM_PROMPT = _load_prompt_from_markdown("seed_direction_system.md")
+SEED_LOGIC_GROUP_SYSTEM_PROMPT = _load_prompt_from_markdown("seed_logic_group_system.md")
 SEED_FP_SYSTEM_PROMPT = _load_prompt_from_markdown("seed_fp_system.md")
 SEED_DELTA_SYSTEM_PROMPT = _load_prompt_from_markdown("seed_delta_system.md")
 

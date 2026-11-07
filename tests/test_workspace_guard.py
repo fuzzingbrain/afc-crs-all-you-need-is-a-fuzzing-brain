@@ -12,7 +12,7 @@ from fuzzingbrain.core.workspace_guard import (
 
 
 def _answer_dir(tree):
-    """The shape a real challenge checkout has: location, POV and patch."""
+    """The shape a real challenge checkout has: location, PoC and patch."""
     vuln = tree / ".aixcc" / "vulns" / "vuln_001"
     (vuln / "blobs").mkdir(parents=True)
     (vuln / "patches").mkdir(parents=True)

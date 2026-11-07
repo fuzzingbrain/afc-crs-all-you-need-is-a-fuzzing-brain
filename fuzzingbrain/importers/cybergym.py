@@ -11,7 +11,7 @@ version gap — CyberGym needs *none* of that: we build straight on the ARVO ima
 The fuzzer V2 then fuzzes is exactly the one ARVO validated reproduces the crash.
 
 The matching ``n132/arvo:<id>-fix`` image (patched source) is what a grader uses
-for the crash / no-crash oracle at PoV time.
+for the crash / no-crash oracle at PoC time.
 
 Contrast with bench.py: no clone, no apt, no compat shims — the "build" is just
 re-running the image's own recipe (helper.py builds ``FROM`` the ARVO image, with

@@ -5,7 +5,7 @@ Tests for FuzzingBrain stopping conditions.
 Verifies that the system correctly stops when:
 1. Timeout is reached
 2. Budget limit is exceeded (llm_cost >= budget_limit)
-3. POV count target is reached
+3. PoC count target is reached
 
 Also tests the LLM call buffer initialization in Celery workers.
 
@@ -27,7 +27,7 @@ def _make_dispatcher(
     run_id=None,
     timeout_minutes=30,
     budget_limit=0.0,
-    pov_count=0,
+    poc_count=0,
 ):
     """Create a WorkerDispatcher with mocked dependencies."""
     from fuzzingbrain.core.models import Run
@@ -38,7 +38,7 @@ def _make_dispatcher(
     run = MagicMock(spec=Run)
     run.run_id = run_id
     run.task_type = MagicMock()
-    run.task_type.value = "pov"
+    run.task_type.value = "poc"
     run.scan_mode = MagicMock()
     run.scan_mode.value = "full"
     run.workspace_path = "/tmp/fake_workspace"
@@ -47,7 +47,7 @@ def _make_dispatcher(
     config = MagicMock(spec=Config)
     config.timeout_minutes = timeout_minutes
     config.budget_limit = budget_limit
-    config.pov_count = pov_count
+    config.poc_count = poc_count
     config.sanitizers = ["address"]
     config.fuzzers = []
     config.ossfuzz_project_name = "test_project"
@@ -126,7 +126,7 @@ class TestTimeoutCondition:
         )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.shutdown_all_fuzzers = MagicMock()
-        repos.povs.count.return_value = 0
+        repos.pocs.count.return_value = 0
 
         # Time: start at 0:00, immediately jump to 0:02 (past 1min timeout)
         base = datetime(2026, 1, 1, 0, 0, 0)
@@ -142,9 +142,9 @@ class TestTimeoutCondition:
         assert result["status"] == "timeout"
         dispatcher.shutdown_all_fuzzers.assert_called_once()
 
-    def test_no_timeout_when_pov_found_first(self):
-        """Run should not timeout if POV target reached first."""
-        dispatcher, repos = _make_dispatcher(pov_count=1, timeout_minutes=60)
+    def test_no_timeout_when_poc_found_first(self):
+        """Run should not timeout if PoC target reached first."""
+        dispatcher, repos = _make_dispatcher(poc_count=1, timeout_minutes=60)
 
         dispatcher.get_status = MagicMock(
             return_value={
@@ -161,7 +161,7 @@ class TestTimeoutCondition:
         dispatcher.shutdown_all_fuzzers = MagicMock()
 
         repos.runs.collection.find_one.return_value = {"llm_cost": 0.0}
-        repos.povs.count.return_value = 1  # POV found
+        repos.pocs.count.return_value = 1  # PoC found
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
@@ -171,7 +171,7 @@ class TestTimeoutCondition:
             now_times=[base, base + timedelta(seconds=5)],
         )
 
-        assert result["status"] == "pov_target_reached"
+        assert result["status"] == "poc_target_reached"
 
 
 # ============================================================================
@@ -204,7 +204,7 @@ class TestBudgetCondition:
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
-        repos.povs.count.return_value = 0
+        repos.pocs.count.return_value = 0
 
         # $35 spent, limit is $30
         repos.runs.collection.find_one.return_value = {"llm_cost": 35.0}
@@ -240,7 +240,7 @@ class TestBudgetCondition:
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
-        repos.povs.count.return_value = 0
+        repos.pocs.count.return_value = 0
 
         repos.runs.collection.find_one.return_value = {"llm_cost": 30.0}
 
@@ -258,7 +258,7 @@ class TestBudgetCondition:
         """When budget_limit=0, budget check should be skipped entirely."""
         dispatcher, repos = _make_dispatcher(
             budget_limit=0.0,
-            pov_count=1,
+            poc_count=1,
             timeout_minutes=60,
         )
 
@@ -276,7 +276,7 @@ class TestBudgetCondition:
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
 
-        repos.povs.count.return_value = 1  # POV found
+        repos.pocs.count.return_value = 1  # PoC found
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
@@ -288,13 +288,13 @@ class TestBudgetCondition:
 
         # Should NOT have queried runs collection for llm_cost
         repos.runs.collection.find_one.assert_not_called()
-        assert result["status"] == "pov_target_reached"
+        assert result["status"] == "poc_target_reached"
 
     def test_budget_under_limit_continues(self):
         """Run should continue when llm_cost < budget_limit."""
         dispatcher, repos = _make_dispatcher(
             budget_limit=30.0,
-            pov_count=1,
+            poc_count=1,
             timeout_minutes=60,
         )
 
@@ -312,9 +312,9 @@ class TestBudgetCondition:
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
 
-        # Under budget, but POV target reached
+        # Under budget, but PoC target reached
         repos.runs.collection.find_one.return_value = {"llm_cost": 10.0}
-        repos.povs.count.return_value = 1
+        repos.pocs.count.return_value = 1
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
@@ -324,13 +324,13 @@ class TestBudgetCondition:
             now_times=[base, base + timedelta(seconds=5)],
         )
 
-        assert result["status"] == "pov_target_reached"
+        assert result["status"] == "poc_target_reached"
 
     def test_budget_check_handles_missing_llm_cost(self):
         """Budget check should handle run doc without llm_cost field."""
         dispatcher, repos = _make_dispatcher(
             budget_limit=30.0,
-            pov_count=1,
+            poc_count=1,
             timeout_minutes=60,
         )
 
@@ -350,7 +350,7 @@ class TestBudgetCondition:
 
         # Run doc exists but no llm_cost field (defaults to 0.0)
         repos.runs.collection.find_one.return_value = {}
-        repos.povs.count.return_value = 1  # POV found
+        repos.pocs.count.return_value = 1  # PoC found
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
@@ -360,13 +360,13 @@ class TestBudgetCondition:
             now_times=[base, base + timedelta(seconds=5)],
         )
 
-        assert result["status"] == "pov_target_reached"
+        assert result["status"] == "poc_target_reached"
 
     def test_budget_check_handles_none_run_doc(self):
         """Budget check should handle find_one returning None."""
         dispatcher, repos = _make_dispatcher(
             budget_limit=30.0,
-            pov_count=1,
+            poc_count=1,
             timeout_minutes=60,
         )
 
@@ -385,7 +385,7 @@ class TestBudgetCondition:
         dispatcher.shutdown_all_fuzzers = MagicMock()
 
         repos.runs.collection.find_one.return_value = None
-        repos.povs.count.return_value = 1  # POV found
+        repos.pocs.count.return_value = 1  # PoC found
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
@@ -395,23 +395,23 @@ class TestBudgetCondition:
             now_times=[base, base + timedelta(seconds=5)],
         )
 
-        assert result["status"] == "pov_target_reached"
+        assert result["status"] == "poc_target_reached"
 
 
 # ============================================================================
-# Test: POV count stopping condition
+# Test: PoC count stopping condition
 # ============================================================================
 
 
-class TestPOVCountCondition:
-    """Tests for POV count-based run termination."""
+class TestPOCCountCondition:
+    """Tests for PoC count-based run termination."""
 
-    def test_pov_target_reached(self):
-        """Run should stop when verified POV count >= pov_count target."""
+    def test_poc_target_reached(self):
+        """Run should stop when verified PoC count >= poc_count target."""
         run_id = str(ObjectId())
         dispatcher, repos = _make_dispatcher(
             run_id=run_id,
-            pov_count=3,
+            poc_count=3,
             timeout_minutes=60,
         )
 
@@ -430,7 +430,7 @@ class TestPOVCountCondition:
         dispatcher.shutdown_all_fuzzers = MagicMock()
 
         repos.runs.collection.find_one.return_value = {"llm_cost": 0.0}
-        repos.povs.count.return_value = 3
+        repos.pocs.count.return_value = 3
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
@@ -440,31 +440,31 @@ class TestPOVCountCondition:
             now_times=[base, base + timedelta(seconds=5)],
         )
 
-        assert result["status"] == "pov_target_reached"
-        assert result["pov_count"] == 3
+        assert result["status"] == "poc_target_reached"
+        assert result["poc_count"] == 3
         dispatcher.graceful_shutdown.assert_called_once()
         dispatcher.shutdown_all_fuzzers.assert_called_once()
 
-    def test_pov_count_uses_objectid(self):
-        """get_verified_pov_count should query with ObjectId, not string."""
+    def test_poc_count_uses_objectid(self):
+        """get_verified_poc_count should query with ObjectId, not string."""
         run_id = str(ObjectId())
-        dispatcher, repos = _make_dispatcher(run_id=run_id, pov_count=1)
+        dispatcher, repos = _make_dispatcher(run_id=run_id, poc_count=1)
 
-        repos.povs.count.return_value = 2
+        repos.pocs.count.return_value = 2
 
-        count = dispatcher.get_verified_pov_count()
+        count = dispatcher.get_verified_poc_count()
 
         assert count == 2
-        call_args = repos.povs.count.call_args[0][0]
+        call_args = repos.pocs.count.call_args[0][0]
         assert isinstance(call_args["run_id"], ObjectId)
         assert str(call_args["run_id"]) == run_id
         assert call_args["is_successful"] is True
 
-    def test_unlimited_pov_count(self):
-        """When pov_count=0, POV target check should be skipped."""
-        dispatcher, repos = _make_dispatcher(pov_count=0, timeout_minutes=1)
+    def test_unlimited_poc_count(self):
+        """When poc_count=0, PoC target check should be skipped."""
+        dispatcher, repos = _make_dispatcher(poc_count=0, timeout_minutes=1)
 
-        assert dispatcher.pov_count_target == 0
+        assert dispatcher.poc_count_target == 0
 
         dispatcher.get_status = MagicMock(
             return_value={
@@ -478,9 +478,9 @@ class TestPOVCountCondition:
         )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.shutdown_all_fuzzers = MagicMock()
-        repos.povs.count.return_value = 10
+        repos.pocs.count.return_value = 10
 
-        # Even with 10 POVs, should NOT stop (pov_count=0 means no target)
+        # Even with 10 PoCs, should NOT stop (poc_count=0 means no target)
         # Will timeout instead
         base = datetime(2026, 1, 1, 0, 0, 0)
         after = base + timedelta(minutes=2)
@@ -521,26 +521,26 @@ class TestDispatcherObjectId:
         mock_worker.sanitizer = "address"
         mock_worker.status.value = "completed"
         mock_worker.worker_id = str(ObjectId())
-        mock_worker.pov_generated = 0
+        mock_worker.poc_generated = 0
         mock_worker.patch_generated = 0
         mock_worker.error_msg = None
         mock_worker.get_duration_seconds.return_value = 60.0
         mock_worker.get_duration_str.return_value = "1.0m"
         repos.workers.find_by_run.return_value = [mock_worker]
 
-        repos.suspicious_points.count.return_value = 0
-        mock_sp = MagicMock()
-        mock_sp.suspicious_point_id = str(ObjectId())
-        repos.suspicious_points.find_all.return_value = [mock_sp]
-        repos.povs.count.return_value = 0
+        repos.vulnerability_hypotheses.count.return_value = 0
+        mock_vh = MagicMock()
+        mock_vh.vulnerability_hypothesis_id = str(ObjectId())
+        repos.vulnerability_hypotheses.find_all.return_value = [mock_vh]
+        repos.pocs.count.return_value = 0
 
         dispatcher.get_results()
 
-        for call in repos.suspicious_points.count.call_args_list:
+        for call in repos.vulnerability_hypotheses.count.call_args_list:
             query = call[0][0]
             assert isinstance(query["run_id"], ObjectId)
 
-        for call in repos.povs.count.call_args_list:
+        for call in repos.pocs.count.call_args_list:
             query = call[0][0]
             assert isinstance(query["run_id"], ObjectId)
 
@@ -680,7 +680,7 @@ class TestExitConditionPriority:
         dispatcher.shutdown_all_fuzzers = MagicMock()
 
         repos.runs.collection.find_one.return_value = {"llm_cost": 50.0}
-        repos.povs.count.return_value = 0
+        repos.pocs.count.return_value = 0
 
         # Both timeout and budget exceeded
         base = datetime(2026, 1, 1, 0, 0, 0)
@@ -696,11 +696,11 @@ class TestExitConditionPriority:
         # Timeout checked first
         assert result["status"] == "timeout"
 
-    def test_budget_checked_before_pov(self):
-        """Budget should be checked before POV count in the poll loop."""
+    def test_budget_checked_before_poc(self):
+        """Budget should be checked before PoC count in the poll loop."""
         dispatcher, repos = _make_dispatcher(
             budget_limit=30.0,
-            pov_count=3,
+            poc_count=3,
             timeout_minutes=60,
         )
 
@@ -718,9 +718,9 @@ class TestExitConditionPriority:
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
 
-        # Both budget exceeded and POV target reached
+        # Both budget exceeded and PoC target reached
         repos.runs.collection.find_one.return_value = {"llm_cost": 50.0}
-        repos.povs.count.return_value = 5
+        repos.pocs.count.return_value = 5
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
@@ -730,7 +730,7 @@ class TestExitConditionPriority:
             now_times=[base, base + timedelta(seconds=5)],
         )
 
-        # Budget checked before POV
+        # Budget checked before PoC
         assert result["status"] == "budget_exceeded"
 
 
@@ -752,7 +752,7 @@ class TestThePollLoopCannotRunAway:
         # Neither stopping rule can fire on its own terms: the clock never
         # advances, so elapsed stays at zero, and sleep does nothing. Before
         # the bound, this call did not return.
-        dispatcher, repos = _make_dispatcher(pov_count=0, timeout_minutes=1)
+        dispatcher, repos = _make_dispatcher(poc_count=0, timeout_minutes=1)
 
         dispatcher.get_status = MagicMock(
             return_value={
@@ -767,7 +767,7 @@ class TestThePollLoopCannotRunAway:
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
-        dispatcher.get_verified_pov_count = MagicMock(return_value=0)
+        dispatcher.get_verified_poc_count = MagicMock(return_value=0)
 
         frozen = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(

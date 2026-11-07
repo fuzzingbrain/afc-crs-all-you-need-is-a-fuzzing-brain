@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """One TSV line describing a finished run, read from MongoDB.
 
-    precomp_result.py <run_id>   ->   status<TAB>povs<TAB>sps<TAB>cost<TAB>note
+    precomp_result.py <run_id>   ->   status<TAB>pocs<TAB>vhs<TAB>cost<TAB>note
 
-status is the run's own status ("completed" when the POV target was reached,
+status is the run's own status ("completed" when the PoC target was reached,
 "error" on timeout/budget, "cancelled" on Ctrl+C) or "missing" when the run
 never reached the database (crashed before it could register).
 """
@@ -22,11 +22,11 @@ def main() -> int:
         print("missing\t0\t0\t0\tno run record")
         return 0
     oid = ObjectId(tid)
-    povs = db.povs.count_documents({"run_id": oid, "is_successful": True})
-    sps = db.suspicious_points.count_documents({"run_id": oid})
+    pocs = db.pocs.count_documents({"run_id": oid, "is_successful": True})
+    vhs = db.vulnerability_hypotheses.count_documents({"run_id": oid})
     cost = float(run.get("llm_cost") or 0)
     note = (run.get("error_msg") or "").replace("\t", " ").replace("\n", " ")[:80]
-    print(f"{run.get('status')}\t{povs}\t{sps}\t{cost:.2f}\t{note}")
+    print(f"{run.get('status')}\t{pocs}\t{vhs}\t{cost:.2f}\t{note}")
     return 0
 
 

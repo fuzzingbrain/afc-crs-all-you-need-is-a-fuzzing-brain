@@ -5,10 +5,10 @@
   "scan_mode": "delta",
   "base_commit": "150028193bf61131c2436e3f4f76631e5d0a21d7",
   "delta_commit": "challenges/cu-delta-05",
-  "task_type": "pov",
+  "task_type": "poc",
   "timeout_minutes": 60,
   "budget_limit": 30.0,
-  "pov_count": 1,
+  "poc_count": 1,
   "remove_git": true,
   "models": {
     "finder": "gpt-4.1",

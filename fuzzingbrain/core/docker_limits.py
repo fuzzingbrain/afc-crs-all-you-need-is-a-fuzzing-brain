@@ -21,7 +21,7 @@ from loguru import logger
 # when the run ends the controller revokes that worker with SIGTERM, which
 # kills the Python side but not the `docker run` clients it forked, and
 # certainly not the containers behind them. Six curl fuzzers were found
-# still running hours after their runs had reported "POV target reached".
+# still running hours after their runs had reported "PoC target reached".
 RUN_LABEL = "fuzzingbrain.run"
 
 

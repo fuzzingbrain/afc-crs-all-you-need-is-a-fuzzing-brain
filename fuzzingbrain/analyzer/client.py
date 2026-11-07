@@ -91,7 +91,7 @@ class AnalysisClient:
         Thread-safe: uses a lock to prevent concurrent access to the socket.
         Without this lock, parallel tool calls from the same agent (via
         asyncio.to_thread) could race on recv(), causing response swapping
-        (e.g., create_suspicious_point gets a str from get_function_source).
+        (e.g., create_vulnerability_hypothesis gets a str from get_function_source).
 
         Args:
             method: RPC method name
@@ -404,10 +404,10 @@ class AnalysisClient:
         return self._request(Method.GET_BUILD_PATHS)
 
     # =========================================================================
-    # Suspicious point operations
+    # Vulnerability hypothesis operations
     # =========================================================================
 
-    def create_suspicious_point(
+    def create_vulnerability_hypothesis(
         self,
         function_name: str,
         description: str,
@@ -415,11 +415,11 @@ class AnalysisClient:
         important_controlflow: str = None,
         harness_name: str = "",
         sanitizer: str = "",
-        direction_id: str = "",
+        lg_id: str = "",
         agent_id: str = "",
     ) -> dict:
         """
-        Create a new suspicious point.
+        Create a new vulnerability hypothesis.
 
         Args:
             function_name: Name of the function containing the suspicious code
@@ -427,16 +427,16 @@ class AnalysisClient:
                 not line numbers; name the bug type in the description)
             score: Initial score (0.0-1.0)
             important_controlflow: List of related functions/variables
-            harness_name: Fuzzer harness name that created this SP
+            harness_name: Fuzzer harness name that created this VH
             sanitizer: Sanitizer type (address, memory, undefined)
-            direction_id: Direction ID that this SP belongs to
-            agent_id: Agent ObjectId that created this SP
+            lg_id: Logic group ID that this VH belongs to
+            agent_id: Agent ObjectId that created this VH
 
         Returns:
             Dict with 'id' and 'created' status
         """
         return self._request(
-            Method.CREATE_SUSPICIOUS_POINT,
+            Method.CREATE_VULNERABILITY_HYPOTHESIS,
             {
                 "function_name": function_name,
                 "description": description,
@@ -444,72 +444,72 @@ class AnalysisClient:
                 "important_controlflow": important_controlflow or "",
                 "harness_name": harness_name,
                 "sanitizer": sanitizer,
-                "direction_id": direction_id,
+                "lg_id": lg_id,
                 "agent_id": agent_id,
             },
         )
 
-    def update_suspicious_point(
+    def update_vulnerability_hypothesis(
         self,
-        sp_id: str,
+        vh_id: str,
         is_checked_by_verifier: bool = None,
         is_crash_found: bool = None,
         score: float = None,
         evidence: str = None,
         verification_notes: str = None,
-        pov_guidance: str = None,
+        poc_guidance: str = None,
         description: str = None,
         important_controlflow: str = None,
         agent_id: str = "",
     ) -> dict:
         """
-        Update a suspicious point after verification.
+        Update a vulnerability hypothesis after verification.
 
         Args:
-            sp_id: Suspicious point ID
+            vh_id: Vulnerability hypothesis ID
             is_checked_by_verifier: Whether verification is complete
             is_crash_found: Whether a crash was reproduced
             score: Verifier confidence (0-1); proceed/priority are derived from it
             evidence: Free-text facts (FOR/AGAINST) established while verifying
             verification_notes: Summary from verification
-            pov_guidance: Guidance for POV agent (input directions, what to watch for)
+            poc_guidance: Guidance for PoC agent (input logic groups, what to watch for)
             description: Revised root-cause description (when the finder's was imprecise)
             important_controlflow: Revised key functions/variables note
-            agent_id: Agent ObjectId that verified this SP
+            agent_id: Agent ObjectId that verified this VH
 
         Returns:
             Dict with 'updated' status
         """
-        # RQ2 ablation: FB_ABLATE_FREEZE_SP freezes the SP's *declared claim*
+        # RQ2 ablation: FB_ABLATE_FREEZE_VH freezes the VH's *declared claim*
         # (root-cause description + key control-flow) at the discovery-handoff
         # version. Downstream verify/PoC may still record the verdict
-        # (is_checked/score), working evidence and pov_guidance, and reason over
+        # (is_checked/score), working evidence and poc_guidance, and reason over
         # new evidence -- only the persistent rewrite of the hypothesis claim is
         # disabled. This isolates "explicit maintained+propagated revision"
         # (claim (i)) without touching agent reasoning.
         import os as _os
-        if _os.environ.get("FB_ABLATE_FREEZE_SP", "").lower() in ("1", "true", "yes"):
+        if _os.environ.get("FB_ABLATE_FREEZE_VH", "").lower() in ("1", "true", "yes"):
             description = None
             important_controlflow = None
 
         # RQ3 ablation: FB_ABLATE_NO_HANDOFF drops the verification->PoC handoff
-        # carried in pov_guidance (the verifier's concrete input directions /
+        # carried in poc_guidance (the verifier's concrete input logic groups /
         # reach & execution findings written for the PoC agent). The no-handoff
         # arm still keeps the revised claim, evidence and verification_notes
         # (analysis summary) and its own dynamic-analysis tools -- only the
         # verification-stage dynamic seed/guidance handoff is withheld, so the
         # PoC agent must re-derive reach on its own. Orthogonal to RQ2/RQ4.
         if _os.environ.get("FB_ABLATE_NO_HANDOFF", "").lower() in ("1", "true", "yes"):
-            pov_guidance = None
+            poc_guidance = None
 
-        params = {"id": sp_id}
+        params = {"id": vh_id}
         for _k, _v in (
             ("is_checked_by_verifier", is_checked_by_verifier),
             ("is_crash_found", is_crash_found),
             ("score", score),
             ("evidence", evidence),
             ("verification_notes", verification_notes),
-            ("pov_guidance", pov_guidance),
+            ("poc_guidance", poc_guidance),
             ("description", description),
             ("important_controlflow", important_controlflow),
         ):
@@ -517,16 +517,16 @@ class AnalysisClient:
                 params[_k] = _v
         if agent_id:
             params["agent_id"] = agent_id
-        return self._request(Method.UPDATE_SUSPICIOUS_POINT, params)
+        return self._request(Method.UPDATE_VULNERABILITY_HYPOTHESIS, params)
 
-    def list_suspicious_points(
+    def list_vulnerability_hypotheses(
         self,
         filter_unchecked: bool = False,
         filter_real: bool = False,
         filter_important: bool = False,
     ) -> dict:
         """
-        List suspicious points with optional filters.
+        List vulnerability hypotheses with optional filters.
 
         Args:
             filter_unchecked: Only return unchecked points
@@ -534,10 +534,10 @@ class AnalysisClient:
             filter_important: Only return high priority points
 
         Returns:
-            Dict with 'suspicious_points', 'count', and 'stats'
+            Dict with 'vulnerability_hypotheses', 'count', and 'stats'
         """
         return self._request(
-            Method.LIST_SUSPICIOUS_POINTS,
+            Method.LIST_VULNERABILITY_HYPOTHESES,
             {
                 "filter_unchecked": filter_unchecked,
                 "filter_real": filter_real,
@@ -545,23 +545,23 @@ class AnalysisClient:
             },
         )
 
-    def get_suspicious_point(self, sp_id: str) -> Optional[dict]:
+    def get_vulnerability_hypothesis(self, vh_id: str) -> Optional[dict]:
         """
-        Get a single suspicious point by ID.
+        Get a single vulnerability hypothesis by ID.
 
         Args:
-            sp_id: Suspicious point ID
+            vh_id: Vulnerability hypothesis ID
 
         Returns:
-            Suspicious point dict or None
+            Vulnerability hypothesis dict or None
         """
-        return self._request(Method.GET_SUSPICIOUS_POINT, {"id": sp_id})
+        return self._request(Method.GET_VULNERABILITY_HYPOTHESIS, {"id": vh_id})
 
     # =========================================================================
-    # Direction operations (Full-scan)
+    # Logic group operations (Full-scan)
     # =========================================================================
 
-    def create_direction(
+    def create_logic_group(
         self,
         name: str,
         risk_level: str,
@@ -574,24 +574,24 @@ class AnalysisClient:
         agent_id: str = "",
     ) -> dict:
         """
-        Create a new direction for Full-scan analysis.
+        Create a new logic group for Full-scan analysis.
 
         Args:
-            name: Direction name (e.g., "Chunk Handlers")
+            name: Logic group name (e.g., "Chunk Handlers")
             risk_level: Security risk level ("high", "medium", "low")
             risk_reason: Why this risk level was assigned
-            core_functions: Main functions in this direction
-            entry_functions: How fuzzer input reaches this direction
+            core_functions: Main functions in this logic group
+            entry_functions: How fuzzer input reaches this logic group
             call_chain_summary: Summary of call paths
             code_summary: Brief description of what this code does
             fuzzer: Fuzzer name
-            agent_id: Agent ObjectId that created this direction
+            agent_id: Agent ObjectId that created this logic group
 
         Returns:
             {"id": "...", "created": True}
         """
         return self._request(
-            Method.CREATE_DIRECTION,
+            Method.CREATE_LOGIC_GROUP,
             {
                 "name": name,
                 "risk_level": risk_level,
@@ -605,81 +605,81 @@ class AnalysisClient:
             },
         )
 
-    def list_directions(
+    def list_logic_groups(
         self,
         fuzzer: str = None,
         status: str = None,
     ) -> dict:
         """
-        List directions with optional filters.
+        List logic groups with optional filters.
 
         Args:
             fuzzer: Filter by fuzzer name
             status: Filter by status ("pending", "in_progress", "completed")
 
         Returns:
-            {"directions": [...], "count": N, "stats": {...}}
+            {"logic_groups": [...], "count": N, "stats": {...}}
         """
         params = {}
         if fuzzer:
             params["fuzzer"] = fuzzer
         if status:
             params["status"] = status
-        return self._request(Method.LIST_DIRECTIONS, params)
+        return self._request(Method.LIST_LOGIC_GROUPS, params)
 
-    def get_direction(self, direction_id: str) -> Optional[dict]:
+    def get_logic_group(self, lg_id: str) -> Optional[dict]:
         """
-        Get a single direction by ID.
+        Get a single logic group by ID.
 
         Args:
-            direction_id: Direction ID
+            lg_id: Logic group ID
 
         Returns:
-            Direction dict or None
+            Logic group dict or None
         """
-        return self._request(Method.GET_DIRECTION, {"id": direction_id})
+        return self._request(Method.GET_LOGIC_GROUP, {"id": lg_id})
 
-    def claim_direction(self, fuzzer: str, processor_id: str) -> Optional[dict]:
+    def claim_logic_group(self, fuzzer: str, processor_id: str) -> Optional[dict]:
         """
-        Claim a pending direction for analysis.
+        Claim a pending logic group for analysis.
 
         Args:
             fuzzer: Fuzzer name
             processor_id: ID of the agent claiming
 
         Returns:
-            Claimed direction dict or None if none available
+            Claimed logic group dict or None if none available
         """
         return self._request(
-            Method.CLAIM_DIRECTION,
+            Method.CLAIM_LOGIC_GROUP,
             {
                 "fuzzer": fuzzer,
                 "processor_id": processor_id,
             },
         )
 
-    def complete_direction(
+    def complete_logic_group(
         self,
-        direction_id: str,
-        sp_count: int = 0,
+        lg_id: str,
+        vh_count: int = 0,
         functions_analyzed: int = 0,
     ) -> dict:
         """
-        Mark a direction as completed.
+        Mark a logic group as completed.
 
         Args:
-            direction_id: Direction ID
-            sp_count: Number of SPs found
+            lg_id: Logic group ID
+            vh_count: Number of VHs found
             functions_analyzed: Number of functions analyzed
 
         Returns:
             {"updated": True}
         """
         return self._request(
-            Method.COMPLETE_DIRECTION,
+            Method.COMPLETE_LOGIC_GROUP,
             {
-                "id": direction_id,
-                "sp_count": sp_count,
+                "id": lg_id,
+                "vh_count": vh_count,
                 "functions_analyzed": functions_analyzed,
             },
         )

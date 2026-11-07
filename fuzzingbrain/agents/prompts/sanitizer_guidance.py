@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Sanitizer-specific guidance templates for suspicious point agents.
+Sanitizer-specific guidance templates for vulnerability hypothesis agents.
 
 These templates provide detailed vulnerability patterns that each sanitizer
 can detect, helping agents focus on relevant bug types.

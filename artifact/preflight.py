@@ -4,9 +4,9 @@
     venv/bin/python3 artifact/preflight.py aixcc/cu-delta-02/tasks/curl_fuzzer_ws.json
 
 Runs each prebuilt fuzzer once on an empty input, through the same function the
-PoV verifier uses (tools.pov._run_fuzzer_docker: same image, lib mounts, image
+PoC verifier uses (tools.poc._run_fuzzer_docker: same image, lib mounts, image
 fallback and resource caps). A binary that cannot load -- missing shared libs,
-a GLIBC version mismatch, rc=127 -- would otherwise make every PoV read as
+a GLIBC version mismatch, rc=127 -- would otherwise make every PoC read as
 "no crash" for the whole run. Prints one line "PREFLIGHT OK|BROKEN <reason>" per
 fuzzer and exits 1 if any is broken.
 """
@@ -21,7 +21,7 @@ sys.path.insert(0, str(ART.parent))
 import json  # noqa: E402
 
 from fuzzingbrain.core.fuzzer_spec import is_no_oom  # noqa: E402
-from fuzzingbrain.tools.pov import _run_fuzzer_docker  # noqa: E402
+from fuzzingbrain.tools.poc import _run_fuzzer_docker  # noqa: E402
 
 # The loader or libc refusing the binary: it never reached LLVMFuzzerTestOneInput.
 LOAD_ERRORS = (

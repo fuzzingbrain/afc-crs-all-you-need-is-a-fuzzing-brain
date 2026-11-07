@@ -1,7 +1,7 @@
 """What makes two crashes the same crash.
 
 Deduplicating on the input's bytes counts distinct inputs, not distinct bugs: a
-fuzzer that finds one overflow ten ways files ten crashes, and a POV count built
+fuzzer that finds one overflow ten ways files ten crashes, and a PoC count built
 on that says ten when the answer is one.
 
 A signature is the sanitizer's class plus the innermost project frames -- the

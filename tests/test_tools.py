@@ -13,32 +13,32 @@ from unittest.mock import MagicMock, patch
 from bson import ObjectId
 
 # Tool implementations
-from fuzzingbrain.tools.suspicious_points import (
-    create_suspicious_point_impl,
-    update_suspicious_point_impl,
-    set_sp_context,
-    get_sp_context,
+from fuzzingbrain.tools.vulnerability_hypotheses import (
+    create_vulnerability_hypothesis_impl,
+    update_vulnerability_hypothesis_impl,
+    set_vh_context,
+    get_vh_context,
 )
 
 
-class TestUpdateSuspiciousPointParameters:
-    """Test update_suspicious_point accepts all required parameters."""
+class TestUpdateVulnerabilityHypothesisParameters:
+    """Test update_vulnerability_hypothesis accepts all required parameters."""
 
     def test_function_signature_has_reachability_params(self):
-        """update_suspicious_point_impl must accept reachability_* parameters."""
+        """update_vulnerability_hypothesis_impl must accept reachability_* parameters."""
         import inspect
 
-        sig = inspect.signature(update_suspicious_point_impl)
+        sig = inspect.signature(update_vulnerability_hypothesis_impl)
         params = list(sig.parameters.keys())
 
         # Must have these parameters
-        assert "suspicious_point_id" in params
+        assert "vulnerability_hypothesis_id" in params
         assert "score" in params
         assert "is_checked_by_verifier" in params
         assert "is_crash_found" in params
         assert "pattern" in params
         assert "verification_notes" in params
-        assert "pov_guidance" in params
+        assert "poc_guidance" in params
         # NEW - these caused the validation error
         assert "reachability_status" in params, "Missing reachability_status parameter!"
         assert "reachability_multiplier" in params, (
@@ -46,46 +46,46 @@ class TestUpdateSuspiciousPointParameters:
         )
         assert "reachability_reason" in params, "Missing reachability_reason parameter!"
 
-    @patch("fuzzingbrain.tools.suspicious_points._get_client")
-    @patch("fuzzingbrain.tools.suspicious_points._ensure_client")
+    @patch("fuzzingbrain.tools.vulnerability_hypotheses._get_client")
+    @patch("fuzzingbrain.tools.vulnerability_hypotheses._ensure_client")
     def test_update_with_reachability_params(self, mock_ensure, mock_get_client):
-        """update_suspicious_point should pass reachability params to client."""
+        """update_vulnerability_hypothesis should pass reachability params to client."""
         mock_ensure.return_value = None
         mock_client = MagicMock()
-        mock_client.update_suspicious_point.return_value = {"updated": True}
+        mock_client.update_vulnerability_hypothesis.return_value = {"updated": True}
         mock_get_client.return_value = mock_client
 
-        # Set SP context
-        set_sp_context("test_fuzzer", "address", "dir123", "agent123")
+        # Set VH context
+        set_vh_context("test_fuzzer", "address", "dir123", "agent123")
 
         # Call with reachability parameters
-        result = update_suspicious_point_impl(
-            suspicious_point_id="sp123",
+        result = update_vulnerability_hypothesis_impl(
+            vulnerability_hypothesis_id="sp123",
             score=0.8,
             is_checked_by_verifier=True,
             pattern="confirmed",
-            pov_guidance="Trigger via oversized input to function pointer path",
+            poc_guidance="Trigger via oversized input to function pointer path",
             reachability_status="pointer_call",
             reachability_multiplier=0.95,
             reachability_reason="Reachable via function pointer",
         )
 
         # Verify client was called with reachability params
-        mock_client.update_suspicious_point.assert_called_once()
-        call_kwargs = mock_client.update_suspicious_point.call_args[1]
+        mock_client.update_vulnerability_hypothesis.assert_called_once()
+        call_kwargs = mock_client.update_vulnerability_hypothesis.call_args[1]
         assert call_kwargs["reachability_status"] == "pointer_call"
         assert call_kwargs["reachability_multiplier"] == 0.95
         assert call_kwargs["reachability_reason"] == "Reachable via function pointer"
 
 
-class TestCreateSuspiciousPointParameters:
-    """Test create_suspicious_point accepts all required parameters."""
+class TestCreateVulnerabilityHypothesisParameters:
+    """Test create_vulnerability_hypothesis accepts all required parameters."""
 
     def test_function_signature(self):
-        """create_suspicious_point_impl must have correct parameters."""
+        """create_vulnerability_hypothesis_impl must have correct parameters."""
         import inspect
 
-        sig = inspect.signature(create_suspicious_point_impl)
+        sig = inspect.signature(create_vulnerability_hypothesis_impl)
         params = list(sig.parameters.keys())
 
         assert "function_name" in params
@@ -93,36 +93,36 @@ class TestCreateSuspiciousPointParameters:
         assert "score" in params
         assert "important_controlflow" in params
 
-    @patch("fuzzingbrain.tools.suspicious_points._get_client")
-    @patch("fuzzingbrain.tools.suspicious_points._ensure_client")
-    def test_create_sp_basic(self, mock_ensure, mock_get_client):
-        """create_suspicious_point should work with basic params."""
+    @patch("fuzzingbrain.tools.vulnerability_hypotheses._get_client")
+    @patch("fuzzingbrain.tools.vulnerability_hypotheses._ensure_client")
+    def test_create_vh_basic(self, mock_ensure, mock_get_client):
+        """create_vulnerability_hypothesis should work with basic params."""
         mock_ensure.return_value = None
         mock_client = MagicMock()
-        mock_client.create_suspicious_point.return_value = {
+        mock_client.create_vulnerability_hypothesis.return_value = {
             "id": str(ObjectId()),
             "merged": False,
         }
         mock_get_client.return_value = mock_client
 
-        # Set SP context
-        set_sp_context("test_fuzzer", "address", "dir123", "agent123")
+        # Set VH context
+        set_vh_context("test_fuzzer", "address", "dir123", "agent123")
 
-        result = create_suspicious_point_impl(
+        result = create_vulnerability_hypothesis_impl(
             function_name="png_read_row",
             description="Buffer overflow in row processing",
             score=0.7,
         )
 
         assert result["success"] is True
-        mock_client.create_suspicious_point.assert_called_once()
+        mock_client.create_vulnerability_hypothesis.assert_called_once()
 
 
 class TestMCPFactoryToolSignatures:
     """Test that MCP factory tools have correct signatures."""
 
-    def test_update_suspicious_point_mcp_signature(self):
-        """MCP update_suspicious_point tool must have reachability params."""
+    def test_update_vulnerability_hypothesis_mcp_signature(self):
+        """MCP update_vulnerability_hypothesis tool must have reachability params."""
         # Import the mcp_factory module
 
         # Check that the module can be imported without errors
@@ -130,7 +130,7 @@ class TestMCPFactoryToolSignatures:
         # that the impl function has the right signature
         import inspect
 
-        sig = inspect.signature(update_suspicious_point_impl)
+        sig = inspect.signature(update_vulnerability_hypothesis_impl)
         params = list(sig.parameters.keys())
 
         assert "reachability_status" in params
@@ -141,12 +141,12 @@ class TestMCPFactoryToolSignatures:
 class TestAnalyzerClientSignatures:
     """Test that AnalyzerClient methods have correct signatures."""
 
-    def test_update_suspicious_point_client_signature(self):
-        """AnalyzerClient.update_suspicious_point must have reachability params."""
+    def test_update_vulnerability_hypothesis_client_signature(self):
+        """AnalyzerClient.update_vulnerability_hypothesis must have reachability params."""
         from fuzzingbrain.analyzer.client import AnalysisClient
         import inspect
 
-        sig = inspect.signature(AnalysisClient.update_suspicious_point)
+        sig = inspect.signature(AnalysisClient.update_vulnerability_hypothesis)
         params = list(sig.parameters.keys())
 
         assert "reachability_status" in params, "Client missing reachability_status!"
@@ -159,14 +159,14 @@ class TestAnalyzerClientSignatures:
 class TestAnalyzerServerHandlers:
     """Test that AnalyzerServer handles all parameters."""
 
-    def test_update_suspicious_point_server_handles_reachability(self):
-        """Server._update_suspicious_point must handle reachability params."""
+    def test_update_vulnerability_hypothesis_server_handles_reachability(self):
+        """Server._update_vulnerability_hypothesis must handle reachability params."""
         # Read the server code and check it handles the params
         import inspect
         from fuzzingbrain.analyzer.server import AnalysisServer
 
-        # Get the source code of _update_suspicious_point
-        source = inspect.getsource(AnalysisServer._update_suspicious_point)
+        # Get the source code of _update_vulnerability_hypothesis
+        source = inspect.getsource(AnalysisServer._update_vulnerability_hypothesis)
 
         # Check that reachability params are handled
         assert "reachability_status" in source, (
@@ -180,19 +180,19 @@ class TestAnalyzerServerHandlers:
         )
 
 
-class TestSPContextFunctions:
-    """Test SP context management."""
+class TestVHContextFunctions:
+    """Test VH context management."""
 
     def test_set_and_get_context(self):
-        """set_sp_context and get_sp_context should work."""
-        set_sp_context(
+        """set_vh_context and get_vh_context should work."""
+        set_vh_context(
             harness_name="test_fuzzer",
             sanitizer="address",
-            direction_id="dir123",
+            lg_id="dir123",
             agent_id="agent456",
         )
 
-        harness, san, dir_id, agent_id = get_sp_context()
+        harness, san, dir_id, agent_id = get_vh_context()
         assert harness == "test_fuzzer"
         assert san == "address"
         assert dir_id == "dir123"
@@ -203,44 +203,44 @@ class TestToolErrorHandling:
     """Test tool error handling."""
 
     def test_update_without_client_returns_error(self):
-        """update_suspicious_point should return error if no client."""
+        """update_vulnerability_hypothesis should return error if no client."""
         # Don't set up client - should fail gracefully
-        with patch("fuzzingbrain.tools.suspicious_points._ensure_client") as mock:
+        with patch("fuzzingbrain.tools.vulnerability_hypotheses._ensure_client") as mock:
             mock.return_value = {"success": False, "error": "No client"}
-            result = update_suspicious_point_impl(
-                suspicious_point_id="sp123",
+            result = update_vulnerability_hypothesis_impl(
+                vulnerability_hypothesis_id="sp123",
                 score=0.5,
             )
             assert result["success"] is False
 
     def test_create_without_client_returns_error(self):
-        """create_suspicious_point should return error if no client."""
-        with patch("fuzzingbrain.tools.suspicious_points._ensure_client") as mock:
+        """create_vulnerability_hypothesis should return error if no client."""
+        with patch("fuzzingbrain.tools.vulnerability_hypotheses._ensure_client") as mock:
             mock.return_value = {"success": False, "error": "No client"}
-            result = create_suspicious_point_impl(
+            result = create_vulnerability_hypothesis_impl(
                 function_name="test",
                 description="test",
             )
             assert result["success"] is False
 
 
-class TestDirectionTools:
-    """Test direction-related tools."""
+class TestLogicGroupTools:
+    """Test logic group-related tools."""
 
-    def test_direction_tool_imports(self):
-        """Direction tools should be importable."""
-        from fuzzingbrain.tools.directions import (
-            create_direction_impl,
-            list_directions_impl,
-            set_direction_context,
-            get_direction_context,
+    def test_logic_group_tool_imports(self):
+        """Logic group tools should be importable."""
+        from fuzzingbrain.tools.logic_groups import (
+            create_logic_group_impl,
+            list_logic_groups_impl,
+            set_logic_group_context,
+            get_logic_group_context,
         )
 
         # Just verify they're callable
-        assert callable(create_direction_impl)
-        assert callable(list_directions_impl)
-        assert callable(set_direction_context)
-        assert callable(get_direction_context)
+        assert callable(create_logic_group_impl)
+        assert callable(list_logic_groups_impl)
+        assert callable(set_logic_group_context)
+        assert callable(get_logic_group_context)
 
 
 class TestAnalyzerTools:
@@ -259,26 +259,26 @@ class TestAnalyzerTools:
         assert callable(_ensure_client)
 
 
-class TestPOVTools:
-    """Test POV-related tools."""
+class TestPOCTools:
+    """Test PoC-related tools."""
 
-    def test_pov_tool_function_signatures(self):
-        """POV tools should have correct signatures."""
-        from fuzzingbrain.tools.pov import (
-            create_pov_impl,
-            verify_pov_impl,
+    def test_poc_tool_function_signatures(self):
+        """PoC tools should have correct signatures."""
+        from fuzzingbrain.tools.poc import (
+            create_poc_impl,
+            verify_poc_impl,
         )
         import inspect
 
-        # Check create_pov_impl
-        sig = inspect.signature(create_pov_impl)
+        # Check create_poc_impl
+        sig = inspect.signature(create_poc_impl)
         params = list(sig.parameters.keys())
         assert "generator_code" in params
 
-        # Check verify_pov_impl
-        sig = inspect.signature(verify_pov_impl)
+        # Check verify_poc_impl
+        sig = inspect.signature(verify_poc_impl)
         params = list(sig.parameters.keys())
-        assert "pov_id" in params
+        assert "poc_id" in params
 
 
 class TestCodeViewerTools:
@@ -300,27 +300,27 @@ class TestCodeViewerTools:
 class TestAllToolsHaveImpl:
     """Ensure all MCP tools have corresponding impl functions."""
 
-    def test_suspicious_point_tools_have_impl(self):
-        """All SP tools should have _impl functions."""
-        from fuzzingbrain.tools import suspicious_points
+    def test_vulnerability_hypothesis_tools_have_impl(self):
+        """All VH tools should have _impl functions."""
+        from fuzzingbrain.tools import vulnerability_hypotheses
 
-        assert hasattr(suspicious_points, "create_suspicious_point_impl")
-        assert hasattr(suspicious_points, "update_suspicious_point_impl")
-        assert hasattr(suspicious_points, "list_suspicious_points_impl")
+        assert hasattr(vulnerability_hypotheses, "create_vulnerability_hypothesis_impl")
+        assert hasattr(vulnerability_hypotheses, "update_vulnerability_hypothesis_impl")
+        assert hasattr(vulnerability_hypotheses, "list_vulnerability_hypotheses_impl")
 
-    def test_direction_tools_have_impl(self):
-        """All direction tools should have _impl functions."""
-        from fuzzingbrain.tools import directions
+    def test_logic_group_tools_have_impl(self):
+        """All logic group tools should have _impl functions."""
+        from fuzzingbrain.tools import logic_groups
 
-        assert hasattr(directions, "create_direction_impl")
-        assert hasattr(directions, "list_directions_impl")
+        assert hasattr(logic_groups, "create_logic_group_impl")
+        assert hasattr(logic_groups, "list_logic_groups_impl")
 
-    def test_pov_tools_have_impl(self):
-        """All POV tools should have _impl functions."""
-        from fuzzingbrain.tools import pov
+    def test_poc_tools_have_impl(self):
+        """All PoC tools should have _impl functions."""
+        from fuzzingbrain.tools import poc
 
-        assert hasattr(pov, "create_pov_impl")
-        assert hasattr(pov, "verify_pov_impl")
+        assert hasattr(poc, "create_poc_impl")
+        assert hasattr(poc, "verify_poc_impl")
 
 
 class TestSeedTools:
@@ -353,7 +353,7 @@ class TestSeedTools:
         set_seed_context(
             run_id="run_001",
             worker_id=test_worker_id,
-            direction_id="dir_001",
+            lg_id="dir_001",
             fuzzer_manager=None,
             fuzzer="test_fuzzer",
             sanitizer="address",
@@ -364,7 +364,7 @@ class TestSeedTools:
         assert ctx is not None
         assert ctx["run_id"] == "run_001"
         assert ctx["worker_id"] == test_worker_id
-        assert ctx["direction_id"] == "dir_001"
+        assert ctx["lg_id"] == "dir_001"
         assert ctx["fuzzer"] == "test_fuzzer"
 
         # Clean up
@@ -385,7 +385,7 @@ class TestSeedTools:
         set_seed_context(
             run_id="run_002",
             worker_id=test_worker_id,
-            direction_id="dir_002",
+            lg_id="dir_002",
             fuzzer_manager=None,
             fuzzer="test_fuzzer",
             sanitizer="address",
@@ -399,7 +399,7 @@ def generate(seed_num: int) -> bytes:
         result = create_seed_impl(
             generator_code=generator_code,
             num_seeds=3,
-            seed_type="direction",
+            seed_type="logic_group",
             worker_id=test_worker_id,
         )
 
@@ -425,7 +425,7 @@ def generate(seed_num: int) -> bytes:
         result = create_seed_impl(
             generator_code=generator_code,
             num_seeds=1,
-            seed_type="direction",
+            seed_type="logic_group",
             worker_id=nonexistent_worker_id,
         )
 
@@ -479,8 +479,8 @@ class TestSeedAgentContextFlow:
                 repos=None,
             )
 
-            # Set up direction_id before configure
-            agent.direction_id = "test_direction_id"
+            # Set up lg_id before configure
+            agent.lg_id = "test_lg_id"
 
             # Call _configure_context
             agent._configure_context(mock_ctx)
@@ -489,7 +489,7 @@ class TestSeedAgentContextFlow:
             mock_set_ctx.assert_called_once()
             call_kwargs = mock_set_ctx.call_args[1]
             assert call_kwargs["worker_id"] == "mock_agent_id_12345"
-            assert call_kwargs["direction_id"] == "test_direction_id"
+            assert call_kwargs["lg_id"] == "test_lg_id"
 
             # Verify agent stores the agent_id for cleanup
             assert agent._seed_agent_id == "mock_agent_id_12345"

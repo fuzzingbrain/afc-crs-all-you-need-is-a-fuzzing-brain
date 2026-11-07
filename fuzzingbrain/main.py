@@ -185,8 +185,8 @@ def signal_handler(signum, frame):
                     fuzzer = w.get("fuzzer", "N/A")
                     sanitizer = w.get("sanitizer", "N/A")
 
-                    # Query SP count from database
-                    sp_count = _repos.suspicious_points.count(
+                    # Query VH count from database
+                    vh_count = _repos.vulnerability_hypotheses.count(
                         {
                             "run_id": run_oid,
                             "sources": {
@@ -198,10 +198,10 @@ def signal_handler(signum, frame):
                         }
                     )
 
-                    # Query POV count from database
-                    worker_sp_ids = [
-                        str(sp.get("suspicious_point_id") or sp.get("_id"))
-                        for sp in _repos.suspicious_points.collection.find(
+                    # Query PoC count from database
+                    worker_vh_ids = [
+                        str(vh.get("vulnerability_hypothesis_id") or vh.get("_id"))
+                        for vh in _repos.vulnerability_hypotheses.collection.find(
                             {
                                 "run_id": run_oid,
                                 "sources": {
@@ -211,35 +211,35 @@ def signal_handler(signum, frame):
                                     }
                                 },
                             },
-                            {"suspicious_point_id": 1, "_id": 1},
+                            {"vulnerability_hypothesis_id": 1, "_id": 1},
                         )
                     ]
-                    pov_count = 0
-                    if worker_sp_ids:
-                        sp_oids = []
-                        for x in worker_sp_ids:
+                    poc_count = 0
+                    if worker_vh_ids:
+                        vh_oids = []
+                        for x in worker_vh_ids:
                             try:
-                                sp_oids.append(_ObjectId(x))
+                                vh_oids.append(_ObjectId(x))
                             except Exception:
-                                sp_oids.append(x)
-                        pov_count = _repos.povs.count(
+                                vh_oids.append(x)
+                        poc_count = _repos.pocs.count(
                             {
                                 "run_id": run_oid,
-                                "suspicious_point_id": {"$in": sp_oids},
+                                "vulnerability_hypothesis_id": {"$in": vh_oids},
                                 "is_successful": True,
                             }
                         )
-                    # Also count fuzzer-discovered POVs
-                    fuzzer_pov_count = _repos.povs.count(
+                    # Also count fuzzer-discovered PoCs
+                    fuzzer_poc_count = _repos.pocs.count(
                         {
                             "run_id": run_oid,
                             "harness_name": fuzzer,
                             "sanitizer": sanitizer,
-                            "suspicious_point_id": {"$in": ["", None]},
+                            "vulnerability_hypothesis_id": {"$in": ["", None]},
                             "is_successful": True,
                         }
                     )
-                    pov_count += fuzzer_pov_count
+                    poc_count += fuzzer_poc_count
 
                     worker_results.append(
                         {
@@ -247,8 +247,8 @@ def signal_handler(signum, frame):
                             "sanitizer": sanitizer,
                             "status": w.get("status", "cancelled"),
                             "duration_str": f"{duration_sec / 60:.1f}m",
-                            "sps_found": sp_count,
-                            "pov_generated": pov_count,
+                            "vhs_found": vh_count,
+                            "poc_generated": poc_count,
                             "patch_generated": w.get("patch_generated", 0),
                         }
                     )
@@ -417,7 +417,7 @@ def create_run(config: Config) -> Run:
         ossfuzz_project_name=config.ossfuzz_project_name,
         sanitizers=config.sanitizers,
         timeout_minutes=config.timeout_minutes,
-        pov_count=config.pov_count,
+        poc_count=config.poc_count,
         budget_limit=config.budget_limit,
         target_commit=config.target_commit,
         base_commit=config.base_commit,

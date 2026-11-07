@@ -46,17 +46,17 @@ coverage:
         target_reached: "Dict mapping target functions to reached status"
         coverage_summary: "Human-readable coverage summary"
 
-    check_pov_reaches_target:
-      description: "Check if a POV reaches a specific target function"
+    check_poc_reaches_target:
+      description: "Check if a PoC reaches a specific target function"
       params:
         fuzzer_name:
           type: string
           required: true
           description: "Name of the fuzzer binary"
-        pov_data_base64:
+        poc_data_base64:
           type: string
           required: true
-          description: "Base64 encoded POV input"
+          description: "Base64 encoded PoC input"
         target_function:
           type: string
           required: true
@@ -273,18 +273,18 @@ analyzer:
         build_paths: "Dict mapping sanitizer names to build directories"
 
 # =============================================================================
-# Suspicious Points Tools (suspicious_points.py)
+# Vulnerability Hypotheses Tools (vulnerability_hypotheses.py)
 # =============================================================================
-suspicious_points:
-  description: "Tools for managing suspicious points (potential vulnerabilities)"
+vulnerability_hypotheses:
+  description: "Tools for managing vulnerability hypotheses (potential vulnerabilities)"
   context_required: true
-  context_function: "SuspiciousPointTools(client)"
+  context_function: "VulnerabilityHypothesisTools(client)"
   note: "Requires AnalysisClient instance; tools are class methods"
 
   tools:
-    create_suspicious_point:
-      description: "Create a new suspicious point when identifying a potential vulnerability"
-      category: "suspicious_point"
+    create_vulnerability_hypothesis:
+      description: "Create a new vulnerability hypothesis when identifying a potential vulnerability"
+      category: "vulnerability_hypothesis"
       params:
         function_name:
           type: string
@@ -318,17 +318,17 @@ suspicious_points:
           required: false
           description: "List of related functions/variables affecting this bug"
       returns:
-        id: "Created suspicious point ID"
+        id: "Created vulnerability hypothesis ID"
         created: "Boolean indicating success"
 
-    update_suspicious_point:
-      description: "Update a suspicious point after verification"
-      category: "suspicious_point"
+    update_vulnerability_hypothesis:
+      description: "Update a vulnerability hypothesis after verification"
+      category: "vulnerability_hypothesis"
       params:
-        suspicious_point_id:
+        vulnerability_hypothesis_id:
           type: string
           required: true
-          description: "ID of the suspicious point to update"
+          description: "ID of the vulnerability hypothesis to update"
         is_checked:
           type: boolean
           required: false
@@ -352,9 +352,9 @@ suspicious_points:
       returns:
         updated: "Boolean indicating success"
 
-    list_suspicious_points:
-      description: "List suspicious points for current task with optional filters"
-      category: "suspicious_point"
+    list_vulnerability_hypotheses:
+      description: "List vulnerability hypotheses for current task with optional filters"
+      category: "vulnerability_hypothesis"
       params:
         filter_unchecked:
           type: boolean
@@ -369,7 +369,7 @@ suspicious_points:
           required: false
           description: "Only return high-priority points"
       returns:
-        suspicious_points: "List of suspicious point objects"
+        vulnerability_hypotheses: "List of vulnerability hypothesis objects"
         count: "Number of points returned"
         stats: "Statistics (total, checked, unchecked, real, false_positive, important)"
 
@@ -472,7 +472,7 @@ categories:
   coverage:
     description: "Tools for dynamic coverage analysis"
     use_cases:
-      - "Verify if a POV reaches target vulnerable function"
+      - "Verify if a PoC reaches target vulnerable function"
       - "Analyze code paths executed by an input"
       - "Guide input generation based on coverage feedback"
 
@@ -504,12 +504,12 @@ categories:
       - "List available fuzzers and their sanitizers"
       - "Get paths to built binaries"
 
-  suspicious_point:
-    description: "Tools for managing suspicious points (potential vulnerabilities)"
+  vulnerability_hypothesis:
+    description: "Tools for managing vulnerability hypotheses (potential vulnerabilities)"
     use_cases:
-      - "Create suspicious points when identifying potential bugs"
-      - "Verify and update suspicious points after analysis"
-      - "List and filter suspicious points by status"
+      - "Create vulnerability hypotheses when identifying potential bugs"
+      - "Verify and update vulnerability hypotheses after analysis"
+      - "List and filter vulnerability hypotheses by status"
       - "Track verification progress"
 
   code_viewing:
@@ -539,8 +539,8 @@ context:
       socket_path: "Path to Analysis Server Unix socket"
       client_id: "Client identifier for query logging"
 
-  suspicious_points:
-    function: "SuspiciousPointTools(client)"
+  vulnerability_hypotheses:
+    function: "VulnerabilityHypothesisTools(client)"
     note: "Class-based tools, instantiate with AnalysisClient"
     params:
       client: "Connected AnalysisClient instance"

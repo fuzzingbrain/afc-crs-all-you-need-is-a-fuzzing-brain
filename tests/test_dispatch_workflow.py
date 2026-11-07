@@ -46,7 +46,7 @@ def _make_run(run_id: str = None, tmp_path: Path = None) -> Run:
     workspace_path = str(tmp_path) if tmp_path else "/tmp/test_run"
     return Run(
         run_id=tid,
-        task_type=JobType.POV,
+        task_type=JobType.POC,
         scan_mode=ScanMode.FULL,
         status=RunStatus.RUNNING,
         workspace_path=workspace_path,
@@ -66,7 +66,7 @@ def _make_config(
         ossfuzz_project_name="libpng",
         timeout_minutes=timeout_minutes,
         budget_limit=50.0,
-        pov_count=1,
+        poc_count=1,
     )
 
 
@@ -335,7 +335,7 @@ class TestCeleryAssignment:
         assert assignment["run_id"] == run_id
         assert assignment["fuzzer"] == "fuzz_png"
         assert assignment["sanitizer"] == "address"
-        assert assignment["task_type"] == "pov"
+        assert assignment["task_type"] == "poc"
         assert assignment["workspace_path"] == ws
         assert assignment["scan_mode"] == "full"
 

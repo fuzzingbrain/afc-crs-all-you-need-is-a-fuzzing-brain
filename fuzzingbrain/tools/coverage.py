@@ -3,7 +3,7 @@
 Coverage Analysis Tool
 
 Runs coverage-instrumented fuzzer to analyze which code paths are executed.
-Used to verify if a POV reaches target functions.
+Used to verify if a PoC reaches target functions.
 
 Workflow:
 1. Run coverage fuzzer with input → generates .profraw
@@ -217,7 +217,7 @@ def run_coverage_fuzzer(
             False,
             "",
             (
-                "No coverage build for this run, so coverage cannot be measured. The coverage build is allowed to fail without stopping a task; trace_pov still traces with gdb against the ASAN binary."
+                "No coverage build for this run, so coverage cannot be measured. The coverage build is allowed to fail without stopping a task; trace_poc still traces with gdb against the ASAN binary."
             ),
         )
 
@@ -951,7 +951,7 @@ def _run_coverage_impl(
         return CoverageResult(
             success=False,
             error=(
-                "No coverage build for this run, so coverage cannot be measured. The coverage build is allowed to fail without stopping a task; trace_pov still traces with gdb against the ASAN binary."
+                "No coverage build for this run, so coverage cannot be measured. The coverage build is allowed to fail without stopping a task; trace_poc still traces with gdb against the ASAN binary."
             ),
         )
 
@@ -1021,17 +1021,17 @@ def _run_coverage_in_dir(
 
 
 @tools_mcp.tool
-def check_pov_reaches_target(
+def check_poc_reaches_target(
     fuzzer_name: str,
-    pov_data_base64: str,
+    poc_data_base64: str,
     target_function: str,
 ) -> Dict[str, Any]:
     """
-    Check if a POV reaches a specific target function.
+    Check if a PoC reaches a specific target function.
 
     Args:
         fuzzer_name: Name of the fuzzer binary
-        pov_data_base64: Base64 encoded POV input
+        poc_data_base64: Base64 encoded PoC input
         target_function: The function name to check
 
     Returns:
@@ -1039,7 +1039,7 @@ def check_pov_reaches_target(
     """
     result = _run_coverage_impl(
         fuzzer_name,
-        pov_data_base64,
+        poc_data_base64,
         target_functions=[target_function],
     )
 
@@ -1066,7 +1066,7 @@ def list_available_fuzzers() -> Dict[str, Any]:
             "success": False,
             "fuzzers": [],
             "error": (
-                "No coverage build for this run, so coverage cannot be measured. The coverage build is allowed to fail without stopping a task; trace_pov still traces with gdb against the ASAN binary."
+                "No coverage build for this run, so coverage cannot be measured. The coverage build is allowed to fail without stopping a task; trace_poc still traces with gdb against the ASAN binary."
             ),
         }
 
@@ -1205,7 +1205,7 @@ def list_fuzzers_impl() -> Dict[str, Any]:
             "success": False,
             "fuzzers": [],
             "error": (
-                "No coverage build for this run, so coverage cannot be measured. The coverage build is allowed to fail without stopping a task; trace_pov still traces with gdb against the ASAN binary."
+                "No coverage build for this run, so coverage cannot be measured. The coverage build is allowed to fail without stopping a task; trace_poc still traces with gdb against the ASAN binary."
             ),
         }
 
@@ -1305,15 +1305,15 @@ def get_feedback_impl(
     }
 
 
-def check_pov_reaches_target_impl(
+def check_poc_reaches_target_impl(
     fuzzer_name: str,
-    pov_data_base64: str,
+    poc_data_base64: str,
     target_function: str,
 ) -> Dict[str, Any]:
-    """Direct call version of check_pov_reaches_target (bypasses MCP FunctionTool wrapper)."""
+    """Direct call version of check_poc_reaches_target (bypasses MCP FunctionTool wrapper)."""
     result = _run_coverage_impl(
         fuzzer_name,
-        pov_data_base64,
+        poc_data_base64,
         target_functions=[target_function],
     )
 
@@ -1328,14 +1328,14 @@ def check_pov_reaches_target_impl(
 __all__ = [
     # MCP Tools (FunctionTool objects - use via MCP only)
     "run_coverage",
-    "check_pov_reaches_target",
+    "check_poc_reaches_target",
     "list_available_fuzzers",
     "get_coverage_feedback",
     # Direct-call functions (for health check and testing)
     "run_coverage_impl",  # Alias for _run_coverage_impl
     "list_fuzzers_impl",  # Alias for direct list
     "get_feedback_impl",  # Alias for direct get
-    "check_pov_reaches_target_impl",  # Alias for direct check
+    "check_poc_reaches_target_impl",  # Alias for direct check
     # Setup and utilities
     "set_coverage_context",
     "set_coverage_fuzzer_path",

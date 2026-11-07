@@ -20,26 +20,26 @@ class Patch:
     A successful patch must:
     1. Apply cleanly to the codebase
     2. Compile successfully
-    3. Pass POV check (no longer triggers the bug)
+    3. Pass PoC check (no longer triggers the bug)
     4. Pass regression tests (if provided)
     """
 
     # Identifiers
     patch_id: str = field(default_factory=generate_id)
     run_id: str = ""  # Required: which run does this patch belong to
-    pov_id: Optional[str] = None  # Optional: which POV is this patch fixing
+    poc_id: Optional[str] = None  # Optional: which PoC is this patch fixing
 
     # Patch content
     patch_content: Optional[str] = None  # The actual diff content
 
     # Description
     description: Optional[str] = None
-    pov_detail: Optional[str] = None  # User-provided POV detail
+    poc_detail: Optional[str] = None  # User-provided PoC detail
 
     # Verification results
     apply_check: bool = False  # Can the patch be applied?
     compilation_check: bool = False  # Does it compile?
-    pov_check: bool = False  # Does it pass POV test?
+    poc_check: bool = False  # Does it pass PoC test?
     test_check: bool = False  # Does it pass regression tests?
 
     # Status
@@ -57,13 +57,13 @@ class Patch:
             "_id": ObjectId(self.patch_id) if self.patch_id else ObjectId(),
             # Note: patch_id removed - use _id only
             "run_id": ObjectId(self.run_id) if self.run_id else None,
-            "pov_id": ObjectId(self.pov_id) if self.pov_id else None,
+            "poc_id": ObjectId(self.poc_id) if self.poc_id else None,
             "patch_content": self.patch_content,
             "description": self.description,
-            "pov_detail": self.pov_detail,
+            "poc_detail": self.poc_detail,
             "apply_check": self.apply_check,
             "compilation_check": self.compilation_check,
-            "pov_check": self.pov_check,
+            "poc_check": self.poc_check,
             "test_check": self.test_check,
             "is_active": self.is_active,
             "msg_history": self.msg_history,
@@ -82,20 +82,20 @@ class Patch:
         if isinstance(run_id, ObjectId):
             run_id = str(run_id)
 
-        pov_id = data.get("pov_id")
-        if isinstance(pov_id, ObjectId):
-            pov_id = str(pov_id)
+        poc_id = data.get("poc_id")
+        if isinstance(poc_id, ObjectId):
+            poc_id = str(poc_id)
 
         return cls(
             patch_id=patch_id or generate_id(),
             run_id=run_id,
-            pov_id=pov_id,
+            poc_id=poc_id,
             patch_content=data.get("patch_content"),
             description=data.get("description"),
-            pov_detail=data.get("pov_detail"),
+            poc_detail=data.get("poc_detail"),
             apply_check=data.get("apply_check", False),
             compilation_check=data.get("compilation_check", False),
-            pov_check=data.get("pov_check", False),
+            poc_check=data.get("poc_check", False),
             test_check=data.get("test_check", False),
             is_active=data.get("is_active", True),
             msg_history=data.get("msg_history", []),
@@ -108,7 +108,7 @@ class Patch:
         return (
             self.apply_check
             and self.compilation_check
-            and self.pov_check
+            and self.poc_check
             and self.test_check
         )
 

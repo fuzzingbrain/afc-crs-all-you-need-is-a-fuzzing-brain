@@ -339,7 +339,7 @@ class AnalyzerBuilder:
                 # $ORIGIN-relative RUNPATH/RPATH (e.g. systemd's
                 # $ORIGIN/src/shared/libsystemd-shared-*.so). Copying only the
                 # binary leaves those unresolved, so in the run container the
-                # loader aborts with rc=127 and every PoV silently reports "no
+                # loader aborts with rc=127 and every PoC silently reports "no
                 # crash" -- the finder looks fine while nothing is ever executed.
                 self._stage_origin_runpath_libs(src_path, out_dir)
                 placed += 1
@@ -368,7 +368,7 @@ class AnalyzerBuilder:
         systemd is the case that forced this: its fuzzers link
         ``libsystemd-shared-*.so`` with RUNPATH ``$ORIGIN/src/shared``. Staging
         only the binary drops that tree, the loader can't find the library, the
-        binary exits 127, and every PoV attempt looks like a clean no-crash.
+        binary exits 127, and every PoC attempt looks like a clean no-crash.
 
         Best-effort: any failure (no readelf, unreadable binary, no RUNPATH)
         leaves the previous binary-only behaviour untouched, so other projects

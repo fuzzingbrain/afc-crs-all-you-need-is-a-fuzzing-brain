@@ -11,7 +11,7 @@ the xfail marker should be removed.
 Known bugs:
   1. __exit__ pops registry BEFORE DB save → zombie worker/agent on save failure
   2. increment_*() counters are read-modify-write without lock → lost updates
-  3. claim_for_verify() has no recovery → orphaned SPs stuck forever
+  3. claim_for_verify() has no recovery → orphaned VHs stuck forever
   5. update_status() allows backward transitions (completed → running)
   6. __enter__() has no reentrance guard → started_at overwritten
 """
@@ -36,9 +36,9 @@ from fuzzingbrain.agents.context import (
     _agent_contexts,
     _agent_contexts_lock,
 )
-from fuzzingbrain.core.models import SPStatus
-from fuzzingbrain.core.models.direction import DirectionStatus
-from fuzzingbrain.db.repository import SuspiciousPointRepository, DirectionRepository
+from fuzzingbrain.core.models import VHStatus
+from fuzzingbrain.core.models.logic_group import LogicGroupStatus
+from fuzzingbrain.db.repository import VulnerabilityHypothesisRepository, LogicGroupRepository
 
 
 # All local imports in context.py use `from ..db import get_database`
@@ -99,15 +99,15 @@ def run_id():
 
 
 @pytest.fixture
-def sp_repo(mock_db):
-    """SuspiciousPointRepository backed by mongomock."""
-    return SuspiciousPointRepository(mock_db)
+def vh_repo(mock_db):
+    """VulnerabilityHypothesisRepository backed by mongomock."""
+    return VulnerabilityHypothesisRepository(mock_db)
 
 
 @pytest.fixture
 def dir_repo(mock_db):
-    """DirectionRepository backed by mongomock."""
-    return DirectionRepository(mock_db)
+    """LogicGroupRepository backed by mongomock."""
+    return LogicGroupRepository(mock_db)
 
 
 def _make_worker(run_id: str, **kwargs) -> WorkerContext:
@@ -125,7 +125,7 @@ def _make_agent(run_id: str, worker_id: str, **kwargs) -> AgentContext:
     return AgentContext(
         run_id=run_id,
         worker_id=worker_id,
-        agent_type=kwargs.get("agent_type", "POVAgent"),
+        agent_type=kwargs.get("agent_type", "POCAgent"),
         fuzzer=kwargs.get("fuzzer", "libfuzzer"),
         sanitizer=kwargs.get("sanitizer", "address"),
     )
@@ -329,11 +329,11 @@ class TestCounterRaceConditions:
 
         ctx.__exit__(None, None, None)
 
-    def test_concurrent_increment_sp_found_with_force_save(
+    def test_concurrent_increment_vh_found_with_force_save(
         self, patch_worker_db, run_id
     ):
         """
-        increment_sp_found calls _save_to_db(force=True) → heavier lock
+        increment_vh_found calls _save_to_db(force=True) → heavier lock
         contention makes the unprotected counter race more likely.
         """
         ctx = _make_worker(run_id)
@@ -346,7 +346,7 @@ class TestCounterRaceConditions:
         def inc():
             try:
                 barrier.wait(timeout=5)
-                ctx.increment_sp_found(count=1)
+                ctx.increment_vh_found(count=1)
             except Exception as e:
                 errors.append(e)
 
@@ -357,20 +357,20 @@ class TestCounterRaceConditions:
             t.join(timeout=10)
 
         assert not errors, f"Thread errors: {errors}"
-        assert ctx.sp_found == n_threads, (
-            f"Race condition: expected {n_threads}, got {ctx.sp_found} "
-            f"(lost {n_threads - ctx.sp_found} updates)"
+        assert ctx.vh_found == n_threads, (
+            f"Race condition: expected {n_threads}, got {ctx.vh_found} "
+            f"(lost {n_threads - ctx.vh_found} updates)"
         )
 
         ctx.__exit__(None, None, None)
 
 
 # =============================================================================
-# Class 3: Orphaned SP Claims  (Bug 3 — SEVERE)
+# Class 3: Orphaned VH Claims  (Bug 3 — SEVERE)
 #
 # Root cause: claim_for_verify() sets status to "verifying" atomically,
 # but there is no timeout, TTL, or reaper. If the agent crashes without
-# calling release_claim(), the SP is stuck forever.
+# calling release_claim(), the VH is stuck forever.
 # =============================================================================
 
 
@@ -379,20 +379,20 @@ class TestOrphanedClaims:
     Invariant: An orphaned claim (agent crashed after claim) must be
     recoverable by another agent without manual intervention.
 
-    Tests all three claim types: verify, POV, and direction.
+    Tests all three claim types: verify, PoC, and logic group.
     """
 
     # ---- helpers ----
 
-    def _insert_pending_verify_sp(self, mock_db, run_id: str) -> str:
-        """Insert a pending_verify SP, return its ID."""
-        sp_id = ObjectId()
-        mock_db.suspicious_points.insert_one(
+    def _insert_pending_verify_vh(self, mock_db, run_id: str) -> str:
+        """Insert a pending_verify VH, return its ID."""
+        vh_id = ObjectId()
+        mock_db.vulnerability_hypotheses.insert_one(
             {
-                "_id": sp_id,
+                "_id": vh_id,
                 "run_id": ObjectId(run_id),
                 "function_name": "vuln_func",
-                "status": SPStatus.PENDING_VERIFY.value,
+                "status": VHStatus.PENDING_VERIFY.value,
                 "score": 0.8,
                 "proceed": False,
                 "is_checked_by_verifier": False,
@@ -401,42 +401,42 @@ class TestOrphanedClaims:
                 "created_at": datetime.now(),
             }
         )
-        return str(sp_id)
+        return str(vh_id)
 
-    def _insert_pending_pov_sp(self, mock_db, run_id: str) -> str:
-        """Insert a pending_pov SP, return its ID."""
-        sp_id = ObjectId()
-        mock_db.suspicious_points.insert_one(
+    def _insert_pending_poc_vh(self, mock_db, run_id: str) -> str:
+        """Insert a pending_poc VH, return its ID."""
+        vh_id = ObjectId()
+        mock_db.vulnerability_hypotheses.insert_one(
             {
-                "_id": sp_id,
+                "_id": vh_id,
                 "run_id": ObjectId(run_id),
                 "function_name": "vuln_func",
-                "status": SPStatus.PENDING_POV.value,
+                "status": VHStatus.PENDING_POC.value,
                 "score": 0.9,
                 "proceed": True,
                 "is_checked_by_verifier": True,
                 "is_crash_found": True,
-                "pov_success_by": None,
-                "pov_attempted_by": [],
+                "poc_success_by": None,
+                "poc_attempted_by": [],
                 "sources": [{"harness_name": "fuzz_x", "sanitizer": "address"}],
                 "created_at": datetime.now(),
             }
         )
-        return str(sp_id)
+        return str(vh_id)
 
-    def _insert_pending_direction(
+    def _insert_pending_logic_group(
         self, mock_db, run_id: str, fuzzer: str = "fuzz_x"
     ) -> str:
-        """Insert a pending direction, return its ID."""
+        """Insert a pending logic group, return its ID."""
         dir_id = ObjectId()
-        mock_db.directions.insert_one(
+        mock_db.logic_groups.insert_one(
             {
                 "_id": dir_id,
                 "run_id": ObjectId(run_id),
                 "fuzzer": fuzzer,
-                "name": "test_direction",
+                "name": "test_logic_group",
                 "description": "test",
-                "status": DirectionStatus.PENDING.value,
+                "status": LogicGroupStatus.PENDING.value,
                 "risk_level": "high",
                 "core_functions": ["func_a"],
                 "entry_functions": ["main"],
@@ -447,7 +447,7 @@ class TestOrphanedClaims:
 
     # ---- Verify claim tests ----
 
-    def test_verify_crash_releases_claim_via_finally(self, mock_db, run_id, sp_repo):
+    def test_verify_crash_releases_claim_via_finally(self, mock_db, run_id, vh_repo):
         """
         Simulate pipeline's finally block: agent crashes after claiming,
         finally calls release_claim, next agent can reclaim.
@@ -455,56 +455,56 @@ class TestOrphanedClaims:
         This is the fix for Bug #3a: pipeline.py's try/finally ensures
         release_claim is always called, even on KeyboardInterrupt/CancelledError.
         """
-        self._insert_pending_verify_sp(mock_db, run_id)
+        self._insert_pending_verify_vh(mock_db, run_id)
 
-        claimed1 = sp_repo.claim_for_verify(run_id, processor_id="agent-001")
+        claimed1 = vh_repo.claim_for_verify(run_id, processor_id="agent-001")
         assert claimed1 is not None
         assert claimed1.status == "verifying"
 
         # Agent 1 "crashes" — pipeline's finally block calls release_claim
-        released = sp_repo.release_claim(
-            claimed1.suspicious_point_id, revert_status="pending_verify"
+        released = vh_repo.release_claim(
+            claimed1.vulnerability_hypothesis_id, revert_status="pending_verify"
         )
         assert released is True
 
         # Agent 2 can now reclaim
-        claimed2 = sp_repo.claim_for_verify(run_id, processor_id="agent-002")
+        claimed2 = vh_repo.claim_for_verify(run_id, processor_id="agent-002")
         assert claimed2 is not None, (
-            "SP must be reclaimable after release_claim in finally block"
+            "VH must be reclaimable after release_claim in finally block"
         )
 
-    def test_verify_release_claim_restores_to_pending(self, mock_db, run_id, sp_repo):
+    def test_verify_release_claim_restores_to_pending(self, mock_db, run_id, vh_repo):
         """
-        Explicit release_claim correctly restores the SP.
+        Explicit release_claim correctly restores the VH.
         Proves recovery path exists but requires manual intervention.
         """
-        sp_id = self._insert_pending_verify_sp(mock_db, run_id)
+        vh_id = self._insert_pending_verify_vh(mock_db, run_id)
 
-        claimed = sp_repo.claim_for_verify(run_id, processor_id="agent-001")
+        claimed = vh_repo.claim_for_verify(run_id, processor_id="agent-001")
         assert claimed is not None
 
-        released = sp_repo.release_claim(sp_id, revert_status="pending_verify")
+        released = vh_repo.release_claim(vh_id, revert_status="pending_verify")
         assert released is True
 
-        claimed2 = sp_repo.claim_for_verify(run_id, processor_id="agent-002")
+        claimed2 = vh_repo.claim_for_verify(run_id, processor_id="agent-002")
         assert claimed2 is not None
 
-    # ---- POV claim tests ----
+    # ---- PoC claim tests ----
 
-    def test_pov_orphaned_sp_reclaimable_by_different_worker(
-        self, mock_db, run_id, sp_repo
+    def test_poc_orphaned_vh_reclaimable_by_different_worker(
+        self, mock_db, run_id, vh_repo
     ):
         """
-        POV claim allows re-claiming by a DIFFERENT fuzzer/sanitizer combo
-        because query matches both pending_pov and generating_pov.
+        PoC claim allows re-claiming by a DIFFERENT fuzzer/sanitizer combo
+        because query matches both pending_poc and generating_poc.
 
-        Note: claim_for_pov without harness_name/sanitizer skips the
-        sources and pov_attempted_by filters, so any worker can reclaim.
+        Note: claim_for_poc without harness_name/sanitizer skips the
+        sources and poc_attempted_by filters, so any worker can reclaim.
         """
-        self._insert_pending_pov_sp(mock_db, run_id)
+        self._insert_pending_poc_vh(mock_db, run_id)
 
         # Worker A claims (with source filter)
-        claimed1 = sp_repo.claim_for_pov(
+        claimed1 = vh_repo.claim_for_poc(
             run_id,
             processor_id="agent-001",
             harness_name="fuzz_x",
@@ -512,30 +512,30 @@ class TestOrphanedClaims:
         )
         assert claimed1 is not None
 
-        # Worker A "crashes" — SP stays in generating_pov
+        # Worker A "crashes" — VH stays in generating_poc
 
-        # Worker B (no filter — simulates a different worker that can handle any SP)
-        claimed2 = sp_repo.claim_for_pov(
+        # Worker B (no filter — simulates a different worker that can handle any VH)
+        claimed2 = vh_repo.claim_for_poc(
             run_id,
             processor_id="agent-002",
         )
         assert claimed2 is not None, (
-            "Orphaned POV SP must be reclaimable by a different worker"
+            "Orphaned PoC VH must be reclaimable by a different worker"
         )
 
-    def test_pov_crash_releases_claim_and_attempted_by(self, mock_db, run_id, sp_repo):
+    def test_poc_crash_releases_claim_and_attempted_by(self, mock_db, run_id, vh_repo):
         """
-        Simulate pipeline's finally block for POV: agent crashes after claiming,
+        Simulate pipeline's finally block for PoC: agent crashes after claiming,
         finally calls release_claim with harness_name/sanitizer to also clean
-        pov_attempted_by, so the same worker can retry.
+        poc_attempted_by, so the same worker can retry.
 
         This is the fix for Bug #3c: release_claim now accepts harness_name/sanitizer
-        to remove the pov_attempted_by entry on crash recovery.
+        to remove the poc_attempted_by entry on crash recovery.
         """
-        self._insert_pending_pov_sp(mock_db, run_id)
+        self._insert_pending_poc_vh(mock_db, run_id)
 
         # Worker A claims
-        claimed1 = sp_repo.claim_for_pov(
+        claimed1 = vh_repo.claim_for_poc(
             run_id,
             processor_id="agent-001",
             harness_name="fuzz_x",
@@ -544,38 +544,38 @@ class TestOrphanedClaims:
         assert claimed1 is not None
 
         # Worker A "crashes" — pipeline's finally block calls release_claim
-        # with harness_name/sanitizer to clean pov_attempted_by
-        released = sp_repo.release_claim(
-            claimed1.suspicious_point_id,
-            revert_status="pending_pov",
+        # with harness_name/sanitizer to clean poc_attempted_by
+        released = vh_repo.release_claim(
+            claimed1.vulnerability_hypothesis_id,
+            revert_status="pending_poc",
             harness_name="fuzz_x",
             sanitizer="address",
         )
         assert released is True
 
         # Same worker combo can now retry
-        claimed2 = sp_repo.claim_for_pov(
+        claimed2 = vh_repo.claim_for_poc(
             run_id,
             processor_id="agent-001",
             harness_name="fuzz_x",
             sanitizer="address",
         )
         assert claimed2 is not None, (
-            "Same worker should be able to retry after crash with pov_attempted_by cleanup"
+            "Same worker should be able to retry after crash with poc_attempted_by cleanup"
         )
 
-    # ---- Direction claim tests ----
+    # ---- Logic group claim tests ----
 
-    def test_direction_crash_releases_claim(self, mock_db, run_id, dir_repo):
+    def test_logic_group_crash_releases_claim(self, mock_db, run_id, dir_repo):
         """
-        After an agent claims a direction and crashes, release_claim
+        After an agent claims a logic group and crashes, release_claim
         restores it to pending so another agent can reclaim.
 
-        Note: directions.claim() is currently not called in production code
+        Note: logic_groups.claim() is currently not called in production code
         (fullscan uses find_pending() directly), but this tests the mechanism
         in case it's wired up in the future.
         """
-        dir_id = self._insert_pending_direction(mock_db, run_id)
+        dir_id = self._insert_pending_logic_group(mock_db, run_id)
 
         claimed1 = dir_repo.claim(run_id, fuzzer="fuzz_x", processor_id="agent-001")
         assert claimed1 is not None
@@ -586,16 +586,16 @@ class TestOrphanedClaims:
 
         # Another agent can now reclaim
         claimed2 = dir_repo.claim(run_id, fuzzer="fuzz_x", processor_id="agent-002")
-        assert claimed2 is not None, "Direction must be reclaimable after release_claim"
+        assert claimed2 is not None, "Logic group must be reclaimable after release_claim"
 
-    def test_direction_release_claim_restores_to_pending(
+    def test_logic_group_release_claim_restores_to_pending(
         self, mock_db, run_id, dir_repo
     ):
         """
-        Explicit release_claim correctly restores the direction.
+        Explicit release_claim correctly restores the logic group.
         Proves recovery path exists but requires manual invocation.
         """
-        dir_id = self._insert_pending_direction(mock_db, run_id)
+        dir_id = self._insert_pending_logic_group(mock_db, run_id)
 
         claimed = dir_repo.claim(run_id, fuzzer="fuzz_x", processor_id="agent-001")
         assert claimed is not None

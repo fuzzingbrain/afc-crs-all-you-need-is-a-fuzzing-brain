@@ -24,21 +24,21 @@ class AgentType(str, Enum):
     - Logging and display
     """
 
-    # Direction Planning
-    DIRECTION_PLANNING = "DirectionPlanningAgent"
+    # Logic group Planning
+    LG_PLANNING = "LGPlanningAgent"
 
-    # SP Generation
-    FULL_SP_GENERATOR = "FullSPGenerator"
-    LARGE_FULL_SP_GENERATOR = "LargeFullSPGenerator"
-    DELTA_SP_GENERATOR = "DeltaSPGenerator"
-    REACHABILITY_SP_GENERATOR = "ReachabilitySPGenerator"
+    # VH Generation
+    FULL_VH_GENERATOR = "FullVHGenerator"
+    LARGE_FULL_VH_GENERATOR = "LargeFullVHGenerator"
+    DELTA_VH_GENERATOR = "DeltaVHGenerator"
+    REACHABILITY_VH_GENERATOR = "ReachabilityVHGenerator"
 
-    # SP Verification
-    SP_VERIFIER = "SPVerifier"
+    # VH Verification
+    VH_VERIFIER = "VHVerifier"
 
-    # POV Generation
-    POV_AGENT = "POVAgent"
-    POV_REPORT_AGENT = "POVReportAgent"
+    # PoC Generation
+    POC_AGENT = "POCAgent"
+    POC_REPORT_AGENT = "POCReportAgent"
 
     # Seed Generation
     SEED_AGENT = "SeedAgent"
@@ -52,29 +52,29 @@ class AgentType(str, Enum):
     def get_category(cls, agent_type: "AgentType") -> str:
         """Get the category of an agent type."""
         categories = {
-            cls.DIRECTION_PLANNING: "direction",
-            cls.FULL_SP_GENERATOR: "spg",
-            cls.LARGE_FULL_SP_GENERATOR: "spg",
-            cls.DELTA_SP_GENERATOR: "spg",
-            cls.REACHABILITY_SP_GENERATOR: "spg",
-            cls.SP_VERIFIER: "spv",
-            cls.POV_AGENT: "pov",
-            cls.POV_REPORT_AGENT: "pov",
+            cls.LG_PLANNING: "logic_group",
+            cls.FULL_VH_GENERATOR: "vhg",
+            cls.LARGE_FULL_VH_GENERATOR: "vhg",
+            cls.DELTA_VH_GENERATOR: "vhg",
+            cls.REACHABILITY_VH_GENERATOR: "vhg",
+            cls.VH_VERIFIER: "vhv",
+            cls.POC_AGENT: "poc",
+            cls.POC_REPORT_AGENT: "poc",
             cls.SEED_AGENT: "seed",
         }
         return categories.get(agent_type, "unknown")
 
     @classmethod
-    def sp_generators(cls) -> list:
-        """Get all SP generator types."""
+    def vh_generators(cls) -> list:
+        """Get all VH generator types."""
         return [
-            cls.FULL_SP_GENERATOR,
-            cls.LARGE_FULL_SP_GENERATOR,
-            cls.DELTA_SP_GENERATOR,
-            cls.REACHABILITY_SP_GENERATOR,
+            cls.FULL_VH_GENERATOR,
+            cls.LARGE_FULL_VH_GENERATOR,
+            cls.DELTA_VH_GENERATOR,
+            cls.REACHABILITY_VH_GENERATOR,
         ]
 
     @classmethod
-    def pov_agents(cls) -> list:
-        """Get all POV-related agent types."""
-        return [cls.POV_AGENT, cls.POV_REPORT_AGENT]
+    def poc_agents(cls) -> list:
+        """Get all PoC-related agent types."""
+        return [cls.POC_AGENT, cls.POC_REPORT_AGENT]

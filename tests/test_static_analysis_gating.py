@@ -52,7 +52,7 @@ def test_file_tools_survive_the_gate():
 
 def test_findings_tools_survive_the_gate():
     names = _names(include_static_analysis_tools=False)
-    assert {"create_suspicious_point", "update_suspicious_point"} <= names
+    assert {"create_vulnerability_hypothesis", "update_vulnerability_hypothesis"} <= names
 
 
 def test_gate_removes_only_the_index_tools():
@@ -103,7 +103,7 @@ def test_prompts_name_only_tools_the_agent_has(available):
 COVERAGE = {
     "run_coverage",
     "get_coverage_feedback",
-    "check_pov_reaches_target",
+    "check_poc_reaches_target",
     "list_available_fuzzers",
 }
 
@@ -118,11 +118,11 @@ def test_coverage_tools_are_withheld_without_a_coverage_build():
     assert COVERAGE & _names(include_coverage_tools=False) == set()
 
 
-def test_trace_pov_survives_a_missing_coverage_build():
-    """trace_pov traces with gdb against the ASAN binary and only falls back to
+def test_trace_poc_survives_a_missing_coverage_build():
+    """trace_poc traces with gdb against the ASAN binary and only falls back to
     coverage, so it loses detail rather than breaking. Gating it with the
     coverage tools would be the mistake this test exists to catch."""
-    assert "trace_pov" in _names(include_coverage_tools=False)
+    assert "trace_poc" in _names(include_coverage_tools=False)
 
 
 def test_coverage_gate_removes_only_the_coverage_tools():
@@ -137,7 +137,7 @@ def test_the_two_gates_are_independent():
     assert GATED & both_off == set()
     assert COVERAGE & both_off == set()
     assert ALWAYS <= both_off, "reading source must survive both gates"
-    assert "trace_pov" in both_off
+    assert "trace_poc" in both_off
 
 
 def test_coverage_error_says_the_build_is_missing_not_the_context():
@@ -168,7 +168,7 @@ WITH_INDEX = [
     "get_function_source",
     "get_callers",
     "get_callees",
-    "create_suspicious_point",
+    "create_vulnerability_hypothesis",
     "analyzer_status",
 ]
 WITHOUT_INDEX = [
@@ -178,46 +178,46 @@ WITHOUT_INDEX = [
 ]
 
 
-def test_sp_generator_can_read_code_without_an_index():
+def test_vh_generator_can_read_code_without_an_index():
     """The generator filtered tools through an allow-list of five names, three
     of which read the function index. A run without one left it holding
-    get_diff and create_suspicious_point -- two tools, no way to read code, and
+    get_diff and create_vulnerability_hypothesis -- two tools, no way to read code, and
     it still had to name a vulnerable function. Observed in a real run:
-    'Available tools: get_diff, create_suspicious_point'."""
-    from fuzzingbrain.agents.sp_generators import SPGeneratorBase
+    'Available tools: get_diff, create_vulnerability_hypothesis'."""
+    from fuzzingbrain.agents.vh_generators import VHGeneratorBase
 
-    kept = _filtered(SPGeneratorBase, WITHOUT_INDEX)
+    kept = _filtered(VHGeneratorBase, WITHOUT_INDEX)
     assert {"Read", "Grep", "Glob"} <= kept
-    assert "create_suspicious_point" in kept
+    assert "create_vulnerability_hypothesis" in kept
 
 
-def test_sp_generator_keeps_the_index_tools_when_they_exist():
-    from fuzzingbrain.agents.sp_generators import SPGeneratorBase
+def test_vh_generator_keeps_the_index_tools_when_they_exist():
+    from fuzzingbrain.agents.vh_generators import VHGeneratorBase
 
-    kept = _filtered(SPGeneratorBase, WITH_INDEX)
+    kept = _filtered(VHGeneratorBase, WITH_INDEX)
     assert {"get_function_source", "get_callers", "get_callees"} <= kept
 
 
-def test_sp_generator_still_excludes_what_it_should():
-    """Generation writes suspicious points; it does not verify them or run
+def test_vh_generator_still_excludes_what_it_should():
+    """Generation writes vulnerability hypotheses; it does not verify them or run
     binaries."""
-    from fuzzingbrain.agents.sp_generators import SPGeneratorBase
+    from fuzzingbrain.agents.vh_generators import VHGeneratorBase
 
     kept = _filtered(
-        SPGeneratorBase,
+        VHGeneratorBase,
         WITH_INDEX
-        + ["update_suspicious_point", "create_pov", "verify_pov", "run_coverage"],
+        + ["update_vulnerability_hypothesis", "create_poc", "verify_poc", "run_coverage"],
     )
     assert (
-        kept & {"update_suspicious_point", "create_pov", "verify_pov", "run_coverage"}
+        kept & {"update_vulnerability_hypothesis", "create_poc", "verify_poc", "run_coverage"}
         == set()
     )
 
 
 def test_verifier_can_read_code_without_an_index():
-    from fuzzingbrain.agents.sp_verifier import SPVerifier
+    from fuzzingbrain.agents.vh_verifier import VHVerifier
 
-    assert {"Read", "Grep", "Glob"} <= _filtered(SPVerifier, WITHOUT_INDEX)
+    assert {"Read", "Grep", "Glob"} <= _filtered(VHVerifier, WITHOUT_INDEX)
 
 
 def test_agent_filters_do_not_use_allow_lists():
@@ -225,10 +225,10 @@ def test_agent_filters_do_not_use_allow_lists():
     is how Read, Grep and Glob stayed invisible to the generator."""
     import inspect
 
-    from fuzzingbrain.agents.sp_generators import SPGeneratorBase
-    from fuzzingbrain.agents.sp_verifier import SPVerifier
+    from fuzzingbrain.agents.vh_generators import VHGeneratorBase
+    from fuzzingbrain.agents.vh_verifier import VHVerifier
 
-    for cls in (SPGeneratorBase, SPVerifier):
+    for cls in (VHGeneratorBase, VHVerifier):
         src = inspect.getsource(cls._filter_tools_for_mode)
         assert "not in" in src, f"{cls.__name__} filters by exclusion, not inclusion"
 
@@ -283,7 +283,7 @@ def test_an_unreachable_server_reports_the_server_not_a_typo(monkeypatch):
 
 
 def test_a_failed_read_closes_the_index_gate_and_leaves_coverage_open():
-    """The two gates read an empty status in opposite directions on purpose:
+    """The two gates read an empty status in opposite logic groups on purpose:
     the index tools use the socket that just failed, the coverage tools do
     not."""
     probe = _StatusProbe()

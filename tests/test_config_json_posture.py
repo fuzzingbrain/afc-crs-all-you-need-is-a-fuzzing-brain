@@ -79,7 +79,7 @@ def test_a_flag_overrides_the_task_file(tmp_path):
     cfg = Config.from_json(path)
     cfg.apply_args(args)
     assert cfg.budget_limit == 0  # 0 = unlimited, not dropped as falsy
-    assert cfg.concurrency.pov_agents == 1
+    assert cfg.concurrency.poc_agents == 1
 
 
 def test_force_model_and_models_are_exclusive(tmp_path):

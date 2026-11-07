@@ -71,7 +71,7 @@ class HarnessSpec:
     # installs (a pinned JDK+maven, a rustup nightly bootstrap, ...).
     setup_steps: List[str] = field(default_factory=list)
     # Optional known-vulnerability report. Written to <ws>/DESCRIPTION.txt and
-    # fed to direction planning to focus the search (see pov_fullscan).
+    # fed to logic group planning to focus the search (see poc_fullscan).
     description: str = ""
 
     @classmethod
@@ -223,7 +223,7 @@ def build_workspace(
     build_sh = proj_dir / "build.sh"
     build_sh.write_text(_render_build_sh(spec))
     build_sh.chmod(0o755)
-    # Optional bug report for direction planning (see pov_fullscan._get_vuln_hint)
+    # Optional bug report for logic group planning (see poc_fullscan._get_vuln_hint)
     if spec.description.strip():
         (dest / "DESCRIPTION.txt").write_text(spec.description.strip() + "\n")
     if spec.harness_files:

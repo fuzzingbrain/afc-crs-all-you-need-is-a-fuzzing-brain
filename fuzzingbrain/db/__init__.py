@@ -9,7 +9,7 @@ from .connection import MongoDB, get_database
 from .repository import (
     BaseRepository,
     RunRepository,
-    POVRepository,
+    POCRepository,
     PatchRepository,
     WorkerRepository,
     FuzzerRepository,
@@ -40,7 +40,7 @@ __all__ = [
     # Repositories
     "BaseRepository",
     "RunRepository",
-    "POVRepository",
+    "POCRepository",
     "PatchRepository",
     "WorkerRepository",
     "FuzzerRepository",

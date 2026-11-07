@@ -59,7 +59,7 @@ def main() -> int:
         dst = out / "tasks" / f"{tag}__{t['task_id']}.json"
         dst.write_text(json.dumps(t, indent=2))
         rows.append((tag, t["task_id"], t["scan_mode"], t["model_profile"],
-                     t.get("pov_count", 1), t["timeout_minutes"], str(dst)))
+                     t.get("poc_count", 1), t["timeout_minutes"], str(dst)))
 
     if problems:
         print("REFUSING TO PLAN -- fix these first:", file=sys.stderr)
@@ -74,9 +74,9 @@ def main() -> int:
             fh.write("\t".join(str(x) for x in r) + "\n")
 
     total = sum(r[5] for r in rows)
-    print(f"{'tag':48} {'mode':6} {'profile':15} {'pov':>3} {'min':>5}")
-    for tag, tid, mode, prof, pov, mins, _ in rows:
-        print(f"{tag:48} {mode:6} {prof:15} {pov:>3} {mins:>5}")
+    print(f"{'tag':48} {'mode':6} {'profile':15} {'poc':>3} {'min':>5}")
+    for tag, tid, mode, prof, poc, mins, _ in rows:
+        print(f"{tag:48} {mode:6} {prof:15} {poc:>3} {mins:>5}")
     print(f"\n{len(rows)} tasks, budget ${budget:g} each (max ${budget * len(rows):g}), "
           f"worst case {total} min = {total / 60:.1f} h if every run times out")
     return 0

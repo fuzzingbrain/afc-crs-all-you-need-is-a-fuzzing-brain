@@ -668,7 +668,7 @@ def spec_from_bench_bug(
 
     Args:
         bug_dir: Path to a bench bug (contains bench.yaml, harness/, Dockerfile).
-        with_description: Include the bug's description.txt as a direction hint.
+        with_description: Include the bug's description.txt as a logic group hint.
             The bench's task is to reproduce *from a description*, so this is the
             faithful (and far more effective) mode; set False to measure purely
             autonomous discovery.

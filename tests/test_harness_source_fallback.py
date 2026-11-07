@@ -5,7 +5,7 @@ Its own description tells the agent this is the most important tool and to call
 it first. On the curl challenge it failed on all four calls with "Fuzzer source
 path not available": every lookup it had needed the build to report a source
 path, and none of them fires when a run names its fuzzers explicitly. The agent
-retried it four times out of fifty iterations and found no suspicious points.
+retried it four times out of fifty iterations and found no vulnerability hypotheses.
 """
 
 import asyncio

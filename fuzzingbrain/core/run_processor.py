@@ -43,7 +43,7 @@ class WorkspaceSetup:
         try:
             run_workspace = Path(self.config.workspace)
             run_workspace.mkdir(parents=True, exist_ok=True)
-            (run_workspace / "results" / "povs").mkdir(parents=True, exist_ok=True)
+            (run_workspace / "results" / "pocs").mkdir(parents=True, exist_ok=True)
             (run_workspace / "results" / "patches").mkdir(parents=True, exist_ok=True)
             (run_workspace / "logs").mkdir(exist_ok=True)
 
@@ -941,10 +941,10 @@ class RunProcessor:
                         run.mark_completed()
                     else:
                         run.mark_error(f"{result['failed']} workers failed")
-                elif result["status"] == "pov_target_reached":
+                elif result["status"] == "poc_target_reached":
                     run.mark_completed()
                     logger.info(
-                        f"Run completed: POV target reached ({result.get('pov_count', 0)} POVs)"
+                        f"Run completed: PoC target reached ({result.get('poc_count', 0)} PoCs)"
                     )
                 elif result["status"] == "budget_exceeded":
                     run.mark_error(result.get("error", "Budget limit exceeded"))
@@ -972,13 +972,13 @@ class RunProcessor:
                 # Count merged duplicates for dedup stats
                 dedup_count = 0
                 try:
-                    sps_with_merges = (
-                        self.repos.suspicious_points.find_with_merged_duplicates(
+                    vhs_with_merges = (
+                        self.repos.vulnerability_hypotheses.find_with_merged_duplicates(
                             run.run_id
                         )
                     )
-                    for sp in sps_with_merges:
-                        dedup_count += len(sp.merged_duplicates)
+                    for vh in vhs_with_merges:
+                        dedup_count += len(vh.merged_duplicates)
                 except Exception as e:
                     logger.warning(f"Failed to count merged duplicates: {e}")
 
@@ -1000,7 +1000,7 @@ class RunProcessor:
                     total_cost=total_cost,
                     budget_limit=self.config.budget_limit,
                     exit_reason=result.get("status", "completed"),
-                    verified_povs=result.get("pov_count"),
+                    verified_pocs=result.get("poc_count"),
                 )
                 # Reset terminal settings before output (subprocess may have changed them)
                 os.system("stty sane 2>/dev/null")

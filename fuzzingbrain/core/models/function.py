@@ -48,9 +48,9 @@ class Function:
     # Reachability (which fuzzers can reach this function)
     reached_by_fuzzers: List[str] = field(default_factory=list)
 
-    # SP Find v2: Track which directions have analyzed this function
+    # VH Find v2: Track which logic groups have analyzed this function
     # Used to prioritize unanalyzed functions and avoid duplicate analysis
-    analyzed_by_directions: List[str] = field(default_factory=list)
+    analyzed_by_logic_groups: List[str] = field(default_factory=list)
 
     # Optional metadata
     language: str = "c"  # Programming language
@@ -76,8 +76,8 @@ class Function:
             "content": self.content,
             "cyclomatic_complexity": self.cyclomatic_complexity,
             "reached_by_fuzzers": self.reached_by_fuzzers,
-            "analyzed_by_directions": [ObjectId(d) for d in self.analyzed_by_directions]
-            if self.analyzed_by_directions
+            "analyzed_by_logic_groups": [ObjectId(d) for d in self.analyzed_by_logic_groups]
+            if self.analyzed_by_logic_groups
             else [],
             "language": self.language,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -108,9 +108,9 @@ class Function:
             content=data.get("content", ""),
             cyclomatic_complexity=data.get("cyclomatic_complexity", 0),
             reached_by_fuzzers=data.get("reached_by_fuzzers", []),
-            analyzed_by_directions=[
+            analyzed_by_logic_groups=[
                 str(d) if isinstance(d, ObjectId) else d
-                for d in data.get("analyzed_by_directions", [])
+                for d in data.get("analyzed_by_logic_groups", [])
             ],
             language=data.get("language", "c"),
             created_at=created_at,

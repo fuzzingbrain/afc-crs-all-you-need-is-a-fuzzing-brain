@@ -196,7 +196,7 @@ def _parse(out: str, targets: List[str], sink: Optional[str], operands: Dict[str
     # UBSan: fatal checks (e.g. signed-integer-overflow; built -fno-sanitize-
     # recover) abort via SIGABRT, which gdb catches -> CRASHED:1. Capture the
     # specific UB type from the last "runtime error:" before the abort, so
-    # crash_matches_sp can match an SP whose crash_type is e.g.
+    # crash_matches_vh can match a VH whose crash_type is e.g.
     # "signed-integer-overflow" instead of a generic "ABRT". A *recoverable*
     # UB (e.g. dav1d msac.c unsigned wrap) does not raise a signal, so it never
     # sets CRASHED:1 and is not counted as a crash here.
@@ -241,7 +241,7 @@ def _parse(out: str, targets: List[str], sink: Optional[str], operands: Dict[str
 
 def trace(elf_host_path: str, run_argv_tmpl, input_bytes: bytes, project: str,
           targets: List[str] = None, sink: str = None, operands: Dict[str, str] = None,
-          sp_function: str = None, sp_crash_type: str = None,
+          vh_function: str = None, vh_crash_type: str = None,
           timeout: int = 150, image: str = None, memory_mb: int = 2048) -> Dict[str, Any]:
     """One gdb-15 run. `run_argv_tmpl(input_in_container)->[argv]` builds the run
     command (fuzztest vs libFuzzer). `memory_mb` caps the container -- raise it
@@ -293,23 +293,23 @@ def trace(elf_host_path: str, run_argv_tmpl, input_bytes: bytes, project: str,
         r = _sh(cmd, timeout=timeout)
         out = (r.stdout or "") + (r.stderr or "")
         res = _parse(out, targets, sink, operands)
-        res["crash_matches_sp"] = _crash_matches(res, sp_function, sp_crash_type)
+        res["crash_matches_vh"] = _crash_matches(res, vh_function, vh_crash_type)
         res["raw_tail"] = out[-800:]
         return res
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
 
-def _crash_matches(res: dict, sp_function: str, sp_crash_type: str) -> Optional[bool]:
+def _crash_matches(res: dict, vh_function: str, vh_crash_type: str) -> Optional[bool]:
     """Only meaningful on a crash. True iff the crash frame's function matches the
-    SP's claimed function AND the sanitizer type matches the SP's crash_type.
+    VH's claimed function AND the sanitizer type matches the VH's crash_type.
     None when there was no crash (field unused)."""
     if not res.get("crashed"):
         return None
     frame = res.get("crash_frame") or ""
     st = (res.get("sanitizer_type") or "").lower()
-    fn_ok = bool(sp_function) and sp_function in frame
-    ty_ok = (not sp_crash_type) or (sp_crash_type.lower() in st) or (st in sp_crash_type.lower())
+    fn_ok = bool(vh_function) and vh_function in frame
+    ty_ok = (not vh_crash_type) or (vh_crash_type.lower() in st) or (st in vh_crash_type.lower())
     return bool(fn_ok and ty_ok)
 
 
@@ -372,7 +372,7 @@ def check_clamp(elf_host_path: str, run_argv_tmpl, input_bytes: bytes, project: 
 # ============================================================================
 # Production adapter: reach_probe
 # ----------------------------------------------------------------------------
-# Verify-stage dynamic evidence WITHOUT a pre-existing PoV. The verifier LLM
+# Verify-stage dynamic evidence WITHOUT a pre-existing PoC. The verifier LLM
 # writes a `generate(variant)->bytes` candidate input (its code-reading is a
 # first-class prior for what should reach the site); we run that input through
 # the ASan fuzzer under gdb-15 and return execution facts the LLM cannot fake:
@@ -400,8 +400,8 @@ def reach_probe(generator_code: str,
                 targets: List[str] = None,
                 sink: str = None,
                 operands: Dict[str, str] = None,
-                sp_function: str = None,
-                sp_crash_type: str = None,
+                vh_function: str = None,
+                vh_crash_type: str = None,
                 timeout: int = 150,
                 probe_agent_id: str = None) -> Dict[str, Any]:
     """Run one LLM-authored candidate input through the ASan fuzzer under gdb-15
@@ -411,7 +411,7 @@ def reach_probe(generator_code: str,
     (tools/probe_corpus.py)."""
     from .coverage import (get_reach_context, get_coverage_context,
                            get_asan_fuzzer_dir, get_docker_image)
-    from .pov import _execute_generator_code
+    from .poc import _execute_generator_code
 
     elf, fuzzer_name, project, image = get_reach_context()
     cov_dir, cov_project, _ = get_coverage_context()
@@ -445,7 +445,7 @@ def reach_probe(generator_code: str,
     try:
         res = trace(str(elf), _argv_tmpl_for(fuzzer_name), blobs[0], project,
                     targets=targets, sink=sink, operands=operands,
-                    sp_function=sp_function, sp_crash_type=sp_crash_type,
+                    vh_function=vh_function, vh_crash_type=vh_crash_type,
                     timeout=timeout, image=image, memory_mb=mem)
     except subprocess.TimeoutExpired:
         return {"error": f"gdb trace timed out after {timeout}s", "crashed": False}

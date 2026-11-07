@@ -19,10 +19,10 @@ Bugs here directly corrupt data or break results.
 | # | Module | File to Create | What to Test |
 |---|--------|---------------|-------------|
 | 1 | `db/repository.py` | `test_repository.py` | CRUD for all repos, ObjectId conversion in queries, `$inc` updates, filter/sort, edge cases (missing doc, duplicate key) |
-| 2 | `analyzer/client.py` | `test_analyzer_client.py` | Socket request/response, thread safety (`Lock`), reconnection on failure, all query methods (`get_function`, `get_callees`, `get_callers`, `create_suspicious_point`, etc.) |
+| 2 | `analyzer/client.py` | `test_analyzer_client.py` | Socket request/response, thread safety (`Lock`), reconnection on failure, all query methods (`get_function`, `get_callees`, `get_callers`, `create_vulnerability_hypothesis`, etc.) |
 | 3 | `llms/buffer.py` | `test_llm_buffer.py` | Flush loop timing, Redis `INCRBYFLOAT` counters, MongoDB batch insert, concurrent `record()` from multiple threads, idempotent `stop()`, error recovery (put records back on flush failure) |
 | 4 | `llms/client.py` | `test_llm_client.py` | LLM call with mock, model routing/selection, token counting, cost calculation, error handling (rate limit, timeout, auth failure) |
-| 5 | `core/sp_dedup.py` | `test_sp_dedup.py` | Duplicate detection (same function + vuln type), merge logic (sources array), non-duplicate cases, edge cases (empty fields) |
+| 5 | `core/vh_dedup.py` | `test_vh_dedup.py` | Duplicate detection (same function + vuln type), merge logic (sources array), non-duplicate cases, edge cases (empty fields) |
 
 ### P1 — Execution Flow
 
@@ -30,10 +30,10 @@ Bugs here cause tasks to fail, hang, or lose data.
 
 | # | Module | File to Create | What to Test |
 |---|--------|---------------|-------------|
-| 6 | `core/dispatcher.py` | `test_dispatcher.py` | Redis budget read with MongoDB fallback, `_get_realtime_cost()`, dispatch worker creation, `get_results()` ObjectId conversion, `graceful_shutdown()` sequence, `get_verified_pov_count()` query |
+| 6 | `core/dispatcher.py` | `test_dispatcher.py` | Redis budget read with MongoDB fallback, `_get_realtime_cost()`, dispatch worker creation, `get_results()` ObjectId conversion, `graceful_shutdown()` sequence, `get_verified_poc_count()` query |
 | 7 | `worker/context.py` | `test_worker_context.py` | `__enter__`/`__exit__` lifecycle, buffer start/stop, DB record creation (worker + agents), cleanup on exception, idempotent exit |
 | 8 | `worker/executor.py` | `test_worker_executor.py` | Strategy selection (delta vs fullscan), execution flow, error propagation |
-| 9 | `worker/pipeline.py` | `test_worker_pipeline.py` | Agent sequencing, iteration limits, early termination on POV found, failure handling |
+| 9 | `worker/pipeline.py` | `test_worker_pipeline.py` | Agent sequencing, iteration limits, early termination on PoC found, failure handling |
 | 10 | `core/run_processor.py` | `test_task_processor.py` | Workspace setup, fuzzer discovery, `update()` vs `save()` for status changes, summary generation |
 
 ### P2 — Agent Logic
@@ -43,9 +43,9 @@ Bugs here reduce analysis quality.
 | # | Module | File to Create | What to Test |
 |---|--------|---------------|-------------|
 | 11 | `agents/base.py` | `test_agent_base.py` | `run()` loop with mock LLM, tool call dispatch, max iteration enforcement, error/exception handling, message history management |
-| 12 | `agents/sp_generators.py` | `test_sp_generators.py` | Prompt construction, SP extraction from LLM response, score parsing, different generator types (Full, LargeFull, Delta) |
-| 13 | `agents/sp_verifier.py` | `test_sp_verifier.py` | Verification decision logic, `_extract_sp_info()`, reachability analysis, `is_checked_by_verifier` update flow, `id=unknown` edge case (#88) |
-| 14 | `agents/pov_agent.py` | `test_pov_agent.py` | POV generation flow, context setup with SP ID, exploit code extraction |
+| 12 | `agents/vh_generators.py` | `test_vh_generators.py` | Prompt construction, VH extraction from LLM response, score parsing, different generator types (Full, LargeFull, Delta) |
+| 13 | `agents/vh_verifier.py` | `test_vh_verifier.py` | Verification decision logic, `_extract_vh_info()`, reachability analysis, `is_checked_by_verifier` update flow, `id=unknown` edge case (#88) |
+| 14 | `agents/poc_agent.py` | `test_poc_agent.py` | PoC generation flow, context setup with VH ID, exploit code extraction |
 
 ### P3 — Tools & Infrastructure
 
@@ -53,10 +53,10 @@ Lower risk but improves confidence.
 
 | # | Module | File to Create | What to Test |
 |---|--------|---------------|-------------|
-| 15 | `tools/suspicious_points.py` | `test_sp_tools.py` | `create_suspicious_point_impl()` with mock client, `update_suspicious_point_impl()`, context variable (`set_sp_context`/`get_sp_context`) |
+| 15 | `tools/vulnerability_hypotheses.py` | `test_vh_tools.py` | `create_vulnerability_hypothesis_impl()` with mock client, `update_vulnerability_hypothesis_impl()`, context variable (`set_vh_context`/`get_vh_context`) |
 | 16 | `tools/mcp_factory.py` | `test_mcp_factory.py` | Server creation per agent type, correct tool registration, tool isolation between agents |
-| 17 | `fuzzer/monitor.py` | `test_fuzzer_monitor.py` | Crash file detection, POV record creation, crash verification, `verified_at` timestamp (#92) |
-| 18 | `fuzzer/seed_agent.py` | `test_seed_agent.py` | Seed generation with mock LLM, direction processing, context setup |
+| 17 | `fuzzer/monitor.py` | `test_fuzzer_monitor.py` | Crash file detection, PoC record creation, crash verification, `verified_at` timestamp (#92) |
+| 18 | `fuzzer/seed_agent.py` | `test_seed_agent.py` | Seed generation with mock LLM, logic group processing, context setup |
 | 19 | `core/config.py` | `test_config.py` | `Config.from_env()` with various env vars, defaults, validation, `FuzzerWorkerConfig` |
 
 ---
@@ -131,30 +131,30 @@ Lower risk but improves confidence.
 - **测试**: `TestWorkerGhostOnSaveFailure`（5 tests, all PASS）, `TestWorkerContextExitFailure`（4 tests, all PASS）
 - **状态**: ✅ 已修复
 
-### Bug #3a — Verify 孤儿 SP（已修复）
+### Bug #3a — Verify 孤儿 VH（已修复）
 
 - **文件**: `worker/pipeline.py:_run_verify_agent`
-- **问题**: `claim_for_verify()` 原子地把 SP 从 `pending_verify` → `verifying`。如果 agent 崩溃（OOM、KeyboardInterrupt、CancelledError），没有人调 `release_claim()`，SP 永远卡在 `verifying`。`pipeline.py` 的 `except Exception` 只捕获普通异常，无法覆盖 `BaseException`
-- **修复**: 用 `claimed_sp_id` 标志 + `finally` 块替代 `except Exception` 中的 `release_claim`。`complete_verify` 成功后 `claimed_sp_id = None`，否则 `finally` 统一 release。覆盖所有退出路径（包括 KeyboardInterrupt/CancelledError）
+- **问题**: `claim_for_verify()` 原子地把 VH 从 `pending_verify` → `verifying`。如果 agent 崩溃（OOM、KeyboardInterrupt、CancelledError），没有人调 `release_claim()`，VH 永远卡在 `verifying`。`pipeline.py` 的 `except Exception` 只捕获普通异常，无法覆盖 `BaseException`
+- **修复**: 用 `claimed_vh_id` 标志 + `finally` 块替代 `except Exception` 中的 `release_claim`。`complete_verify` 成功后 `claimed_vh_id = None`，否则 `finally` 统一 release。覆盖所有退出路径（包括 KeyboardInterrupt/CancelledError）
 - **测试**: `TestOrphanedClaims::test_verify_crash_releases_claim_via_finally`（PASS）
 - **状态**: ✅ 已修复
 
-### Bug #3b — Direction 孤儿（SP Finding 阶段）（已修复）
+### Bug #3b — Logic group 孤儿（VH Finding 阶段）（已修复）
 
-- **文件**: `db/repository.py:DirectionRepository.claim`
-- **问题**: Direction 的 `claim()` 把状态从 `pending` → `in_progress`。`release_claim()` 方法存在但代码库没有调用
-- **发现**: `directions.claim()` 在当前架构中未被使用（fullscan 策略用 `find_pending()` 直接获取 direction）。但 `release_claim` 机制本身是正确的
-- **测试**: `TestOrphanedClaims::test_direction_crash_releases_claim`（PASS）
+- **文件**: `db/repository.py:LogicGroupRepository.claim`
+- **问题**: Logic group 的 `claim()` 把状态从 `pending` → `in_progress`。`release_claim()` 方法存在但代码库没有调用
+- **发现**: `logic_groups.claim()` 在当前架构中未被使用（fullscan 策略用 `find_pending()` 直接获取 logic group）。但 `release_claim` 机制本身是正确的
+- **测试**: `TestOrphanedClaims::test_logic_group_crash_releases_claim`（PASS）
 - **状态**: ✅ 已修复（测试验证 release→reclaim 路径正确）
 
-### Bug #3c — POV 同 Worker 重试被拒（已修复）
+### Bug #3c — PoC 同 Worker 重试被拒（已修复）
 
-- **文件**: `db/repository.py:release_claim`, `worker/pipeline.py:_run_pov_agent`
-- **问题**: `pov_attempted_by` 过滤器排除已尝试过的同 fuzzer/sanitizer 组合。崩溃后 `release_claim` 只改 status 不清理 `pov_attempted_by`，同 worker 无法重试
+- **文件**: `db/repository.py:release_claim`, `worker/pipeline.py:_run_poc_agent`
+- **问题**: `poc_attempted_by` 过滤器排除已尝试过的同 fuzzer/sanitizer 组合。崩溃后 `release_claim` 只改 status 不清理 `poc_attempted_by`，同 worker 无法重试
 - **修复**: 两处改动
-  1. `release_claim` 新增 `harness_name`/`sanitizer` 参数，用 `$pull` 从 `pov_attempted_by` 移除当前 worker 的记录
-  2. pipeline `_run_pov_agent` 的 `finally` 块调用 `release_claim` 时传入 `harness_name`/`sanitizer`
-- **测试**: `TestOrphanedClaims::test_pov_crash_releases_claim_and_attempted_by`（PASS）
+  1. `release_claim` 新增 `harness_name`/`sanitizer` 参数，用 `$pull` 从 `poc_attempted_by` 移除当前 worker 的记录
+  2. pipeline `_run_poc_agent` 的 `finally` 块调用 `release_claim` 时传入 `harness_name`/`sanitizer`
+- **测试**: `TestOrphanedClaims::test_poc_crash_releases_claim_and_attempted_by`（PASS）
 - **状态**: ✅ 已修复
 
 ### Bug #5a — 状态回退无保护（已修复）
@@ -183,15 +183,15 @@ Lower risk but improves confidence.
 - **测试**: `TestContextReentrance`（4 tests, all PASS）
 - **状态**: ✅ 已修复
 
-### Bug — Direction Leak（Context 泄漏）（已修复）
+### Bug — Logic group Leak（Context 泄漏）（已修复）
 
-- **文件**: `tools/suspicious_points.py:set_sp_agent_id`, `tools/mcp_factory.py`, `agents/base.py`, `agents/sp_verifier.py`, `agents/pov_agent.py`
-- **问题**: `set_sp_agent_id()` 更新 agent_id 时没有清除旧的 `direction_id`，导致 Verify/POV 阶段的 SP 被错误关联到上一个 direction
-- **触发条件**: Pipeline 从 SP Finding 阶段切换到 Verify 阶段时
+- **文件**: `tools/vulnerability_hypotheses.py:set_vh_agent_id`, `tools/mcp_factory.py`, `agents/base.py`, `agents/vh_verifier.py`, `agents/poc_agent.py`
+- **问题**: `set_vh_agent_id()` 更新 agent_id 时没有清除旧的 `lg_id`，导致 Verify/POC 阶段的 VH 被错误关联到上一个 logic group
+- **触发条件**: Pipeline 从 VH Finding 阶段切换到 Verify 阶段时
 - **修复**: 三层防御
-  1. `set_sp_agent_id()` 清除 `direction_id`，防止旧 context 残留
-  2. `create_suspicious_point_impl()` 开头检查 `direction_id`，没有就拒绝创建
-  3. `_register_suspicious_point_tools` 拆分为 create 和 read/update，SPVerifier 和 POVAgent 的 MCP server 不注册 `create_suspicious_point` 工具
-- **测试**: `TestContextLeakBetweenPipelinePhases::test_set_sp_agent_id_must_not_leak_direction`（PASS）
+  1. `set_vh_agent_id()` 清除 `lg_id`，防止旧 context 残留
+  2. `create_vulnerability_hypothesis_impl()` 开头检查 `lg_id`，没有就拒绝创建
+  3. `_register_vulnerability_hypothesis_tools` 拆分为 create 和 read/update，VHVerifier 和 POCAgent 的 MCP server 不注册 `create_vulnerability_hypothesis` 工具
+- **测试**: `TestContextLeakBetweenPipelinePhases::test_set_vh_agent_id_must_not_leak_logic_group`（PASS）
 - **状态**: ✅ 已修复
 

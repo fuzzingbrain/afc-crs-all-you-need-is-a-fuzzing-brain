@@ -178,12 +178,12 @@ class TestParallelToolCalls:
         Each sends a different method — must get back their own method in response.
 
         This is the exact bug we fixed: get_function_source() returning a dict
-        meant for create_suspicious_point(), or vice versa.
+        meant for create_vulnerability_hypothesis(), or vice versa.
         """
         client = AnalysisClient(socket_path, timeout=10.0)
         methods = [
             "get_function_source",
-            "create_suspicious_point",
+            "create_vulnerability_hypothesis",
             "get_callers",
             "get_callees",
             "get_reachability",

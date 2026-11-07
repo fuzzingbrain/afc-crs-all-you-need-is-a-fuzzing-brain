@@ -272,7 +272,7 @@ def test_long_tool_args_are_clipped_not_dumped():
     from fuzzingbrain.agents.base import format_tool_args
 
     rendered = format_tool_args({"content": "A" * 5000, "fuzzer": "html"})
-    assert len(rendered) < 250, "a POV blob must not end up in a log line"
+    assert len(rendered) < 250, "a PoC blob must not end up in a log line"
     assert "fuzzer='html'" in rendered
 
 

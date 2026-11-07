@@ -23,11 +23,11 @@ from .utils import async_tool
 def create_isolated_mcp_server(
     agent_id: str = "default",
     worker_id: str = None,
-    include_pov_tools: bool = True,
+    include_poc_tools: bool = True,
     include_seed_tools: bool = False,
-    include_sp_tools: bool = True,
-    include_sp_create_tools: bool = True,
-    include_direction_tools: bool = True,
+    include_vh_tools: bool = True,
+    include_vh_create_tools: bool = True,
+    include_logic_group_tools: bool = True,
     include_static_analysis_tools: bool = True,
     include_coverage_tools: bool = True,
     include_reach_probe_tools: bool = False,
@@ -41,19 +41,19 @@ def create_isolated_mcp_server(
 
     Args:
         agent_id: Unique identifier for this agent (used in server name)
-        worker_id: Worker ID for context lookup (used by POV tools and seed tools)
-        include_pov_tools: Whether to include POV tools (default True).
-                          Set to False for SP/Verify agents that don't need POV tools.
+        worker_id: Worker ID for context lookup (used by PoC tools and seed tools)
+        include_poc_tools: Whether to include PoC tools (default True).
+                          Set to False for VH/Verify agents that don't need PoC tools.
         include_seed_tools: Whether to include seed generation tools (default False).
-                           Set to True for SeedAgent. When True, SP/direction/POV tools
+                           Set to True for SeedAgent. When True, VH/logic_group/POC tools
                            are excluded (SeedAgent only needs code analysis + create_seed).
-        include_sp_tools: Whether to include suspicious point tools (default True).
-                         Set to False for DirectionPlanningAgent.
-        include_sp_create_tools: Whether to include SP creation tool (default True).
-                               Set to False for SPVerifier/POVAgent — they should only
-                               read/update SPs, not create new ones.
-        include_direction_tools: Whether to include direction tools (default True).
-                                Set to False for agents that don't need directions.
+        include_vh_tools: Whether to include vulnerability hypothesis tools (default True).
+                         Set to False for LGPlanningAgent.
+        include_vh_create_tools: Whether to include VH creation tool (default True).
+                               Set to False for VHVerifier/POCAgent — they should only
+                               read/update VHs, not create new ones.
+        include_logic_group_tools: Whether to include logic group tools (default True).
+                                Set to False for agents that don't need logic groups.
         include_static_analysis_tools: Whether to include the tools that read the
                                 function index and call graph (default True). Set
                                 to False when those collections are empty: the
@@ -93,23 +93,23 @@ def create_isolated_mcp_server(
 
     if include_seed_tools:
         # SeedAgent: only code analysis + create_seed
-        # No SP, direction, POV, or coverage tools
+        # No VH, logic group, PoC, or coverage tools
         _register_seed_tools(mcp, worker_id=worker_id)
     else:
-        # Register SP tools only if requested
-        if include_sp_tools:
-            if include_sp_create_tools:
-                _register_sp_create_tools(mcp)
-            _register_sp_read_update_tools(mcp)
-        # Register direction tools only if requested
-        if include_direction_tools:
-            _register_direction_tools(mcp)
-        if include_pov_tools:
-            _register_pov_tools(mcp, worker_id=worker_id)
+        # Register VH tools only if requested
+        if include_vh_tools:
+            if include_vh_create_tools:
+                _register_vh_create_tools(mcp)
+            _register_vh_read_update_tools(mcp)
+        # Register logic group tools only if requested
+        if include_logic_group_tools:
+            _register_logic_group_tools(mcp)
+        if include_poc_tools:
+            _register_poc_tools(mcp, worker_id=worker_id)
             if include_coverage_tools:
                 _register_coverage_tools(mcp)
-        # Verify-stage dynamic reach-probe (independent of POV tools): the
-        # SPVerifier gets execution evidence without a pre-existing PoV.
+        # Verify-stage dynamic reach-probe (independent of PoC tools): the
+        # VHVerifier gets execution evidence without a pre-existing PoC.
         if include_reach_probe_tools:
             _register_reach_probe_tools(mcp, worker_id=worker_id)
 
@@ -199,7 +199,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
     # and are NOT static analysis (the call graph tools below are). Routing
     # them through the shared MongoDB made it the bottleneck (regex scans +
     # per-function tree-sitter file reads) and starved the real work under
-    # full-scan's SP write storm. Agents read source via Read/Grep/Glob now.
+    # full-scan's VH write storm. Agents read source via Read/Grep/Glob now.
     # The underlying AnalysisClient methods remain available for internal use
     # (diff_parser, executor), same pattern as get_reachable_functions below.
 
@@ -458,19 +458,19 @@ def _register_file_tools(mcp: FastMCP) -> None:
         return glob_impl(pattern, include_dirs, head_limit)
 
 
-def _register_sp_create_tools(mcp: FastMCP) -> None:
-    """Register SP creation tool (only for SP Finding agents)."""
+def _register_vh_create_tools(mcp: FastMCP) -> None:
+    """Register VH creation tool (only for VH Finding agents)."""
 
     @mcp.tool
     @async_tool
-    def create_suspicious_point(
+    def create_vulnerability_hypothesis(
         function_name: str,
         description: str,
         score: float = 0.5,
         important_controlflow: str = None,
     ) -> Dict[str, Any]:
         """
-        Create a new suspicious point for a potential vulnerability.
+        Create a new vulnerability hypothesis for a potential vulnerability.
 
         Args:
             function_name: Name of the suspicious function
@@ -480,38 +480,38 @@ def _register_sp_create_tools(mcp: FastMCP) -> None:
             important_controlflow: Free-text note naming the key functions/variables
                 in the flow to the bug and why they matter (one short paragraph).
         """
-        from .suspicious_points import create_suspicious_point_impl
+        from .vulnerability_hypotheses import create_vulnerability_hypothesis_impl
 
-        return create_suspicious_point_impl(
+        return create_vulnerability_hypothesis_impl(
             function_name, description, score, important_controlflow
         )
 
 
-def _register_sp_read_update_tools(mcp: FastMCP) -> None:
-    """Register SP read/update tools (for all agents that need SP access)."""
+def _register_vh_read_update_tools(mcp: FastMCP) -> None:
+    """Register VH read/update tools (for all agents that need VH access)."""
 
     @mcp.tool
     @async_tool
-    def update_suspicious_point(
-        suspicious_point_id: str,
+    def update_vulnerability_hypothesis(
+        vulnerability_hypothesis_id: str,
         score: float = None,
         is_checked_by_verifier: bool = None,
         is_crash_found: bool = None,
         evidence: str = None,
         verification_notes: str = None,
-        pov_guidance: str = None,
+        poc_guidance: str = None,
         description: str = None,
         important_controlflow: str = None,
     ) -> Dict[str, Any]:
         """
-        Update a suspicious point after verifying it. Make this call ONCE, at the
+        Update a vulnerability hypothesis after verifying it. Make this call ONCE, at the
         end, recording your whole verdict together.
 
         Args:
-            suspicious_point_id: ID of the suspicious point to update
+            vulnerability_hypothesis_id: ID of the vulnerability hypothesis to update
             score: Your confidence in [0,1] that the bug is real AND detectable by this
                 sanitizer via this harness (1.0 = you reproduced a crash). The system
-                derives proceed/priority from it — higher score ranks higher in the PoV
+                derives proceed/priority from it — higher score ranks higher in the PoC
                 queue; a low score with clear disconfirming evidence drops it.
             is_checked_by_verifier: Set True when your verification is complete.
             is_crash_found: Set True only if you reproduced a crash with reach_probe.
@@ -519,48 +519,48 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
                 with where it came from (`file:line` for reads, reach_probe/check_clamp
                 results for runs). Write facts, not conclusions. Write it all here at once.
             verification_notes: Short summary of your verdict.
-            pov_guidance: Guidance for the POV agent (input direction, how to reach the
+            poc_guidance: Guidance for the PoC agent (input logic group, how to reach the
                 vuln, what you already tried).
             description: Revised root-cause description — set ONLY when the incoming
                 description was wrong or imprecise.
             important_controlflow: Revised key functions/variables note — set ONLY when
                 the incoming one was wrong or imprecise.
         """
-        from .suspicious_points import update_suspicious_point_impl
+        from .vulnerability_hypotheses import update_vulnerability_hypothesis_impl
 
-        return update_suspicious_point_impl(
-            suspicious_point_id=suspicious_point_id,
+        return update_vulnerability_hypothesis_impl(
+            vulnerability_hypothesis_id=vulnerability_hypothesis_id,
             score=score,
             is_checked_by_verifier=is_checked_by_verifier,
             is_crash_found=is_crash_found,
             evidence=evidence,
             verification_notes=verification_notes,
-            pov_guidance=pov_guidance,
+            poc_guidance=poc_guidance,
             description=description,
             important_controlflow=important_controlflow,
         )
 
     @mcp.tool
     @async_tool
-    def get_suspicious_point(suspicious_point_id: str) -> Dict[str, Any]:
+    def get_vulnerability_hypothesis(vulnerability_hypothesis_id: str) -> Dict[str, Any]:
         """
-        Get details of a specific suspicious point.
+        Get details of a specific vulnerability hypothesis.
 
         Args:
-            suspicious_point_id: ID of the suspicious point
+            vulnerability_hypothesis_id: ID of the vulnerability hypothesis
         """
-        from .suspicious_points import get_suspicious_point_impl
+        from .vulnerability_hypotheses import get_vulnerability_hypothesis_impl
 
-        return get_suspicious_point_impl(suspicious_point_id)
+        return get_vulnerability_hypothesis_impl(vulnerability_hypothesis_id)
 
 
 def _register_reach_probe_tools(mcp: FastMCP, worker_id: str = None) -> None:
     """Register the verify-stage dynamic reach-probe tools (gdb-15 execution).
 
-    The verifier does not have a PoV, so it authors a candidate input and runs
+    The verifier does not have a PoC, so it authors a candidate input and runs
     it through the ASan binary under gdb to obtain execution FACTS (reach / crash
-    / margin) that it cannot fabricate. These upgrade the PoV-queue ordering; they
-    never floor a real SP (recall-first). A dynamically observed clamp is the one
+    / margin) that it cannot fabricate. These upgrade the PoC-queue ordering; they
+    never floor a real VH (recall-first). A dynamically observed clamp is the one
     execution fact that disconfirms.
 
     Each probe input is also kept as a fuzzer seed (tools/probe_corpus.py), looked
@@ -574,20 +574,20 @@ def _register_reach_probe_tools(mcp: FastMCP, worker_id: str = None) -> None:
         targets: List[str] = None,
         sink: str = None,
         operands: Dict[str, str] = None,
-        sp_function: str = None,
-        sp_crash_type: str = None,
+        vh_function: str = None,
+        vh_crash_type: str = None,
     ) -> Dict[str, Any]:
         """
         Run ONE candidate input through the ASan fuzzer under gdb-15 and return
         dynamic evidence: which target functions were reached, whether it crashed
         (+ sanitizer type and crash frame), the exact overflow margin from the ASan
-        report (negative = past the boundary), whether the crash matches the SP,
+        report (negative = past the boundary), whether the crash matches the VH,
         and the runtime values of variables at one program point (`operands`).
 
-        Use this to CONFIRM the SP is reachable/triggerable. Iterate: read the code,
+        Use this to CONFIRM the VH is reachable/triggerable. Iterate: read the code,
         write a better generator, probe again. Reaching or crashing is worth more
         than any amount of reading. Record the returned reached/crashed/asan_margin/
-        operands as facts in update_suspicious_point's `evidence` (a crash means
+        operands as facts in update_vulnerability_hypothesis's `evidence` (a crash means
         score = 1.0).
 
         `operands` is read at: the `sink` if it was reached; otherwise the top of
@@ -604,8 +604,8 @@ def _register_reach_probe_tools(mcp: FastMCP, worker_id: str = None) -> None:
             operands: optional {label: C expression} to evaluate at that point,
                       e.g. {"len": "len", "cap": "buf->size"}; omit to get all
                       arguments (and locals at a sink or crash).
-            sp_function: the SP's function name (for crash_matches_sp).
-            sp_crash_type: the SP's claimed bug class (for crash_matches_sp).
+            vh_function: the VH's function name (for crash_matches_vh).
+            vh_crash_type: the VH's claimed bug class (for crash_matches_vh).
         """
         from .gdb_trace import reach_probe as _reach_probe
 
@@ -614,8 +614,8 @@ def _register_reach_probe_tools(mcp: FastMCP, worker_id: str = None) -> None:
             targets=targets,
             sink=sink,
             operands=operands,
-            sp_function=sp_function,
-            sp_crash_type=sp_crash_type,
+            vh_function=vh_function,
+            vh_crash_type=vh_crash_type,
             probe_agent_id=bound_worker_id,
         )
 
@@ -630,7 +630,7 @@ def _register_reach_probe_tools(mcp: FastMCP, worker_id: str = None) -> None:
         SLOW watchpoint trace: watch a tainted variable inside `at_function` while
         running an input, and report its value-change trace. A value that is REDUCED
         (bounded) at a guard before the sink is a DYNAMICALLY OBSERVED clamp — the
-        one execution fact that disconfirms the SP. Use only when you suspect the
+        one execution fact that disconfirms the VH. Use only when you suspect the
         tainted value is clamped before the dangerous site.
 
         Args:
@@ -640,7 +640,7 @@ def _register_reach_probe_tools(mcp: FastMCP, worker_id: str = None) -> None:
         """
         from .gdb_trace import check_clamp as _check_clamp
         from .coverage import get_reach_context, get_coverage_context
-        from .pov import _execute_generator_code
+        from .poc import _execute_generator_code
 
         elf, fuzzer_name, project, _image = get_reach_context()
         if not project:
@@ -662,18 +662,18 @@ def _register_reach_probe_tools(mcp: FastMCP, worker_id: str = None) -> None:
 
 
 # Keep backward-compatible alias
-def _register_suspicious_point_tools(mcp: FastMCP) -> None:
-    """Register all suspicious point tools (backward compatibility)."""
-    _register_sp_create_tools(mcp)
-    _register_sp_read_update_tools(mcp)
+def _register_vulnerability_hypothesis_tools(mcp: FastMCP) -> None:
+    """Register all vulnerability hypothesis tools (backward compatibility)."""
+    _register_vh_create_tools(mcp)
+    _register_vh_read_update_tools(mcp)
 
 
-def _register_direction_tools(mcp: FastMCP) -> None:
-    """Register direction tools (Full-scan mode)."""
+def _register_logic_group_tools(mcp: FastMCP) -> None:
+    """Register logic group tools (Full-scan mode)."""
 
     @mcp.tool
     @async_tool
-    def create_direction(
+    def create_logic_group(
         name: str,
         risk_level: str,
         risk_reason: str,
@@ -682,7 +682,7 @@ def _register_direction_tools(mcp: FastMCP) -> None:
         code_summary: str = "",
     ) -> Dict[str, Any]:
         """
-        Create an analysis direction: ONE business feature/module of the code
+        Create an analysis logic group: ONE business feature/module of the code
         reachable from the fuzzer.
 
         Args:
@@ -696,37 +696,37 @@ def _register_direction_tools(mcp: FastMCP) -> None:
             entry_functions: the functions where fuzzer input enters this feature.
             code_summary: brief description of what this feature does.
         """
-        from .directions import create_direction_impl
+        from .logic_groups import create_logic_group_impl
 
-        return create_direction_impl(
+        return create_logic_group_impl(
             name, risk_level, risk_reason, core_functions, entry_functions, code_summary
         )
 
     @mcp.tool
     @async_tool
-    def list_directions() -> Dict[str, Any]:
-        """List the analysis directions for this worker's fuzzer."""
-        from .directions import list_directions_impl
+    def list_logic_groups() -> Dict[str, Any]:
+        """List the analysis logic groups for this worker's fuzzer."""
+        from .logic_groups import list_logic_groups_impl
 
-        return list_directions_impl()
+        return list_logic_groups_impl()
 
     @mcp.tool
     @async_tool
-    def get_direction(direction_id: str) -> Dict[str, Any]:
+    def get_logic_group(lg_id: str) -> Dict[str, Any]:
         """
-        Get details of a specific direction.
+        Get details of a specific logic group.
 
         Args:
-            direction_id: ID of the direction
+            lg_id: ID of the logic group
         """
-        from .directions import get_direction_impl
+        from .logic_groups import get_logic_group_impl
 
-        return get_direction_impl(direction_id)
+        return get_logic_group_impl(lg_id)
 
 
-def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
+def _register_poc_tools(mcp: FastMCP, worker_id: str = None) -> None:
     """
-    Register POV tools with worker_id bound via closure.
+    Register PoC tools with worker_id bound via closure.
 
     Args:
         mcp: FastMCP instance to register tools to
@@ -745,29 +745,29 @@ def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
 
     @mcp.tool
     @async_tool
-    def create_pov(generator_code: str) -> Dict[str, Any]:
+    def create_poc(generator_code: str) -> Dict[str, Any]:
         """
         Generate test input blobs using Python code.
 
         Args:
             generator_code: Python code with a generate() function that returns bytes
         """
-        from .pov import create_pov_impl
+        from .poc import create_poc_impl
 
-        return create_pov_impl(generator_code, worker_id=bound_worker_id)
+        return create_poc_impl(generator_code, worker_id=bound_worker_id)
 
     @mcp.tool
     @async_tool
-    def verify_pov(pov_id: str) -> Dict[str, Any]:
+    def verify_poc(poc_id: str) -> Dict[str, Any]:
         """
-        Test if a POV triggers a crash.
+        Test if a PoC triggers a crash.
 
         Args:
-            pov_id: ID of the POV to verify
+            poc_id: ID of the PoC to verify
         """
-        from .pov import verify_pov_impl
+        from .poc import verify_poc_impl
 
-        return verify_pov_impl(pov_id, worker_id=bound_worker_id)
+        return verify_poc_impl(poc_id, worker_id=bound_worker_id)
 
 
 def _register_coverage_tools(mcp: FastMCP) -> None:
@@ -798,23 +798,23 @@ def _register_coverage_tools(mcp: FastMCP) -> None:
 
     @mcp.tool
     @async_tool
-    def check_pov_reaches_target(
+    def check_poc_reaches_target(
         fuzzer_name: str,
-        pov_data_base64: str,
+        poc_data_base64: str,
         target_function: str,
     ) -> Dict[str, Any]:
         """
-        Check if a POV reaches a specific target function.
+        Check if a PoC reaches a specific target function.
 
         Args:
             fuzzer_name: Name of the fuzzer binary
-            pov_data_base64: Base64 encoded POV input
+            poc_data_base64: Base64 encoded PoC input
             target_function: The function name to check
         """
-        from .coverage import check_pov_reaches_target_impl
+        from .coverage import check_poc_reaches_target_impl
 
-        return check_pov_reaches_target_impl(
-            fuzzer_name, pov_data_base64, target_function
+        return check_poc_reaches_target_impl(
+            fuzzer_name, poc_data_base64, target_function
         )
 
     @mcp.tool
@@ -867,7 +867,7 @@ def _register_seed_tools(mcp: FastMCP, worker_id: str = None) -> None:
         num_seeds: int = 5,
     ) -> Dict[str, Any]:
         """
-        Generate fuzzer seeds to improve coverage based on analysis direction.
+        Generate fuzzer seeds to improve coverage based on analysis logic group.
 
         Write Python code with a generate(seed_num: int) function that returns bytes.
         The function receives seed number (1, 2, ..., num_seeds) and should return
@@ -904,21 +904,21 @@ def _register_seed_tools(mcp: FastMCP, worker_id: str = None) -> None:
             {
                 "success": True,
                 "seeds_generated": N,
-                "seed_type": "direction" or "delta",
+                "seed_type": "logic_group" or "delta",
                 "seed_paths": ["path1", "path2", ...],
             }
         """
         from ..fuzzer.seed_tools import create_seed_impl, get_seed_context
 
-        # Determine seed_type from context (delta or direction)
+        # Determine seed_type from context (delta or logic group)
         wid = bound_worker_id
         ctx = get_seed_context(wid) if wid else {}
         if ctx.get("delta_id"):
             seed_type = "delta"
-        elif ctx.get("direction_id"):
-            seed_type = "direction"
+        elif ctx.get("lg_id"):
+            seed_type = "logic_group"
         else:
-            seed_type = "direction"  # Default fallback
+            seed_type = "logic_group"  # Default fallback
 
         return create_seed_impl(
             generator_code=generator_code,

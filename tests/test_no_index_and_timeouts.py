@@ -23,7 +23,7 @@ class TestTimeoutIsNotACrash:
 
     def test_libfuzzer_timeout_filename_is_rejected(self):
         # libFuzzer names the artifact after the sha1 of the input; this one is
-        # the sha1 of nothing, which is what fp-full-01 counted as its POV.
+        # the sha1 of nothing, which is what fp-full-01 counted as its PoC.
         name = "timeout-da39a3ee5e6b4b0d3255bfef95601890afd80709"
         assert not name.startswith(CRASH_ARTIFACT_PREFIXES)
 
@@ -39,17 +39,17 @@ class TestTimeoutIsNotACrash:
         assert any(i.lower() in crash.lower() for i in CRASH_INDICATORS)
 
 
-class TestDirectionFunctionsSurviveWithoutAnIndex:
-    """Direction planning reads the source, so its names are real either way.
+class TestLogicGroupFunctionsSurviveWithoutAnIndex:
+    """Logic group planning reads the source, so its names are real either way.
 
     Resolving them through the function index and dropping the misses turned 61
-    named functions into four empty pools and zero suspicious points, on a run
+    named functions into four empty pools and zero vulnerability hypotheses, on a run
     whose only difference was that static analysis had been switched off.
     """
 
     @staticmethod
     def _strategy(found):
-        from fuzzingbrain.worker.strategies.pov_fullscan import POVFullscanStrategy
+        from fuzzingbrain.worker.strategies.poc_fullscan import POCFullscanStrategy
 
         class _Functions:
             def find_by_name(self, run_id, name):
@@ -58,7 +58,7 @@ class TestDirectionFunctionsSurviveWithoutAnIndex:
         class _Repos:
             functions = _Functions()
 
-        s = object.__new__(POVFullscanStrategy)
+        s = object.__new__(POCFullscanStrategy)
         s.run_id = "t1"
         s.repos = _Repos()
         return s
@@ -69,10 +69,10 @@ class TestDirectionFunctionsSurviveWithoutAnIndex:
         assert func is not None
         assert func.name == "xmlParseCDSect"
         assert func.run_id == "t1"
-        # No body: the SP agent reads it with Read/Grep, which is what it does
+        # No body: the VH agent reads it with Read/Grep, which is what it does
         # for an indexed function whose content is stale anyway.
         assert func.content == ""
-        assert func.analyzed_by_directions == []
+        assert func.analyzed_by_logic_groups == []
 
     def test_indexed_name_is_returned_unchanged(self):
         from fuzzingbrain.core.models.function import Function
@@ -82,10 +82,10 @@ class TestDirectionFunctionsSurviveWithoutAnIndex:
         assert s._resolve_function("xmlParseCDSect") is real
 
     def test_placeholder_lands_in_the_new_pool(self):
-        # analyzed_by_directions is empty, so the caller files it under
+        # analyzed_by_logic_groups is empty, so the caller files it under
         # "small/new" -- the pool the first phase actually processes.
         s = self._strategy({})
-        assert not s._resolve_function("anything").analyzed_by_directions
+        assert not s._resolve_function("anything").analyzed_by_logic_groups
 
 
 class TestAnExitIsNotACrash:
@@ -93,7 +93,7 @@ class TestAnExitIsNotACrash:
 
     sqlite3's shell harness calls exit() from usage() on input it does not
     like. libFuzzer writes crash-<sha1>, names it exactly as it names a heap
-    overflow, and a run reported it as a verified POV -- a submission spent on
+    overflow, and a run reported it as a verified PoC -- a submission spent on
     a harness that printed its usage text.
     """
 
@@ -127,7 +127,7 @@ class TestAnExitIsNotACrash:
         src = inspect.getsource(FuzzerMonitor._handle_crash)
         # A finding requires a real sanitizer/signal fault class. When the
         # signature carries no crash_class (an orderly exit), the monitor logs
-        # NOT A CRASH and drops the artifact instead of promoting a POV.
+        # NOT A CRASH and drops the artifact instead of promoting a PoC.
         assert "signature.crash_class" in src
         assert "if not signature.crash_class:" in src
         assert "NOT A CRASH" in src
@@ -136,11 +136,11 @@ class TestAnExitIsNotACrash:
 class TestAFuzzerCrashCarriesItsSignature:
     """A crash the monitor deduplicated must reach the database identified.
 
-    The monitor computed the signature and the POV record dropped it, so every
+    The monitor computed the signature and the PoC record dropped it, so every
     fuzzer-found crash was stored unsigned and counted as its own bug.
     """
 
-    def test_the_pov_records_it(self):
+    def test_the_poc_records_it(self):
         import inspect
 
         from fuzzingbrain.core.dispatcher import WorkerDispatcher
@@ -150,9 +150,9 @@ class TestAFuzzerCrashCarriesItsSignature:
         )
 
     def test_the_worker_promotion_path_records_it(self):
-        # The worker-local FuzzerManager monitor is the single crash->POV
+        # The worker-local FuzzerManager monitor is the single crash->PoC
         # promoter (the run-level dispatcher monitor no longer wires on_crash),
-        # so the live promotion path must carry the signature onto the POV too.
+        # so the live promotion path must carry the signature onto the PoC too.
         import inspect
 
         from fuzzingbrain.worker.executor import WorkerExecutor

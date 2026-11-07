@@ -12,12 +12,12 @@ from bson import ObjectId
 from fuzzingbrain.core.models import (
     Run,
     RunStatus,
-    POV,
+    POC,
     Patch,
-    SuspiciousPoint,
-    SPStatus,
-    Direction,
-    DirectionStatus,
+    VulnerabilityHypothesis,
+    VHStatus,
+    LogicGroup,
+    LogicGroupStatus,
     RiskLevel,
     Worker,
     WorkerStatus,
@@ -35,25 +35,25 @@ from fuzzingbrain.core.utils import generate_id
 
 
 class TestRunLifecycle:
-    """Run goes pending → running → collects POVs/patches → completed."""
+    """Run goes pending → running → collects POCs/patches → completed."""
 
-    def test_run_accumulates_povs_and_patches(self, repos):
-        """As workers find POVs and patches, they accumulate on the run."""
+    def test_run_accumulates_pocs_and_patches(self, repos):
+        """As workers find PoCs and patches, they accumulate on the run."""
         run = Run(project_name="openssl")
         repos.runs.save(run)
         repos.runs.update_status(run.run_id, "running")
 
-        pov1, pov2, patch1 = generate_id(), generate_id(), generate_id()
-        repos.runs.add_pov(run.run_id, pov1)
-        repos.runs.add_pov(run.run_id, pov2)
+        poc1, poc2, patch1 = generate_id(), generate_id(), generate_id()
+        repos.runs.add_poc(run.run_id, poc1)
+        repos.runs.add_poc(run.run_id, poc2)
         repos.runs.add_patch(run.run_id, patch1)
 
         found = repos.runs.find_by_id(run.run_id)
         assert found.status == RunStatus.RUNNING
-        assert len(found.pov_ids) == 2
+        assert len(found.poc_ids) == 2
         assert len(found.patch_ids) == 1
-        assert pov1 in found.pov_ids
-        assert pov2 in found.pov_ids
+        assert poc1 in found.poc_ids
+        assert poc2 in found.poc_ids
 
     def test_find_by_status_only_returns_matching(self, repos):
         """Dispatcher queries pending runs to launch them."""
@@ -97,68 +97,68 @@ class TestRunLifecycle:
 
 
 # =========================================================================
-# SP Pipeline: The Core Business Flow
+# VH Pipeline: The Core Business Flow
 #
 # Real flow: pending_verify → [claim] → verifying → [complete_verify] →
-#   verified (false positive) OR pending_pov → [claim_for_pov] →
-#   generating_pov → [complete_pov] → pov_generated / failed
+#   verified (false positive) OR pending_poc → [claim_for_poc] →
+#   generating_poc → [complete_poc] → poc_generated / failed
 # =========================================================================
 
 
-class TestSPPipelineLifecycle:
-    """End-to-end suspicious point pipeline tests."""
+class TestVHPipelineLifecycle:
+    """End-to-end vulnerability hypothesis pipeline tests."""
 
-    def _make_sp(self, run_id, **kwargs):
+    def _make_vh(self, run_id, **kwargs):
         defaults = dict(
             run_id=run_id,
             function_name="vuln_func",
-            direction_id=generate_id(),
+            lg_id=generate_id(),
             description="heap-buffer-overflow in vuln_func",
             sources=[{"harness_name": "fuzz1", "sanitizer": "address"}],
         )
         defaults.update(kwargs)
-        return SuspiciousPoint(**defaults)
+        return VulnerabilityHypothesis(**defaults)
 
-    def test_full_pipeline_verify_to_pov_success(self, repos):
-        """SP flows through entire pipeline: create → verify → POV success."""
+    def test_full_pipeline_verify_to_poc_success(self, repos):
+        """VH flows through entire pipeline: create → verify → PoC success."""
         run_id = generate_id()
-        sp = self._make_sp(run_id, score=0.8)
-        repos.suspicious_points.save(sp)
+        vh = self._make_vh(run_id, score=0.8)
+        repos.vulnerability_hypotheses.save(vh)
 
         # Step 1: Verifier agent claims
-        claimed = repos.suspicious_points.claim_for_verify(run_id, "verifier_1")
-        assert claimed.suspicious_point_id == sp.suspicious_point_id
-        assert claimed.status == SPStatus.VERIFYING.value
+        claimed = repos.vulnerability_hypotheses.claim_for_verify(run_id, "verifier_1")
+        assert claimed.vulnerability_hypothesis_id == vh.vulnerability_hypothesis_id
+        assert claimed.status == VHStatus.VERIFYING.value
 
-        # Step 2: Verifier confirms real, sends to POV stage
-        repos.suspicious_points.complete_verify(
-            sp.suspicious_point_id,
+        # Step 2: Verifier confirms real, sends to PoC stage
+        repos.vulnerability_hypotheses.complete_verify(
+            vh.vulnerability_hypothesis_id,
             is_crash_found=True,
             score=0.95,
             notes="confirmed via manual analysis",
-            proceed_to_pov=True,
+            proceed_to_poc=True,
         )
-        found = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
-        assert found.status == SPStatus.PENDING_POV.value
+        found = repos.vulnerability_hypotheses.find_by_id(vh.vulnerability_hypothesis_id)
+        assert found.status == VHStatus.PENDING_POC.value
         assert found.is_checked_by_verifier is True
         assert found.is_crash_found is True
         assert found.score == 0.95
 
-        # Step 3: POV worker claims
-        pov_claimed = repos.suspicious_points.claim_for_pov(
+        # Step 3: PoC worker claims
+        poc_claimed = repos.vulnerability_hypotheses.claim_for_poc(
             run_id,
-            "pov_worker_1",
+            "poc_worker_1",
             harness_name="fuzz1",
             sanitizer="address",
         )
-        assert pov_claimed is not None
-        assert pov_claimed.status == SPStatus.GENERATING_POV.value
+        assert poc_claimed is not None
+        assert poc_claimed.status == VHStatus.GENERATING_POC.value
 
-        # Step 4: POV worker succeeds
-        pov_id = generate_id()
-        result = repos.suspicious_points.complete_pov(
-            sp.suspicious_point_id,
-            pov_id=pov_id,
+        # Step 4: PoC worker succeeds
+        poc_id = generate_id()
+        result = repos.vulnerability_hypotheses.complete_poc(
+            vh.vulnerability_hypothesis_id,
+            poc_id=poc_id,
             success=True,
             harness_name="fuzz1",
             sanitizer="address",
@@ -166,186 +166,186 @@ class TestSPPipelineLifecycle:
         assert result is True
 
         # Final state check
-        final = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
-        assert final.status == SPStatus.POV_GENERATED.value
-        assert final.pov_id == pov_id
-        assert final.pov_success_by["harness_name"] == "fuzz1"
+        final = repos.vulnerability_hypotheses.find_by_id(vh.vulnerability_hypothesis_id)
+        assert final.status == VHStatus.POC_GENERATED.value
+        assert final.poc_id == poc_id
+        assert final.poc_success_by["harness_name"] == "fuzz1"
 
     def test_verify_false_positive_stays_terminal(self, repos):
-        """SP verified as false positive → VERIFIED (terminal), not in POV pipeline."""
+        """VH verified as false positive → VERIFIED (terminal), not in PoC pipeline."""
         run_id = generate_id()
-        sp = self._make_sp(run_id, score=0.4)
-        repos.suspicious_points.save(sp)
+        vh = self._make_vh(run_id, score=0.4)
+        repos.vulnerability_hypotheses.save(vh)
 
-        repos.suspicious_points.claim_for_verify(run_id, "verifier_1")
-        repos.suspicious_points.complete_verify(
-            sp.suspicious_point_id,
+        repos.vulnerability_hypotheses.claim_for_verify(run_id, "verifier_1")
+        repos.vulnerability_hypotheses.complete_verify(
+            vh.vulnerability_hypothesis_id,
             is_crash_found=False,
             score=0.1,
-            proceed_to_pov=False,
+            proceed_to_poc=False,
         )
 
-        found = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
-        assert found.status == SPStatus.VERIFIED.value
+        found = repos.vulnerability_hypotheses.find_by_id(vh.vulnerability_hypothesis_id)
+        assert found.status == VHStatus.VERIFIED.value
         assert found.is_crash_found is False
 
-        # Pipeline should consider this SP done
-        assert repos.suspicious_points.is_pipeline_complete(run_id) is True
+        # Pipeline should consider this VH done
+        assert repos.vulnerability_hypotheses.is_pipeline_complete(run_id) is True
 
-    def test_all_workers_fail_pov_marks_failed(self, repos):
-        """When every source worker fails POV, SP transitions to FAILED."""
+    def test_all_workers_fail_poc_marks_failed(self, repos):
+        """When every source worker fails PoC, VH transitions to FAILED."""
         run_id = generate_id()
-        sp = self._make_sp(
+        vh = self._make_vh(
             run_id,
-            status=SPStatus.PENDING_POV.value,
+            status=VHStatus.PENDING_POC.value,
             score=0.8,
             sources=[
                 {"harness_name": "fuzzA", "sanitizer": "address"},
                 {"harness_name": "fuzzB", "sanitizer": "address"},
             ],
         )
-        repos.suspicious_points.save(sp)
+        repos.vulnerability_hypotheses.save(vh)
 
         # Worker A claims and fails
-        repos.suspicious_points.claim_for_pov(
+        repos.vulnerability_hypotheses.claim_for_poc(
             run_id, "wA", harness_name="fuzzA", sanitizer="address"
         )
-        repos.suspicious_points.complete_pov(
-            sp.suspicious_point_id,
+        repos.vulnerability_hypotheses.complete_poc(
+            vh.vulnerability_hypothesis_id,
             success=False,
             harness_name="fuzzA",
             sanitizer="address",
         )
 
-        # SP should not be failed yet — worker B hasn't tried
-        mid = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
-        assert mid.status != SPStatus.FAILED.value
+        # VH should not be failed yet — worker B hasn't tried
+        mid = repos.vulnerability_hypotheses.find_by_id(vh.vulnerability_hypothesis_id)
+        assert mid.status != VHStatus.FAILED.value
 
         # Worker B claims and fails
-        repos.suspicious_points.claim_for_pov(
+        repos.vulnerability_hypotheses.claim_for_poc(
             run_id, "wB", harness_name="fuzzB", sanitizer="address"
         )
-        repos.suspicious_points.complete_pov(
-            sp.suspicious_point_id,
+        repos.vulnerability_hypotheses.complete_poc(
+            vh.vulnerability_hypothesis_id,
             success=False,
             harness_name="fuzzB",
             sanitizer="address",
         )
 
         # Now ALL sources have tried and failed → FAILED
-        final = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
-        assert final.status == SPStatus.FAILED.value
+        final = repos.vulnerability_hypotheses.find_by_id(vh.vulnerability_hypothesis_id)
+        assert final.status == VHStatus.FAILED.value
 
     def test_release_claim_on_verifier_crash(self, repos):
-        """If a verifier crashes, release_claim reverts SP so another agent can retry."""
+        """If a verifier crashes, release_claim reverts VH so another agent can retry."""
         run_id = generate_id()
-        sp = self._make_sp(run_id, score=0.7)
-        repos.suspicious_points.save(sp)
+        vh = self._make_vh(run_id, score=0.7)
+        repos.vulnerability_hypotheses.save(vh)
 
         # Agent claims
-        claimed = repos.suspicious_points.claim_for_verify(run_id, "agent_1")
-        assert claimed.status == SPStatus.VERIFYING.value
+        claimed = repos.vulnerability_hypotheses.claim_for_verify(run_id, "agent_1")
+        assert claimed.status == VHStatus.VERIFYING.value
 
         # Agent crashes → release with revert
-        repos.suspicious_points.release_claim(
-            sp.suspicious_point_id, revert_status=SPStatus.PENDING_VERIFY.value
+        repos.vulnerability_hypotheses.release_claim(
+            vh.vulnerability_hypothesis_id, revert_status=VHStatus.PENDING_VERIFY.value
         )
 
-        found = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
-        assert found.status == SPStatus.PENDING_VERIFY.value
+        found = repos.vulnerability_hypotheses.find_by_id(vh.vulnerability_hypothesis_id)
+        assert found.status == VHStatus.PENDING_VERIFY.value
 
         # Another agent can now claim it
-        reclaimed = repos.suspicious_points.claim_for_verify(run_id, "agent_2")
+        reclaimed = repos.vulnerability_hypotheses.claim_for_verify(run_id, "agent_2")
         assert reclaimed is not None
-        assert reclaimed.suspicious_point_id == sp.suspicious_point_id
+        assert reclaimed.vulnerability_hypothesis_id == vh.vulnerability_hypothesis_id
 
 
-class TestSPClaimScheduling:
-    """SP claim priority and exclusion logic."""
+class TestVHClaimScheduling:
+    """VH claim priority and exclusion logic."""
 
-    def _make_sp(self, run_id, **kwargs):
+    def _make_vh(self, run_id, **kwargs):
         defaults = dict(
             run_id=run_id,
             function_name="vuln_func",
-            direction_id=generate_id(),
+            lg_id=generate_id(),
             description="overflow",
             sources=[{"harness_name": "fuzz1", "sanitizer": "address"}],
         )
         defaults.update(kwargs)
-        return SuspiciousPoint(**defaults)
+        return VulnerabilityHypothesis(**defaults)
 
     def test_claim_verify_respects_priority(self, repos):
-        """Important SPs claimed before high-score, high-score before low."""
+        """Important VHs claimed before high-score, high-score before low."""
         run_id = generate_id()
-        low = self._make_sp(run_id, score=0.3, priority=0.0)
-        high = self._make_sp(run_id, score=0.9, priority=0.0)
-        important = self._make_sp(run_id, score=0.5, priority=1.0)
-        for sp in [low, high, important]:
-            repos.suspicious_points.save(sp)
+        low = self._make_vh(run_id, score=0.3, priority=0.0)
+        high = self._make_vh(run_id, score=0.9, priority=0.0)
+        important = self._make_vh(run_id, score=0.5, priority=1.0)
+        for vh in [low, high, important]:
+            repos.vulnerability_hypotheses.save(vh)
 
-        c1 = repos.suspicious_points.claim_for_verify(run_id, "a1")
-        assert c1.suspicious_point_id == important.suspicious_point_id
+        c1 = repos.vulnerability_hypotheses.claim_for_verify(run_id, "a1")
+        assert c1.vulnerability_hypothesis_id == important.vulnerability_hypothesis_id
 
-        c2 = repos.suspicious_points.claim_for_verify(run_id, "a2")
-        assert c2.suspicious_point_id == high.suspicious_point_id
+        c2 = repos.vulnerability_hypotheses.claim_for_verify(run_id, "a2")
+        assert c2.vulnerability_hypothesis_id == high.vulnerability_hypothesis_id
 
-        c3 = repos.suspicious_points.claim_for_verify(run_id, "a3")
-        assert c3.suspicious_point_id == low.suspicious_point_id
+        c3 = repos.vulnerability_hypotheses.claim_for_verify(run_id, "a3")
+        assert c3.vulnerability_hypothesis_id == low.vulnerability_hypothesis_id
 
         # Nothing left
-        assert repos.suspicious_points.claim_for_verify(run_id, "a4") is None
+        assert repos.vulnerability_hypotheses.claim_for_verify(run_id, "a4") is None
 
-    def test_claim_pov_excludes_already_attempted(self, repos):
-        """Worker that already attempted POV on this SP cannot claim it again."""
+    def test_claim_poc_excludes_already_attempted(self, repos):
+        """Worker that already attempted PoC on this VH cannot claim it again."""
         run_id = generate_id()
-        sp = self._make_sp(
+        vh = self._make_vh(
             run_id,
-            status=SPStatus.PENDING_POV.value,
+            status=VHStatus.PENDING_POC.value,
             score=0.8,
             sources=[
                 {"harness_name": "fuzzA", "sanitizer": "address"},
                 {"harness_name": "fuzzB", "sanitizer": "address"},
             ],
         )
-        repos.suspicious_points.save(sp)
+        repos.vulnerability_hypotheses.save(vh)
 
         # Worker A claims
-        c1 = repos.suspicious_points.claim_for_pov(
+        c1 = repos.vulnerability_hypotheses.claim_for_poc(
             run_id, "wA", harness_name="fuzzA", sanitizer="address"
         )
         assert c1 is not None
 
         # Worker A tries again → excluded
-        c2 = repos.suspicious_points.claim_for_pov(
+        c2 = repos.vulnerability_hypotheses.claim_for_poc(
             run_id, "wA", harness_name="fuzzA", sanitizer="address"
         )
         assert c2 is None
 
-        # Worker B can still claim the same SP
-        c3 = repos.suspicious_points.claim_for_pov(
+        # Worker B can still claim the same VH
+        c3 = repos.vulnerability_hypotheses.claim_for_poc(
             run_id, "wB", harness_name="fuzzB", sanitizer="address"
         )
         assert c3 is not None
 
-    def test_pov_first_success_wins_race(self, repos):
-        """Two workers generate POV simultaneously — only first success recorded."""
+    def test_poc_first_success_wins_race(self, repos):
+        """Two workers generate PoC simultaneously — only first success recorded."""
         run_id = generate_id()
-        sp = self._make_sp(
+        vh = self._make_vh(
             run_id,
-            status=SPStatus.GENERATING_POV.value,
+            status=VHStatus.GENERATING_POC.value,
             score=0.8,
             sources=[
                 {"harness_name": "fuzzA", "sanitizer": "address"},
                 {"harness_name": "fuzzB", "sanitizer": "address"},
             ],
         )
-        repos.suspicious_points.save(sp)
+        repos.vulnerability_hypotheses.save(vh)
 
         # Worker A succeeds
         assert (
-            repos.suspicious_points.complete_pov(
-                sp.suspicious_point_id,
-                pov_id=generate_id(),
+            repos.vulnerability_hypotheses.complete_poc(
+                vh.vulnerability_hypothesis_id,
+                poc_id=generate_id(),
                 success=True,
                 harness_name="fuzzA",
                 sanitizer="address",
@@ -355,9 +355,9 @@ class TestSPClaimScheduling:
 
         # Worker B also succeeds, but too late
         assert (
-            repos.suspicious_points.complete_pov(
-                sp.suspicious_point_id,
-                pov_id=generate_id(),
+            repos.vulnerability_hypotheses.complete_poc(
+                vh.vulnerability_hypothesis_id,
+                poc_id=generate_id(),
                 success=True,
                 harness_name="fuzzB",
                 sanitizer="address",
@@ -365,73 +365,73 @@ class TestSPClaimScheduling:
             is False
         )
 
-        final = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
-        assert final.pov_success_by["harness_name"] == "fuzzA"
-        assert final.status == SPStatus.POV_GENERATED.value
+        final = repos.vulnerability_hypotheses.find_by_id(vh.vulnerability_hypothesis_id)
+        assert final.poc_success_by["harness_name"] == "fuzzA"
+        assert final.status == VHStatus.POC_GENERATED.value
 
-    def test_pov_failure_does_not_clobber_concurrent_winner(self, repos, monkeypatch):
-        """A late POV failure must not revert an SP another worker already won.
+    def test_poc_failure_does_not_clobber_concurrent_winner(self, repos, monkeypatch):
+        """A late PoC failure must not revert a VH another worker already won.
 
-        Reproduces the read-modify-write race in complete_pov's failure path:
-        the failing worker acts on a stale snapshot (pov_success_by=None, all
+        Reproduces the read-modify-write race in complete_poc's failure path:
+        the failing worker acts on a stale snapshot (poc_success_by=None, all
         contributors "attempted") taken before the winner committed. The FAILED
-        write must be guarded so it cannot overwrite POV_GENERATED.
+        write must be guarded so it cannot overwrite POC_GENERATED.
         """
         run_id = generate_id()
-        sp = self._make_sp(
+        vh = self._make_vh(
             run_id,
-            status=SPStatus.GENERATING_POV.value,
+            status=VHStatus.GENERATING_POC.value,
             score=0.8,
             sources=[
                 {"harness_name": "fuzzA", "sanitizer": "address"},
                 {"harness_name": "fuzzB", "sanitizer": "address"},
             ],
         )
-        repos.suspicious_points.save(sp)
+        repos.vulnerability_hypotheses.save(vh)
 
-        # Worker B wins first: the SP is POV_GENERATED in the DB.
-        repos.suspicious_points.complete_pov(
-            sp.suspicious_point_id,
-            pov_id=generate_id(),
+        # Worker B wins first: the VH is POC_GENERATED in the DB.
+        repos.vulnerability_hypotheses.complete_poc(
+            vh.vulnerability_hypothesis_id,
+            poc_id=generate_id(),
             success=True,
             harness_name="fuzzB",
             sanitizer="address",
         )
 
         # Worker A still holds a pre-win snapshot: no winner yet, both attempted.
-        stale = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
-        stale.pov_success_by = None
-        stale.pov_attempted_by = [
+        stale = repos.vulnerability_hypotheses.find_by_id(vh.vulnerability_hypothesis_id)
+        stale.poc_success_by = None
+        stale.poc_attempted_by = [
             {"harness_name": "fuzzA", "sanitizer": "address"},
             {"harness_name": "fuzzB", "sanitizer": "address"},
         ]
-        monkeypatch.setattr(repos.suspicious_points, "find_by_id", lambda _id: stale)
+        monkeypatch.setattr(repos.vulnerability_hypotheses, "find_by_id", lambda _id: stale)
 
         # A reports failure. Pre-fix this unconditionally wrote FAILED.
-        repos.suspicious_points.complete_pov(
-            sp.suspicious_point_id,
+        repos.vulnerability_hypotheses.complete_poc(
+            vh.vulnerability_hypothesis_id,
             success=False,
             harness_name="fuzzA",
             sanitizer="address",
         )
 
         monkeypatch.undo()
-        final = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
-        assert final.status == SPStatus.POV_GENERATED.value
-        assert final.pov_success_by["harness_name"] == "fuzzB"
+        final = repos.vulnerability_hypotheses.find_by_id(vh.vulnerability_hypothesis_id)
+        assert final.status == VHStatus.POC_GENERATED.value
+        assert final.poc_success_by["harness_name"] == "fuzzB"
 
-    def test_claim_pov_respects_min_score(self, repos):
-        """SPs below min_score are not claimable for POV."""
+    def test_claim_poc_respects_min_score(self, repos):
+        """VHs below min_score are not claimable for PoC."""
         run_id = generate_id()
-        low_score = self._make_sp(
+        low_score = self._make_vh(
             run_id,
-            status=SPStatus.PENDING_POV.value,
+            status=VHStatus.PENDING_POC.value,
             score=0.3,
         )
-        repos.suspicious_points.save(low_score)
+        repos.vulnerability_hypotheses.save(low_score)
 
         # Default min_score=0.5, so score 0.3 should not be claimable
-        claimed = repos.suspicious_points.claim_for_pov(
+        claimed = repos.vulnerability_hypotheses.claim_for_poc(
             run_id,
             "w1",
             harness_name="fuzz1",
@@ -440,7 +440,7 @@ class TestSPClaimScheduling:
         assert claimed is None
 
         # But with lower threshold, it should be claimable
-        claimed2 = repos.suspicious_points.claim_for_pov(
+        claimed2 = repos.vulnerability_hypotheses.claim_for_poc(
             run_id,
             "w1",
             min_score=0.2,
@@ -450,118 +450,118 @@ class TestSPClaimScheduling:
         assert claimed2 is not None
 
 
-class TestSPSourceMerging:
-    """When multiple fuzzers find the same SP, sources merge via $addToSet."""
+class TestVHSourceMerging:
+    """When multiple fuzzers find the same VH, sources merge via $addToSet."""
 
     def test_same_source_not_duplicated(self, repos):
         """$addToSet prevents duplicate harness/sanitizer pairs."""
         run_id = generate_id()
-        sp = SuspiciousPoint(
+        vh = VulnerabilityHypothesis(
             run_id=run_id,
             function_name="f",
-            direction_id=generate_id(),
+            lg_id=generate_id(),
             description="d",
             sources=[],
         )
-        repos.suspicious_points.save(sp)
+        repos.vulnerability_hypotheses.save(vh)
 
-        repos.suspicious_points.add_source(sp.suspicious_point_id, "fuzz1", "address")
-        repos.suspicious_points.add_source(sp.suspicious_point_id, "fuzz1", "address")
-        repos.suspicious_points.add_source(sp.suspicious_point_id, "fuzz2", "address")
+        repos.vulnerability_hypotheses.add_source(vh.vulnerability_hypothesis_id, "fuzz1", "address")
+        repos.vulnerability_hypotheses.add_source(vh.vulnerability_hypothesis_id, "fuzz1", "address")
+        repos.vulnerability_hypotheses.add_source(vh.vulnerability_hypothesis_id, "fuzz2", "address")
 
-        found = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
+        found = repos.vulnerability_hypotheses.find_by_id(vh.vulnerability_hypothesis_id)
         assert len(found.sources) == 2  # fuzz1/addr + fuzz2/addr, not 3
 
     def test_merged_duplicate_records_original_info(self, repos):
-        """When deduplicating SPs, the duplicate's metadata is preserved."""
+        """When deduplicating VHs, the duplicate's metadata is preserved."""
         run_id = generate_id()
-        primary = SuspiciousPoint(
+        primary = VulnerabilityHypothesis(
             run_id=run_id,
             function_name="f",
-            direction_id=generate_id(),
+            lg_id=generate_id(),
             description="primary desc",
             sources=[{"harness_name": "fuzz1", "sanitizer": "address"}],
         )
-        repos.suspicious_points.save(primary)
+        repos.vulnerability_hypotheses.save(primary)
 
         # Duplicate found by fuzz2 gets merged into primary
-        repos.suspicious_points.add_merged_duplicate(
-            primary.suspicious_point_id,
+        repos.vulnerability_hypotheses.add_merged_duplicate(
+            primary.vulnerability_hypothesis_id,
             description="duplicate desc from fuzz2",
             harness_name="fuzz2",
             sanitizer="address",
             score=0.7,
         )
 
-        found = repos.suspicious_points.find_by_id(primary.suspicious_point_id)
+        found = repos.vulnerability_hypotheses.find_by_id(primary.vulnerability_hypothesis_id)
         assert len(found.merged_duplicates) == 1
         assert found.merged_duplicates[0]["description"] == "duplicate desc from fuzz2"
         assert found.merged_duplicates[0]["harness_name"] == "fuzz2"
 
 
-class TestSPPipelineCompletion:
+class TestVHPipelineCompletion:
     """Pipeline completion checks drive the worker termination decision."""
 
-    def _make_sp(self, run_id, **kwargs):
+    def _make_vh(self, run_id, **kwargs):
         defaults = dict(
             run_id=run_id,
             function_name="f",
-            direction_id=generate_id(),
+            lg_id=generate_id(),
             description="d",
             sources=[{"harness_name": "fuzz1", "sanitizer": "address"}],
         )
         defaults.update(kwargs)
-        return SuspiciousPoint(**defaults)
+        return VulnerabilityHypothesis(**defaults)
 
     def test_terminal_states_mean_complete(self, repos):
-        """Pipeline is complete when all SPs are in terminal states."""
+        """Pipeline is complete when all VHs are in terminal states."""
         run_id = generate_id()
-        repos.suspicious_points.save(
-            self._make_sp(run_id, status=SPStatus.POV_GENERATED.value)
+        repos.vulnerability_hypotheses.save(
+            self._make_vh(run_id, status=VHStatus.POC_GENERATED.value)
         )
-        repos.suspicious_points.save(
-            self._make_sp(run_id, status=SPStatus.FAILED.value)
+        repos.vulnerability_hypotheses.save(
+            self._make_vh(run_id, status=VHStatus.FAILED.value)
         )
-        repos.suspicious_points.save(
-            self._make_sp(run_id, status=SPStatus.VERIFIED.value)
+        repos.vulnerability_hypotheses.save(
+            self._make_vh(run_id, status=VHStatus.VERIFIED.value)
         )
-        repos.suspicious_points.save(
-            self._make_sp(run_id, status=SPStatus.SKIPPED.value)
+        repos.vulnerability_hypotheses.save(
+            self._make_vh(run_id, status=VHStatus.SKIPPED.value)
         )
-        assert repos.suspicious_points.is_pipeline_complete(run_id) is True
+        assert repos.vulnerability_hypotheses.is_pipeline_complete(run_id) is True
 
-    def test_pending_sp_blocks_completion(self, repos):
-        """One pending_verify SP means pipeline is NOT complete."""
+    def test_pending_vh_blocks_completion(self, repos):
+        """One pending_verify VH means pipeline is NOT complete."""
         run_id = generate_id()
-        repos.suspicious_points.save(
-            self._make_sp(run_id, status=SPStatus.POV_GENERATED.value)
+        repos.vulnerability_hypotheses.save(
+            self._make_vh(run_id, status=VHStatus.POC_GENERATED.value)
         )
-        repos.suspicious_points.save(
-            self._make_sp(run_id, status=SPStatus.PENDING_VERIFY.value)
+        repos.vulnerability_hypotheses.save(
+            self._make_vh(run_id, status=VHStatus.PENDING_VERIFY.value)
         )
-        assert repos.suspicious_points.is_pipeline_complete(run_id) is False
+        assert repos.vulnerability_hypotheses.is_pipeline_complete(run_id) is False
 
     def test_worker_specific_completion(self, repos):
         """Worker checks completion for its own harness/sanitizer only."""
         run_id = generate_id()
-        # SP that only fuzz1 cares about — still pending
-        sp_fuzz1 = self._make_sp(
+        # VH that only fuzz1 cares about — still pending
+        vh_fuzz1 = self._make_vh(
             run_id,
-            status=SPStatus.PENDING_VERIFY.value,
+            status=VHStatus.PENDING_VERIFY.value,
             sources=[{"harness_name": "fuzz1", "sanitizer": "address"}],
         )
-        # SP that only fuzz2 cares about — done
-        sp_fuzz2 = self._make_sp(
+        # VH that only fuzz2 cares about — done
+        vh_fuzz2 = self._make_vh(
             run_id,
-            status=SPStatus.POV_GENERATED.value,
+            status=VHStatus.POC_GENERATED.value,
             sources=[{"harness_name": "fuzz2", "sanitizer": "address"}],
         )
-        repos.suspicious_points.save(sp_fuzz1)
-        repos.suspicious_points.save(sp_fuzz2)
+        repos.vulnerability_hypotheses.save(vh_fuzz1)
+        repos.vulnerability_hypotheses.save(vh_fuzz2)
 
-        # fuzz2/address is done (its SPs are all terminal)
+        # fuzz2/address is done (its VHs are all terminal)
         assert (
-            repos.suspicious_points.is_pipeline_complete(
+            repos.vulnerability_hypotheses.is_pipeline_complete(
                 run_id, harness_name="fuzz2", sanitizer="address"
             )
             is True
@@ -569,53 +569,53 @@ class TestSPPipelineCompletion:
 
         # fuzz1/address is NOT done (still has pending_verify)
         assert (
-            repos.suspicious_points.is_pipeline_complete(
+            repos.vulnerability_hypotheses.is_pipeline_complete(
                 run_id, harness_name="fuzz1", sanitizer="address"
             )
             is False
         )
 
-    def test_worker_specific_pov_stage_completion(self, repos):
-        """Worker's POV pipeline is complete once it has attempted all its SPs.
+    def test_worker_specific_poc_stage_completion(self, repos):
+        """Worker's PoC pipeline is complete once it has attempted all its VHs.
 
-        The POV-stage query checks: contributor + not succeeded + not attempted.
-        After a worker attempts a POV (even if it fails), that SP is "done"
+        The PoC-stage query checks: contributor + not succeeded + not attempted.
+        After a worker attempts a PoC (even if it fails), that VH is "done"
         for that worker.
         """
         run_id = generate_id()
-        sp = self._make_sp(
+        vh = self._make_vh(
             run_id,
-            status=SPStatus.PENDING_POV.value,
+            status=VHStatus.PENDING_POC.value,
             score=0.8,
             sources=[
                 {"harness_name": "fuzzA", "sanitizer": "address"},
                 {"harness_name": "fuzzB", "sanitizer": "address"},
             ],
         )
-        repos.suspicious_points.save(sp)
+        repos.vulnerability_hypotheses.save(vh)
 
-        # fuzzA has un-attempted SPs → NOT complete
+        # fuzzA has un-attempted VHs → NOT complete
         assert (
-            repos.suspicious_points.is_pipeline_complete(
+            repos.vulnerability_hypotheses.is_pipeline_complete(
                 run_id, harness_name="fuzzA", sanitizer="address"
             )
             is False
         )
 
         # fuzzA claims and fails
-        repos.suspicious_points.claim_for_pov(
+        repos.vulnerability_hypotheses.claim_for_poc(
             run_id, "wA", harness_name="fuzzA", sanitizer="address"
         )
-        repos.suspicious_points.complete_pov(
-            sp.suspicious_point_id,
+        repos.vulnerability_hypotheses.complete_poc(
+            vh.vulnerability_hypothesis_id,
             success=False,
             harness_name="fuzzA",
             sanitizer="address",
         )
 
-        # fuzzA has now attempted its only SP → complete for fuzzA
+        # fuzzA has now attempted its only VH → complete for fuzzA
         assert (
-            repos.suspicious_points.is_pipeline_complete(
+            repos.vulnerability_hypotheses.is_pipeline_complete(
                 run_id, harness_name="fuzzA", sanitizer="address"
             )
             is True
@@ -623,7 +623,7 @@ class TestSPPipelineCompletion:
 
         # But fuzzB still hasn't attempted → NOT complete for fuzzB
         assert (
-            repos.suspicious_points.is_pipeline_complete(
+            repos.vulnerability_hypotheses.is_pipeline_complete(
                 run_id, harness_name="fuzzB", sanitizer="address"
             )
             is False
@@ -632,15 +632,15 @@ class TestSPPipelineCompletion:
     def test_count_by_status_breakdown(self, repos):
         """Status counts drive the dashboard and scheduling decisions."""
         run_id = generate_id()
-        repos.suspicious_points.save(
-            self._make_sp(run_id, is_checked_by_verifier=True, is_crash_found=True, priority=1.0)
+        repos.vulnerability_hypotheses.save(
+            self._make_vh(run_id, is_checked_by_verifier=True, is_crash_found=True, priority=1.0)
         )
-        repos.suspicious_points.save(
-            self._make_sp(run_id, is_checked_by_verifier=True, is_crash_found=False)
+        repos.vulnerability_hypotheses.save(
+            self._make_vh(run_id, is_checked_by_verifier=True, is_crash_found=False)
         )
-        repos.suspicious_points.save(self._make_sp(run_id, is_checked_by_verifier=False))
+        repos.vulnerability_hypotheses.save(self._make_vh(run_id, is_checked_by_verifier=False))
 
-        counts = repos.suspicious_points.count_by_status(run_id)
+        counts = repos.vulnerability_hypotheses.count_by_status(run_id)
         assert counts["total"] == 3
         assert counts["checked"] == 2
         assert counts["unchecked"] == 1
@@ -650,12 +650,12 @@ class TestSPPipelineCompletion:
 
 
 # =========================================================================
-# Direction → SP Find Workflow
+# Logic group → VH Find Workflow
 # =========================================================================
 
 
-class TestDirectionWorkflow:
-    """Directions represent analysis plans that agents claim and execute."""
+class TestLogicGroupWorkflow:
+    """Logic groups represent analysis plans that agents claim and execute."""
 
     def _make_dir(self, run_id, **kwargs):
         defaults = dict(
@@ -665,10 +665,10 @@ class TestDirectionWorkflow:
             risk_level=RiskLevel.MEDIUM.value,
         )
         defaults.update(kwargs)
-        return Direction(**defaults)
+        return LogicGroup(**defaults)
 
     def test_claim_respects_risk_priority(self, repos):
-        """High-risk directions are claimed before low-risk."""
+        """High-risk logic groups are claimed before low-risk."""
         run_id = generate_id()
         low = self._make_dir(
             run_id, name="low_risk_dir", risk_level=RiskLevel.LOW.value
@@ -677,49 +677,49 @@ class TestDirectionWorkflow:
             run_id, name="high_risk_dir", risk_level=RiskLevel.HIGH.value
         )
         # Save low first to prove order doesn't matter
-        repos.directions.save(low)
-        repos.directions.save(high)
+        repos.logic_groups.save(low)
+        repos.logic_groups.save(high)
 
-        claimed = repos.directions.claim(run_id, "fuzz_target", "agent_1")
-        assert claimed.direction_id == high.direction_id
-        assert claimed.status == DirectionStatus.IN_PROGRESS.value
+        claimed = repos.logic_groups.claim(run_id, "fuzz_target", "agent_1")
+        assert claimed.lg_id == high.lg_id
+        assert claimed.status == LogicGroupStatus.IN_PROGRESS.value
 
     def test_complete_records_analysis_results(self, repos):
-        """After analyzing a direction, sp_count and functions_analyzed are recorded."""
+        """After analyzing a logic group, vh_count and functions_analyzed are recorded."""
         run_id = generate_id()
         d = self._make_dir(run_id)
-        repos.directions.save(d)
-        repos.directions.claim(run_id, "fuzz_target", "agent_1")
+        repos.logic_groups.save(d)
+        repos.logic_groups.claim(run_id, "fuzz_target", "agent_1")
 
-        repos.directions.complete(d.direction_id, sp_count=7, functions_analyzed=42)
-        found = repos.directions.find_by_id(d.direction_id)
-        assert found.status == DirectionStatus.COMPLETED.value
-        assert found.sp_count == 7
+        repos.logic_groups.complete(d.lg_id, vh_count=7, functions_analyzed=42)
+        found = repos.logic_groups.find_by_id(d.lg_id)
+        assert found.status == LogicGroupStatus.COMPLETED.value
+        assert found.vh_count == 7
         assert found.functions_analyzed == 42
 
-    def test_skip_low_value_direction(self, repos):
-        """Agent can skip a direction deemed not worth analyzing."""
+    def test_skip_low_value_logic_group(self, repos):
+        """Agent can skip a logic group deemed not worth analyzing."""
         run_id = generate_id()
         d = self._make_dir(run_id, risk_level=RiskLevel.LOW.value)
-        repos.directions.save(d)
+        repos.logic_groups.save(d)
 
-        repos.directions.skip(d.direction_id, reason="too simple")
-        found = repos.directions.find_by_id(d.direction_id)
-        assert found.status == DirectionStatus.SKIPPED.value
+        repos.logic_groups.skip(d.lg_id, reason="too simple")
+        found = repos.logic_groups.find_by_id(d.lg_id)
+        assert found.status == LogicGroupStatus.SKIPPED.value
 
     def test_release_claim_on_agent_crash(self, repos):
-        """If an agent crashes, its claimed direction returns to PENDING."""
+        """If an agent crashes, its claimed logic group returns to PENDING."""
         run_id = generate_id()
         d = self._make_dir(run_id)
-        repos.directions.save(d)
-        repos.directions.claim(run_id, "fuzz_target", "agent_1")
+        repos.logic_groups.save(d)
+        repos.logic_groups.claim(run_id, "fuzz_target", "agent_1")
 
-        repos.directions.release_claim(d.direction_id)
+        repos.logic_groups.release_claim(d.lg_id)
 
-        found = repos.directions.find_by_id(d.direction_id)
-        assert found.status == DirectionStatus.PENDING.value
+        found = repos.logic_groups.find_by_id(d.lg_id)
+        assert found.status == LogicGroupStatus.PENDING.value
         # Another agent can now claim it
-        reclaimed = repos.directions.claim(run_id, "fuzz_target", "agent_2")
+        reclaimed = repos.logic_groups.claim(run_id, "fuzz_target", "agent_2")
         assert reclaimed is not None
 
     def test_is_all_complete_mixed_states(self, repos):
@@ -729,101 +729,101 @@ class TestDirectionWorkflow:
         d2 = self._make_dir(run_id, name="d2")
         d3 = self._make_dir(run_id, name="d3")
         for d in [d1, d2, d3]:
-            repos.directions.save(d)
+            repos.logic_groups.save(d)
 
-        assert repos.directions.is_all_complete(run_id) is False
+        assert repos.logic_groups.is_all_complete(run_id) is False
 
-        repos.directions.complete(d1.direction_id)
-        repos.directions.skip(d2.direction_id)
+        repos.logic_groups.complete(d1.lg_id)
+        repos.logic_groups.skip(d2.lg_id)
         # d3 still pending
-        assert repos.directions.is_all_complete(run_id) is False
+        assert repos.logic_groups.is_all_complete(run_id) is False
 
-        repos.directions.complete(d3.direction_id)
-        assert repos.directions.is_all_complete(run_id) is True
+        repos.logic_groups.complete(d3.lg_id)
+        assert repos.logic_groups.is_all_complete(run_id) is True
 
     def test_find_by_fuzzer_isolates_fuzzers(self, repos):
-        """Directions from different fuzzers don't mix."""
+        """Logic groups from different fuzzers don't mix."""
         run_id = generate_id()
         d1 = self._make_dir(run_id, fuzzer="fuzz1", name="dir_for_fuzz1")
         d2 = self._make_dir(run_id, fuzzer="fuzz2", name="dir_for_fuzz2")
-        repos.directions.save(d1)
-        repos.directions.save(d2)
+        repos.logic_groups.save(d1)
+        repos.logic_groups.save(d2)
 
-        found = repos.directions.find_by_fuzzer(run_id, "fuzz1")
+        found = repos.logic_groups.find_by_fuzzer(run_id, "fuzz1")
         assert len(found) == 1
-        assert found[0].direction_id == d1.direction_id
+        assert found[0].lg_id == d1.lg_id
 
     def test_delete_by_run_removes_all(self, repos):
         """Cleaning up after run cancellation."""
         run_id = generate_id()
         for i in range(3):
-            repos.directions.save(self._make_dir(run_id, name=f"dir_{i}"))
+            repos.logic_groups.save(self._make_dir(run_id, name=f"dir_{i}"))
 
-        deleted = repos.directions.delete_by_run(run_id)
+        deleted = repos.logic_groups.delete_by_run(run_id)
         assert deleted == 3
-        assert repos.directions.count({"run_id": ObjectId(run_id)}) == 0
+        assert repos.logic_groups.count({"run_id": ObjectId(run_id)}) == 0
 
 
 # =========================================================================
-# POV Discovery and Reporting
+# PoC Discovery and Reporting
 # =========================================================================
 
 
-class TestPOVDiscovery:
-    """POV repository serves the POV discovery and deduplication pipeline."""
+class TestPOCDiscovery:
+    """PoC repository serves the PoC discovery and deduplication pipeline."""
 
     def test_find_by_run_uses_objectid(self, repos):
-        """POVs stored with ObjectId(run_id) must be findable by string run_id."""
+        """PoCs stored with ObjectId(run_id) must be findable by string run_id."""
         run_id = generate_id()
         other_run = generate_id()
-        p1 = POV(run_id=run_id, harness_name="h1")
-        p2 = POV(run_id=run_id, harness_name="h2")
-        p_other = POV(run_id=other_run, harness_name="h1")
+        p1 = POC(run_id=run_id, harness_name="h1")
+        p2 = POC(run_id=run_id, harness_name="h2")
+        p_other = POC(run_id=other_run, harness_name="h1")
         for p in [p1, p2, p_other]:
-            repos.povs.save(p)
+            repos.pocs.save(p)
 
-        found = repos.povs.find_by_run(run_id)
+        found = repos.pocs.find_by_run(run_id)
         assert len(found) == 2
-        assert {p.pov_id for p in found} == {p1.pov_id, p2.pov_id}
+        assert {p.poc_id for p in found} == {p1.poc_id, p2.poc_id}
 
     def test_successful_excludes_inactive_and_failed(self, repos):
-        """Only active + successful POVs count toward run score."""
+        """Only active + successful PoCs count toward run score."""
         run_id = generate_id()
-        active_success = POV(run_id=run_id, is_active=True, is_successful=True)
-        active_fail = POV(run_id=run_id, is_active=True, is_successful=False)
-        inactive_success = POV(run_id=run_id, is_active=False, is_successful=True)
+        active_success = POC(run_id=run_id, is_active=True, is_successful=True)
+        active_fail = POC(run_id=run_id, is_active=True, is_successful=False)
+        inactive_success = POC(run_id=run_id, is_active=False, is_successful=True)
         for p in [active_success, active_fail, inactive_success]:
-            repos.povs.save(p)
+            repos.pocs.save(p)
 
-        found = repos.povs.find_successful_by_run(run_id)
+        found = repos.pocs.find_successful_by_run(run_id)
         assert len(found) == 1
-        assert found[0].pov_id == active_success.pov_id
+        assert found[0].poc_id == active_success.poc_id
 
     def test_find_by_harness_for_worker_isolation(self, repos):
-        """Each worker queries POVs for its own harness."""
+        """Each worker queries PoCs for its own harness."""
         run_id = generate_id()
-        p1 = POV(run_id=run_id, harness_name="fuzz_target1")
-        p2 = POV(run_id=run_id, harness_name="fuzz_target2")
-        repos.povs.save(p1)
-        repos.povs.save(p2)
+        p1 = POC(run_id=run_id, harness_name="fuzz_target1")
+        p2 = POC(run_id=run_id, harness_name="fuzz_target2")
+        repos.pocs.save(p1)
+        repos.pocs.save(p2)
 
-        found = repos.povs.find_by_harness(run_id, "fuzz_target1")
+        found = repos.pocs.find_by_harness(run_id, "fuzz_target1")
         assert len(found) == 1
         assert found[0].harness_name == "fuzz_target1"
 
     def test_deactivate_removes_from_active_query(self, repos):
-        """Deactivated POV no longer appears in active/successful queries."""
+        """Deactivated PoC no longer appears in active/successful queries."""
         run_id = generate_id()
-        pov = POV(run_id=run_id, is_active=True, is_successful=True)
-        repos.povs.save(pov)
+        poc = POC(run_id=run_id, is_active=True, is_successful=True)
+        repos.pocs.save(poc)
 
-        repos.povs.deactivate(pov.pov_id)
+        repos.pocs.deactivate(poc.poc_id)
 
-        assert len(repos.povs.find_active_by_run(run_id)) == 0
-        assert len(repos.povs.find_successful_by_run(run_id)) == 0
+        assert len(repos.pocs.find_active_by_run(run_id)) == 0
+        assert len(repos.pocs.find_successful_by_run(run_id)) == 0
 
         # But still findable by direct ID
-        found = repos.povs.find_by_id(pov.pov_id)
+        found = repos.pocs.find_by_id(poc.poc_id)
         assert found is not None
         assert found.is_active is False
 
@@ -834,7 +834,7 @@ class TestPOVDiscovery:
 
 
 class TestPatchVerification:
-    """Patches go through apply → compile → pov → test checks."""
+    """Patches go through apply → compile → poc → test checks."""
 
     def test_only_fully_verified_patches_are_valid(self, repos):
         """find_valid_by_run requires all 4 checks to be True."""
@@ -843,14 +843,14 @@ class TestPatchVerification:
             run_id=run_id,
             apply_check=True,
             compilation_check=True,
-            pov_check=True,
+            poc_check=True,
             test_check=True,
         )
         partial_pass = Patch(
             run_id=run_id,
             apply_check=True,
             compilation_check=True,
-            pov_check=True,
+            poc_check=True,
             test_check=False,  # test failed
         )
         repos.patches.save(full_pass)
@@ -867,7 +867,7 @@ class TestPatchVerification:
             run_id=run_id,
             apply_check=True,
             compilation_check=True,
-            pov_check=True,
+            poc_check=True,
             test_check=True,
             is_active=False,
         )
@@ -892,7 +892,7 @@ class TestPatchVerification:
         found = repos.patches.find_by_id(pa.patch_id)
         assert found.apply_check is True
         assert found.compilation_check is True
-        assert found.pov_check is False
+        assert found.poc_check is False
 
 
 # =========================================================================
@@ -913,14 +913,14 @@ class TestWorkerLifecycle:
 
         repos.workers.update_status(w.worker_id, "running")
         repos.workers.update_strategy(w.worker_id, "fullscan")
-        repos.workers.update_strategy(w.worker_id, "pov_targeted")
-        repos.workers.update_results(w.worker_id, povs=3, patches=1)
+        repos.workers.update_strategy(w.worker_id, "poc_targeted")
+        repos.workers.update_results(w.worker_id, pocs=3, patches=1)
 
         found = repos.workers.find_by_id(w.worker_id)
         assert found.status == WorkerStatus.RUNNING
-        assert found.current_strategy == "pov_targeted"
-        assert found.strategy_history == ["fullscan", "pov_targeted"]
-        assert found.pov_generated == 3
+        assert found.current_strategy == "poc_targeted"
+        assert found.strategy_history == ["fullscan", "poc_targeted"]
+        assert found.poc_generated == 3
         assert found.patch_generated == 1
 
     def test_find_by_fuzzer_exact_match(self, repos):
@@ -1001,7 +1001,7 @@ class TestFuzzerBuild:
 
 
 class TestFunctionAnalysis:
-    """Functions track which directions have analyzed them to avoid redundant work."""
+    """Functions track which logic groups have analyzed them to avoid redundant work."""
 
     def test_composite_key_lookup(self, repos):
         """Function._id = '{run_id}_{name}', find_by_name constructs this key."""
@@ -1028,7 +1028,7 @@ class TestFunctionAnalysis:
 
         This drives coverage efficiency: agents analyze new functions before
         re-visiting already-analyzed ones.
-        Priority: never analyzed > analyzed by other direction > analyzed by this direction.
+        Priority: never analyzed > analyzed by other logic group > analyzed by this logic group.
         """
         run_id = generate_id()
         dir_a = generate_id()
@@ -1045,14 +1045,14 @@ class TestFunctionAnalysis:
             name="analyzed_by_other",
             file_path="a.c",
             reached_by_fuzzers=["fuzz1"],
-            analyzed_by_directions=[dir_b],
+            analyzed_by_logic_groups=[dir_b],
         )
         fn_done = Function(
             run_id=run_id,
             name="already_analyzed",
             file_path="a.c",
             reached_by_fuzzers=["fuzz1"],
-            analyzed_by_directions=[dir_a],
+            analyzed_by_logic_groups=[dir_a],
         )
         for fn in [fn_fresh, fn_other, fn_done]:
             repos.functions.save(fn)
@@ -1064,9 +1064,9 @@ class TestFunctionAnalysis:
         assert results[2].name == "already_analyzed"
 
     def test_mark_analyzed_is_idempotent(self, repos):
-        """$addToSet ensures marking the same direction twice doesn't duplicate."""
+        """$addToSet ensures marking the same logic group twice doesn't duplicate."""
         run_id = generate_id()
-        direction_id = generate_id()
+        lg_id = generate_id()
         fn = Function(
             run_id=run_id,
             name="func_a",
@@ -1075,16 +1075,16 @@ class TestFunctionAnalysis:
         )
         repos.functions.save(fn)
 
-        repos.functions.mark_analyzed_by_direction(fn.function_id, direction_id)
-        repos.functions.mark_analyzed_by_direction(fn.function_id, direction_id)
+        repos.functions.mark_analyzed_by_logic_group(fn.function_id, lg_id)
+        repos.functions.mark_analyzed_by_logic_group(fn.function_id, lg_id)
 
         found = repos.functions.find_by_name(run_id, "func_a")
-        assert len(found.analyzed_by_directions) == 1
+        assert len(found.analyzed_by_logic_groups) == 1
 
     def test_mark_many_analyzed_batch(self, repos):
-        """Batch-mark multiple functions as analyzed by one direction."""
+        """Batch-mark multiple functions as analyzed by one logic group."""
         run_id = generate_id()
-        direction_id = generate_id()
+        lg_id = generate_id()
         f1 = Function(
             run_id=run_id, name="f1", file_path="a.c", reached_by_fuzzers=["fuzz1"]
         )
@@ -1096,13 +1096,13 @@ class TestFunctionAnalysis:
 
         updated = repos.functions.mark_many_analyzed(
             [f1.function_id, f2.function_id],
-            direction_id,
+            lg_id,
         )
         assert updated == 2
 
         for fn_id in [f1.function_id, f2.function_id]:
             found = repos.functions.find_by_id(fn_id)
-            assert direction_id in found.analyzed_by_directions
+            assert lg_id in found.analyzed_by_logic_groups
 
     def test_delete_by_run_cleans_up(self, repos):
         """When a run is re-run, old function data is cleaned out."""
@@ -1248,24 +1248,24 @@ class TestObjectIdRoundtrip:
         found = repos.workers.find_by_id(w.worker_id)
         assert found.worker_id == w.worker_id
 
-    def test_sp_roundtrip(self, repos):
-        sp = SuspiciousPoint(
+    def test_vh_roundtrip(self, repos):
+        vh = VulnerabilityHypothesis(
             run_id=generate_id(),
             function_name="f",
-            direction_id=generate_id(),
+            lg_id=generate_id(),
             description="d",
         )
-        repos.suspicious_points.save(sp)
-        found = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
-        assert found.suspicious_point_id == sp.suspicious_point_id
-        assert found.run_id == sp.run_id
-        assert found.direction_id == sp.direction_id
+        repos.vulnerability_hypotheses.save(vh)
+        found = repos.vulnerability_hypotheses.find_by_id(vh.vulnerability_hypothesis_id)
+        assert found.vulnerability_hypothesis_id == vh.vulnerability_hypothesis_id
+        assert found.run_id == vh.run_id
+        assert found.lg_id == vh.lg_id
 
-    def test_direction_roundtrip(self, repos):
-        d = Direction(run_id=generate_id(), fuzzer="f", name="d")
-        repos.directions.save(d)
-        found = repos.directions.find_by_id(d.direction_id)
-        assert found.direction_id == d.direction_id
+    def test_logic_group_roundtrip(self, repos):
+        d = LogicGroup(run_id=generate_id(), fuzzer="f", name="d")
+        repos.logic_groups.save(d)
+        found = repos.logic_groups.find_by_id(d.lg_id)
+        assert found.lg_id == d.lg_id
 
     def test_function_composite_key_roundtrip(self, repos):
         """Function uses '{run_id}_{name}' as _id, not ObjectId."""
@@ -1283,17 +1283,17 @@ class TestRepositoryManager:
     def test_lazy_singleton_per_repo(self, repos):
         """Each property returns the same instance on repeated access."""
         assert repos.runs is repos.runs
-        assert repos.povs is repos.povs
-        assert repos.suspicious_points is repos.suspicious_points
+        assert repos.pocs is repos.pocs
+        assert repos.vulnerability_hypotheses is repos.vulnerability_hypotheses
 
     def test_all_nine_repos_accessible(self, repos):
         """All 9 repository types are accessible."""
         repo_names = [
             "runs",
-            "povs",
+            "pocs",
             "patches",
-            "suspicious_points",
-            "directions",
+            "vulnerability_hypotheses",
+            "logic_groups",
             "workers",
             "fuzzers",
             "functions",

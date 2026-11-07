@@ -51,7 +51,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             - run_id: str
             - fuzzer: str
             - sanitizer: str
-            - task_type: str (pov | patch | pov-patch | harness)
+            - task_type: str (poc | patch | poc-patch | harness)
             - workspace_path: str
             - project_name: str
             - log_dir: str (optional)
@@ -67,10 +67,10 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     task_type = assignment["task_type"]
     project_name = assignment["project_name"]
     log_dir = assignment.get("log_dir")
-    # Image the fuzzer binary runs in for PoV verify. From the task JSON when set
+    # Image the fuzzer binary runs in for PoC verify. From the task JSON when set
     # (a prebuilt/imported binary must run in the image it was built in), else the
     # OSS-Fuzz convention.
-    pov_docker_image = assignment.get("docker_image") or f"gcr.io/oss-fuzz/{project_name}"
+    poc_docker_image = assignment.get("docker_image") or f"gcr.io/oss-fuzz/{project_name}"
 
     # Pre-built fuzzer info from Analyzer (new architecture)
     fuzzer_binary_path = assignment.get("fuzzer_binary_path")
@@ -87,7 +87,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     max_parallel_fuzzers = assignment.get(
         "max_parallel_fuzzers", DEFAULT_MAX_PARALLEL_FUZZERS
     )
-    sp_max_count = assignment.get("sp_max_count")
+    vh_max_count = assignment.get("vh_max_count")
     fuzzer_sources = assignment.get("fuzzer_sources")
 
     # Install this run's concurrency before anything reads it.
@@ -194,9 +194,9 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             index_path=index_path,
             diff_path=diff_path,
             log_dir=log_dir,
-            docker_image=pov_docker_image,
+            docker_image=poc_docker_image,
             max_parallel_fuzzers=max_parallel_fuzzers,
-            sp_max_count=sp_max_count,
+            vh_max_count=vh_max_count,
             fuzzer_sources=fuzzer_sources,
             # Pass celery_job_id for WorkerContext
             celery_job_id=self.request.id,
@@ -215,7 +215,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             status="completed",
             fuzzer=fuzzer,
             sanitizer=sanitizer,
-            pov_generated=result.get("pov_generated", 0),
+            poc_generated=result.get("poc_generated", 0),
             patch_generated=result.get("patch_generated", 0),
             elapsed_seconds=elapsed_seconds,
         )
@@ -233,7 +233,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             "status": "completed",
             "fuzzer": fuzzer,
             "sanitizer": sanitizer,
-            "pov_generated": result.get("pov_generated", 0),
+            "poc_generated": result.get("poc_generated", 0),
             "patch_generated": result.get("patch_generated", 0),
         }
 

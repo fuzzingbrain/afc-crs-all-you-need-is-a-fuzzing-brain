@@ -44,7 +44,7 @@ class Worker:
     run_id: str = ""  # Parent Run ObjectId
 
     # Assignment
-    task_type: str = "pov"  # pov | patch | harness
+    task_type: str = "poc"  # poc | patch | harness
     fuzzer: str = ""
     sanitizer: str = "address"
     scan_mode: str = "full"  # full | delta
@@ -63,9 +63,9 @@ class Worker:
     agents_spawned: int = 0
     agents_completed: int = 0
     agents_failed: int = 0
-    sp_found: int = 0
-    sp_verified: int = 0
-    pov_generated: int = 0
+    vh_found: int = 0
+    vh_verified: int = 0
+    poc_generated: int = 0
     patch_generated: int = 0
 
     # Timestamps
@@ -77,9 +77,9 @@ class Worker:
     # Phase timing (seconds) - for performance analysis
     phase_build: float = 0.0
     phase_reachability: float = 0.0
-    phase_find_sp: float = 0.0
+    phase_find_vh: float = 0.0
     phase_verify: float = 0.0
-    phase_pov: float = 0.0
+    phase_poc: float = 0.0
     phase_save: float = 0.0
 
     # Result summary
@@ -127,9 +127,9 @@ class Worker:
             "agents_spawned": self.agents_spawned,
             "agents_completed": self.agents_completed,
             "agents_failed": self.agents_failed,
-            "sp_found": self.sp_found,
-            "sp_verified": self.sp_verified,
-            "pov_generated": self.pov_generated,
+            "vh_found": self.vh_found,
+            "vh_verified": self.vh_verified,
+            "poc_generated": self.poc_generated,
             "patch_generated": self.patch_generated,
             # Timestamps
             "created_at": self.created_at,
@@ -139,9 +139,9 @@ class Worker:
             # Phase timing
             "phase_build": self.phase_build,
             "phase_reachability": self.phase_reachability,
-            "phase_find_sp": self.phase_find_sp,
+            "phase_find_vh": self.phase_find_vh,
             "phase_verify": self.phase_verify,
-            "phase_pov": self.phase_pov,
+            "phase_poc": self.phase_poc,
             "phase_save": self.phase_save,
             # Result
             "result_summary": self.result_summary,
@@ -168,7 +168,7 @@ class Worker:
             worker_id=worker_id or "",
             celery_job_id=data.get("celery_job_id"),
             run_id=run_id or "",
-            task_type=data.get("task_type", "pov"),
+            task_type=data.get("task_type", "poc"),
             fuzzer=data.get("fuzzer", ""),
             sanitizer=data.get("sanitizer", "address"),
             scan_mode=data.get("scan_mode", "full"),
@@ -182,10 +182,10 @@ class Worker:
             agents_spawned=data.get("agents_spawned", 0),
             agents_completed=data.get("agents_completed", 0),
             agents_failed=data.get("agents_failed", 0),
-            sp_found=data.get("sp_found", 0),
-            sp_verified=data.get("sp_verified", 0),
+            vh_found=data.get("vh_found", 0),
+            vh_verified=data.get("vh_verified", 0),
             # Support legacy field names for backward compatibility
-            pov_generated=data.get("pov_generated", data.get("povs_found", 0)),
+            poc_generated=data.get("poc_generated", data.get("pocs_found", 0)),
             patch_generated=data.get("patch_generated", data.get("patches_found", 0)),
             # Timestamps
             created_at=data.get("created_at", datetime.now()),
@@ -195,9 +195,9 @@ class Worker:
             # Phase timing
             phase_build=data.get("phase_build", 0.0),
             phase_reachability=data.get("phase_reachability", 0.0),
-            phase_find_sp=data.get("phase_find_sp", 0.0),
+            phase_find_vh=data.get("phase_find_vh", 0.0),
             phase_verify=data.get("phase_verify", 0.0),
-            phase_pov=data.get("phase_pov", 0.0),
+            phase_poc=data.get("phase_poc", 0.0),
             phase_save=data.get("phase_save", 0.0),
             # Result
             result_summary=data.get("result_summary", {}),
@@ -214,10 +214,10 @@ class Worker:
         self.started_at = datetime.now()
         self.updated_at = datetime.now()
 
-    def mark_completed(self, pov_count: int = 0, patch_count: int = 0):
+    def mark_completed(self, poc_count: int = 0, patch_count: int = 0):
         """Mark worker as completed"""
         self.status = WorkerStatus.COMPLETED
-        self.pov_generated = pov_count
+        self.poc_generated = poc_count
         self.patch_generated = patch_count
         self.finished_at = datetime.now()
         self.updated_at = datetime.now()
@@ -261,9 +261,9 @@ class Worker:
         phases = [
             ("Build", self.phase_build, "#4CAF50"),  # Green
             ("Reachability", self.phase_reachability, "#2196F3"),  # Blue
-            ("Find SP", self.phase_find_sp, "#FF9800"),  # Orange
+            ("Find VH", self.phase_find_vh, "#FF9800"),  # Orange
             ("Verify", self.phase_verify, "#9C27B0"),  # Purple
-            ("POV", self.phase_pov, "#E91E63"),  # Pink
+            ("POC", self.phase_poc, "#E91E63"),  # Pink
             ("Save", self.phase_save, "#607D8B"),  # Grey
         ]
 

@@ -5,7 +5,7 @@ Workspace sanitisation.
 An AIxCC challenge ships its own answer. Checking out ``delta_ref`` -- which for
 the official challenges is the branch head -- puts ``.aixcc/vulns/<v>/`` in the
 tree, and that directory holds ``vuln.yaml`` naming the CWE, the file and the
-exact line range, a reference POV blob, and the reference patch. An agent with a
+exact line range, a reference PoC blob, and the reference patch. An agent with a
 working file tool needs one call to read it.
 
 The codebase already excluded ``.aixcc`` when generating the diff, with a comment
@@ -151,7 +151,7 @@ def assert_workspace_clean(workspace: Path, require_no_git: bool = False) -> Non
     if leftovers:
         raise WorkspaceGuardError(
             f"{ANSWER_DIR} is still present in the workspace: {leftovers}. "
-            "It contains the vulnerability location, a reference POV and the "
+            "It contains the vulnerability location, a reference PoC and the "
             "reference patch, so any finding from this run would be worthless. "
             "Workspace sanitisation did not run, or ran before the checkout."
         )

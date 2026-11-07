@@ -34,7 +34,7 @@ class ActiveFuzzerInfo:
     """Information about an active fuzzer."""
 
     worker_id: str
-    source: str  # "global" or sp_id
+    source: str  # "global" or vh_id
     fuzzer_name: str
     sanitizer: str
     crash_dir: Path
@@ -47,7 +47,7 @@ class WatchEntry:
 
     path: Path
     worker_id: str  # Worker that owns this directory
-    source: str  # "global" or sp_id
+    source: str  # "global" or vh_id
     fuzzer_name: str
     sanitizer: str
 
@@ -125,7 +125,7 @@ class FuzzerMonitor:
     2. Auto-discovery: Monitor scans workspace for crash directories with .active marker
 
     Responsibilities:
-    - Monitor all fuzzer crash directories (Global + SP Fuzzers from all Workers)
+    - Monitor all fuzzer crash directories (Global + VH Fuzzers from all Workers)
     - Deduplicate crashes (based on hash)
     - Verify crashes
     - Report to callbacks
@@ -245,7 +245,7 @@ class FuzzerMonitor:
         Args:
             crash_dir: Path to crash directory
             worker_id: Worker identifier
-            source: Source identifier ("global" or sp_id)
+            source: Source identifier ("global" or vh_id)
             fuzzer_name: Fuzzer binary name
             sanitizer: Sanitizer type
             fuzzer_path: Path to fuzzer binary (for verification)
@@ -278,7 +278,7 @@ class FuzzerMonitor:
 
         Args:
             worker_id: Worker identifier
-            source: Source identifier ("global" or sp_id)
+            source: Source identifier ("global" or vh_id)
         """
         with self._lock:
             self.watch_dirs = [
@@ -475,7 +475,7 @@ class FuzzerMonitor:
 
         Scans for:
         - Global Fuzzer: worker_workspace/*/fuzzer_worker/global/crashes/ (if .active exists)
-        - SP Fuzzer: worker_workspace/*/fuzzer_worker/sp_fuzzers/*/crashes/ (if .active exists)
+        - VH Fuzzer: worker_workspace/*/fuzzer_worker/vh_fuzzers/*/crashes/ (if .active exists)
 
         Also tracks fuzzer start/stop events and logs them.
 
@@ -552,31 +552,31 @@ class FuzzerMonitor:
                             self.docker_image,
                         )
 
-            # Check SP Fuzzer crashes directories
-            sp_fuzzers_dir = fuzzer_worker_dir / "sp_fuzzers"
-            if sp_fuzzers_dir.exists():
-                for sp_dir in sp_fuzzers_dir.iterdir():
-                    if not sp_dir.is_dir():
+            # Check VH Fuzzer crashes directories
+            vh_fuzzers_dir = fuzzer_worker_dir / "vh_fuzzers"
+            if vh_fuzzers_dir.exists():
+                for vh_dir in vh_fuzzers_dir.iterdir():
+                    if not vh_dir.is_dir():
                         continue
 
-                    sp_id = sp_dir.name
-                    sp_crashes = sp_dir / "crashes"
-                    sp_active = sp_dir / self.ACTIVE_MARKER
+                    vh_id = vh_dir.name
+                    vh_crashes = vh_dir / "crashes"
+                    vh_active = vh_dir / self.ACTIVE_MARKER
 
-                    if sp_crashes.exists() and sp_active.exists():
+                    if vh_crashes.exists() and vh_active.exists():
                         entry = WatchEntry(
-                            path=sp_crashes,
+                            path=vh_crashes,
                             worker_id=worker_id,
-                            source=sp_id,
+                            source=vh_id,
                             fuzzer_name=fuzzer_name,
                             sanitizer=sanitizer,
                         )
                         entries.append(entry)
 
                         # Track this fuzzer and log if newly started
-                        fuzzer_key = f"{worker_id}:{sp_id}"
+                        fuzzer_key = f"{worker_id}:{vh_id}"
                         current_active_keys.add(fuzzer_key)
-                        self._check_fuzzer_started(fuzzer_key, entry, sp_crashes)
+                        self._check_fuzzer_started(fuzzer_key, entry, vh_crashes)
 
         # Check for stopped fuzzers
         self._check_stopped_fuzzers(current_active_keys)
@@ -653,7 +653,7 @@ class FuzzerMonitor:
 
                 # Log the start event
                 fuzzer_type = (
-                    "Global" if entry.source == "global" else f"SP({entry.source[:8]})"
+                    "Global" if entry.source == "global" else f"VH({entry.source[:8]})"
                 )
                 self._log(
                     f"[FUZZER STARTED] {fuzzer_type} | "
@@ -679,7 +679,7 @@ class FuzzerMonitor:
 
                 # Log the stop event
                 fuzzer_type = (
-                    "Global" if info.source == "global" else f"SP({info.source[:8]})"
+                    "Global" if info.source == "global" else f"VH({info.source[:8]})"
                 )
                 self._log(
                     f"[FUZZER STOPPED] {fuzzer_type} | "
@@ -810,7 +810,7 @@ class FuzzerMonitor:
             sanitizer_output = verify_result.get("output", "")
 
         # The identity of this crash, and the only thing that decides whether it
-        # is new. Every crash passes here -- global fuzzer, SP fuzzer, agent --
+        # is new. Every crash passes here -- global fuzzer, VH fuzzer, agent --
         # so one bug found three ways is reported once.
         signature = compute_signature(
             sanitizer_output,
@@ -830,7 +830,7 @@ class FuzzerMonitor:
         # -- libFuzzer prints "ERROR: libFuzzer: fuzz target exited" and files a
         # crash- artifact indistinguishable by name, and sqlite3's shell harness
         # does exactly that on a malformed option like "-vfs". Counting that as a
-        # PoV is a false positive (it costs a submission). An empty class with an
+        # PoC is a false positive (it costs a submission). An empty class with an
         # empty sanitizer_output is instead a capture race, so re-verify once
         # before deciding, then require a real class.
         if not signature.crash_class:
@@ -877,8 +877,8 @@ class FuzzerMonitor:
             vuln_type=vuln_type,
             sanitizer_output=sanitizer_output[:10000],  # Truncate
             found_at=datetime.now(),
-            source="global_fuzzer" if watch_entry.source == "global" else "sp_fuzzer",
-            sp_id=watch_entry.source if watch_entry.source != "global" else None,
+            source="global_fuzzer" if watch_entry.source == "global" else "vh_fuzzer",
+            vh_id=watch_entry.source if watch_entry.source != "global" else None,
             fuzzer_name=watch_entry.fuzzer_name,
             sanitizer=watch_entry.sanitizer,
             signature=sig_key,
@@ -893,7 +893,7 @@ class FuzzerMonitor:
         fuzzer_type = (
             "Global"
             if watch_entry.source == "global"
-            else f"SP({watch_entry.source[:8]})"
+            else f"VH({watch_entry.source[:8]})"
         )
         self._log(
             f"[CRASH FOUND] {fuzzer_type} | "
@@ -1086,19 +1086,19 @@ class FuzzerMonitor:
 
         Args:
             worker_id: Worker identifier
-            source: "global" or sp_id
+            source: "global" or vh_id
 
         Returns:
             List of crash records
         """
         with self._lock:
-            expected_source = "global_fuzzer" if source == "global" else "sp_fuzzer"
+            expected_source = "global_fuzzer" if source == "global" else "vh_fuzzer"
             return [
                 r
                 for r in self.crash_records
                 if r.worker_id == worker_id
                 and r.source == expected_source
-                and (source == "global" or r.sp_id == source)
+                and (source == "global" or r.vh_id == source)
             ]
 
     def get_stats(self) -> Dict[str, Any]:

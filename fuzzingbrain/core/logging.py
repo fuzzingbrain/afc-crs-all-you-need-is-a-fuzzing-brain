@@ -68,7 +68,7 @@ _current_log_dir: Optional[Path] = None
 # Log Path Helpers
 # =============================================================================
 
-# Max length for names in filenames (direction_name, function_name)
+# Max length for names in filenames (logic_group_name, function_name)
 MAX_NAME_LENGTH = 20
 
 
@@ -108,13 +108,13 @@ def create_log_directories(log_dir: Path, workers: list = None) -> None:
             worker_dir = log_dir / "worker" / f"{fuzzer}_{sanitizer}"
             worker_dir.mkdir(parents=True, exist_ok=True)
             # Create agent subdirectories
-            (worker_dir / "agent" / "direction").mkdir(parents=True, exist_ok=True)
+            (worker_dir / "agent" / "logic_group").mkdir(parents=True, exist_ok=True)
             (worker_dir / "agent" / "seed").mkdir(parents=True, exist_ok=True)
-            (worker_dir / "agent" / "sp" / "generate").mkdir(
+            (worker_dir / "agent" / "vh" / "generate").mkdir(
                 parents=True, exist_ok=True
             )
-            (worker_dir / "agent" / "sp" / "verify").mkdir(parents=True, exist_ok=True)
-            (worker_dir / "agent" / "pov").mkdir(parents=True, exist_ok=True)
+            (worker_dir / "agent" / "vh" / "verify").mkdir(parents=True, exist_ok=True)
+            (worker_dir / "agent" / "poc").mkdir(parents=True, exist_ok=True)
 
 
 def get_worker_log_dir(fuzzer: str, sanitizer: str) -> Optional[Path]:
@@ -147,12 +147,12 @@ def get_agent_log_path(
     Get the log file path for an agent.
 
     Args:
-        agent_type: One of "direction", "seed", "spg", "spv", "pov"
+        agent_type: One of "logic_group", "seed", "vhg", "vhv", "poc"
         fuzzer: Fuzzer name
         sanitizer: Sanitizer name
         index: Agent index (1-based for display, used in filename)
-        target_name: direction_name or function_name
-        is_delta: Whether this is delta scan mode (for SPG)
+        target_name: logic_group_name or function_name
+        is_delta: Whether this is delta scan mode (for VHG)
 
     Returns:
         Path to agent log file (without extension), or None if logging not initialized.
@@ -166,8 +166,8 @@ def get_agent_log_path(
     # Truncate target name for filename
     name_suffix = f"_{truncate_name(target_name)}" if target_name else ""
 
-    if agent_type == "direction":
-        agent_dir = worker_dir / "agent" / "direction"
+    if agent_type == "logic_group":
+        agent_dir = worker_dir / "agent" / "logic_group"
         agent_dir.mkdir(parents=True, exist_ok=True)
         base_path = agent_dir / "D_agent"
 
@@ -176,23 +176,23 @@ def get_agent_log_path(
         agent_dir.mkdir(parents=True, exist_ok=True)
         base_path = agent_dir / f"Seed_{index}{name_suffix}"
 
-    elif agent_type == "spg":
-        agent_dir = worker_dir / "agent" / "sp" / "generate"
+    elif agent_type == "vhg":
+        agent_dir = worker_dir / "agent" / "vh" / "generate"
         agent_dir.mkdir(parents=True, exist_ok=True)
         if is_delta:
-            base_path = agent_dir / "SPG_delta"
+            base_path = agent_dir / "VHG_delta"
         else:
-            base_path = agent_dir / f"SPG_{index}{name_suffix}"
+            base_path = agent_dir / f"VHG_{index}{name_suffix}"
 
-    elif agent_type == "spv":
-        agent_dir = worker_dir / "agent" / "sp" / "verify"
+    elif agent_type == "vhv":
+        agent_dir = worker_dir / "agent" / "vh" / "verify"
         agent_dir.mkdir(parents=True, exist_ok=True)
-        base_path = agent_dir / f"SPV_{index}{name_suffix}"
+        base_path = agent_dir / f"VHV_{index}{name_suffix}"
 
-    elif agent_type == "pov":
-        agent_dir = worker_dir / "agent" / "pov"
+    elif agent_type == "poc":
+        agent_dir = worker_dir / "agent" / "poc"
         agent_dir.mkdir(parents=True, exist_ok=True)
-        base_path = agent_dir / f"POV_{index}{name_suffix}"
+        base_path = agent_dir / f"POC_{index}{name_suffix}"
 
     else:
         raise ValueError(f"Unknown agent type: {agent_type}")
@@ -459,9 +459,9 @@ def _create_agent_header(metadata: Dict[str, Any]) -> str:
     lines.append("├" + "─" * width + "┤")
 
     purpose_keys = [
-        "Direction",
+        "LogicGroup",
         "Target Function",
-        "SP ID",
+        "VH ID",
         "Vulnerability Type",
         "Goal",
     ]
@@ -494,15 +494,15 @@ def get_agent_banner_and_header(metadata: Dict[str, Any]) -> str:
 
     Args:
         metadata: Agent metadata dictionary with keys like:
-            - Agent: Agent class name (e.g., "FullscanSPAgent")
+            - Agent: Agent class name (e.g., "FullscanVHAgent")
             - Scan Mode: "full-scan" or "delta"
-            - Phase: "SP Finding", "Verification", "POV Generation"
+            - Phase: "VH Finding", "Verification", "PoC Generation"
             - Fuzzer: Fuzzer name
             - Sanitizer: Sanitizer type
             - Worker ID: Worker identifier
-            - Direction: Direction name (for SP agents)
+            - Logic group: Logic group name (for VH agents)
             - Target Function: Function being analyzed
-            - SP ID: Suspicious point ID (for verify/POV)
+            - VH ID: Vulnerability hypothesis ID (for verify/POC)
             - Vulnerability Type: Type of vulnerability
             - Goal: What the agent is trying to achieve
 
@@ -651,11 +651,11 @@ def setup_worker_logging(
         return None
 
     # Create agent subdirectories
-    (worker_dir / "agent" / "direction").mkdir(parents=True, exist_ok=True)
+    (worker_dir / "agent" / "logic_group").mkdir(parents=True, exist_ok=True)
     (worker_dir / "agent" / "seed").mkdir(parents=True, exist_ok=True)
-    (worker_dir / "agent" / "sp" / "generate").mkdir(parents=True, exist_ok=True)
-    (worker_dir / "agent" / "sp" / "verify").mkdir(parents=True, exist_ok=True)
-    (worker_dir / "agent" / "pov").mkdir(parents=True, exist_ok=True)
+    (worker_dir / "agent" / "vh" / "generate").mkdir(parents=True, exist_ok=True)
+    (worker_dir / "agent" / "vh" / "verify").mkdir(parents=True, exist_ok=True)
+    (worker_dir / "agent" / "poc").mkdir(parents=True, exist_ok=True)
 
     # Write worker log header
     worker_log = worker_dir / "worker.log"
@@ -907,7 +907,7 @@ def create_worker_summary(
     status: str,
     fuzzer: str,
     sanitizer: str,
-    pov_generated: int = 0,
+    poc_generated: int = 0,
     patch_generated: int = 0,
     elapsed_seconds: float = 0,
     error_msg: Optional[str] = None,
@@ -920,7 +920,7 @@ def create_worker_summary(
         status: completed/failed
         fuzzer: Fuzzer name
         sanitizer: Sanitizer type
-        pov_generated: Number of POVs generated
+        poc_generated: Number of PoCs generated
         patch_generated: Number of patches generated
         elapsed_seconds: Time elapsed
         error_msg: Error message if failed
@@ -945,7 +945,7 @@ def create_worker_summary(
     lines.append("│" + f"  Elapsed:      {elapsed_str}".ljust(width) + "│")
 
     if status == "completed":
-        lines.append("│" + f"  POVs:         {pov_generated}".ljust(width) + "│")
+        lines.append("│" + f"  PoCs:         {poc_generated}".ljust(width) + "│")
         lines.append("│" + f"  Patches:      {patch_generated}".ljust(width) + "│")
     elif error_msg:
         # Truncate error message if too long
@@ -968,7 +968,7 @@ def create_final_summary(
     total_cost: float = 0.0,
     budget_limit: float = 0.0,
     exit_reason: str = "completed",
-    verified_povs: Optional[int] = None,
+    verified_pocs: Optional[int] = None,
 ) -> str:
     """
     Create final run summary with all workers results.
@@ -979,7 +979,7 @@ def create_final_summary(
         workers: List of worker result dicts
         total_elapsed_minutes: Total elapsed time in minutes
         use_color: Whether to use ANSI colors for console output
-        dedup_count: Number of SPs merged as duplicates
+        dedup_count: Number of VHs merged as duplicates
         total_cost: Total API cost in dollars
         budget_limit: Budget limit in dollars (0 = unlimited)
         exit_reason: Why the run ended (completed, budget_exceeded, timeout, etc.)
@@ -992,13 +992,13 @@ def create_final_summary(
     completed = sum(1 for w in workers if w.get("status") == "completed")
     interrupted = sum(1 for w in workers if w.get("status") == "interrupted")
     failed = sum(1 for w in workers if w.get("status") == "failed")
-    total_sps = sum(w.get("sps_found", 0) for w in workers)
+    total_vhs = sum(w.get("vhs_found", 0) for w in workers)
     # What the workers generated, which is not what survived verification: the
-    # run stops on povs where is_successful is true, so a summary counting
+    # run stops on pocs where is_successful is true, so a summary counting
     # generated ones reports a number the stopping rule never saw. Prefer the
     # verified count when the caller has it.
-    generated_povs = sum(w.get("pov_generated", 0) for w in workers)
-    total_povs = generated_povs if verified_povs is None else verified_povs
+    generated_pocs = sum(w.get("poc_generated", 0) for w in workers)
+    total_pocs = generated_pocs if verified_pocs is None else verified_pocs
     total_patches = sum(w.get("patch_generated", 0) for w in workers)
 
     # Column widths for worker table
@@ -1007,8 +1007,8 @@ def create_final_summary(
     col_sanitizer = 10
     col_status = 12
     col_duration = 10
-    col_sps = 8  # Wider to accommodate "1(1)" format
-    col_povs = 6
+    col_vhs = 8  # Wider to accommodate "1(1)" format
+    col_pocs = 6
     col_patches = 8
 
     # Total width = sum of columns + 7 internal separators (┼)
@@ -1018,8 +1018,8 @@ def create_final_summary(
         + col_sanitizer
         + col_status
         + col_duration
-        + col_sps
-        + col_povs
+        + col_vhs
+        + col_pocs
         + col_patches
         + 7
     )
@@ -1051,17 +1051,17 @@ def create_final_summary(
         workers_parts.append(f"{failed} failed")
     workers_str = ", ".join(workers_parts)
     lines.append("│" + f"  Workers:       {workers_str}".ljust(table_width) + "│")
-    lines.append("│" + f"  SPs Found:     {total_sps}".ljust(table_width) + "│")
+    lines.append("│" + f"  VHs Found:     {total_vhs}".ljust(table_width) + "│")
     if dedup_count > 0:
         lines.append(
             "│"
-            + f"  SPs Merged:    {dedup_count} (duplicates)".ljust(table_width)
+            + f"  VHs Merged:    {dedup_count} (duplicates)".ljust(table_width)
             + "│"
         )
-    pov_line = f"  POVs Found:    {total_povs}"
-    if verified_povs is not None and generated_povs != verified_povs:
-        pov_line += f" verified ({generated_povs} generated)"
-    lines.append("│" + pov_line.ljust(table_width) + "│")
+    poc_line = f"  PoCs Found:    {total_pocs}"
+    if verified_pocs is not None and generated_pocs != verified_pocs:
+        poc_line += f" verified ({generated_pocs} generated)"
+    lines.append("│" + poc_line.ljust(table_width) + "│")
     lines.append("│" + f"  Patches:       {total_patches}".ljust(table_width) + "│")
 
     # Cost and budget info
@@ -1087,9 +1087,9 @@ def create_final_summary(
         )
     elif exit_reason == "timeout":
         lines.append("│" + "  Exit Reason:   Timeout reached".ljust(table_width) + "│")
-    elif exit_reason == "pov_target_reached":
+    elif exit_reason == "poc_target_reached":
         lines.append(
-            "│" + "  Exit Reason:   POV target reached".ljust(table_width) + "│"
+            "│" + "  Exit Reason:   PoC target reached".ljust(table_width) + "│"
         )
     elif exit_reason == "cancelled":
         lines.append(
@@ -1111,9 +1111,9 @@ def create_final_summary(
         + "│"
         + " Duration".center(col_duration)
         + "│"
-        + " SPs".center(col_sps)
+        + " VHs".center(col_vhs)
         + "│"
-        + " POVs".center(col_povs)
+        + " PoCs".center(col_pocs)
         + "│"
         + " Patches".center(col_patches)
         + "│"
@@ -1131,9 +1131,9 @@ def create_final_summary(
         + "┼"
         + "─" * col_duration
         + "┼"
-        + "─" * col_sps
+        + "─" * col_vhs
         + "┼"
-        + "─" * col_povs
+        + "─" * col_pocs
         + "┼"
         + "─" * col_patches
         + "┤"
@@ -1163,16 +1163,16 @@ def create_final_summary(
         status_cell = " " + status_display.ljust(col_status - 1)
         duration_cell = duration_str.center(col_duration)
 
-        # SPs cell: show "N(M)" format where N=found, M=merged
-        sps_found = w.get("sps_found", 0)
-        sps_merged = w.get("sps_merged", 0)
-        if sps_merged > 0:
-            sps_display = f"{sps_found}({sps_merged})"
+        # VHs cell: show "N(M)" format where N=found, M=merged
+        vhs_found = w.get("vhs_found", 0)
+        vhs_merged = w.get("vhs_merged", 0)
+        if vhs_merged > 0:
+            vhs_display = f"{vhs_found}({vhs_merged})"
         else:
-            sps_display = str(sps_found)
-        sps_cell = sps_display.center(col_sps)
+            vhs_display = str(vhs_found)
+        vhs_cell = vhs_display.center(col_vhs)
 
-        povs_cell = str(w.get("pov_generated", 0)).center(col_povs)
+        pocs_cell = str(w.get("poc_generated", 0)).center(col_pocs)
         patches_cell = str(w.get("patch_generated", 0)).center(col_patches)
 
         # Apply color to worker content (not borders)
@@ -1202,11 +1202,11 @@ def create_final_summary(
                 + reset
                 + "│"
                 + color
-                + sps_cell
+                + vhs_cell
                 + reset
                 + "│"
                 + color
-                + povs_cell
+                + pocs_cell
                 + reset
                 + "│"
                 + color
@@ -1227,9 +1227,9 @@ def create_final_summary(
                 + "│"
                 + duration_cell
                 + "│"
-                + sps_cell
+                + vhs_cell
                 + "│"
-                + povs_cell
+                + pocs_cell
                 + "│"
                 + patches_cell
                 + "│"
@@ -1248,9 +1248,9 @@ def create_final_summary(
         + "┴"
         + "─" * col_duration
         + "┴"
-        + "─" * col_sps
+        + "─" * col_vhs
         + "┴"
-        + "─" * col_povs
+        + "─" * col_pocs
         + "┴"
         + "─" * col_patches
         + "┘"

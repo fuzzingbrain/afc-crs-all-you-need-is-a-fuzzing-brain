@@ -60,7 +60,7 @@ class WorkerDispatcher:
         self.project_name = config.ossfuzz_project_name or run.project_name
         self.analyze_result = analyze_result
         self.celery_queue = celery_queue
-        self.pov_count_target = config.pov_count  # Target POV count (0 = unlimited)
+        self.poc_count_target = config.poc_count  # Target PoC count (0 = unlimited)
         self._run_oid = ObjectId(run.run_id)  # Cached ObjectId for MongoDB queries
 
         # Redis client for real-time budget reads (millisecond latency vs MongoDB's 2-7s)
@@ -77,10 +77,10 @@ class WorkerDispatcher:
         # NOTE: on_crash is deliberately NOT wired here. Each worker runs in its
         # own Celery process with its own FuzzerManager monitor, which registers
         # the exact prebuilt fuzzer_path/docker_image and wires on_crash to
-        # promote crashes to scored POVs (see WorkerExecutor). Wiring on_crash on
+        # promote crashes to scored PoCs (see WorkerExecutor). Wiring on_crash on
         # this run-level auto-discovery monitor too made BOTH monitors process
         # every crash file (they have independent _processed_artifacts and live
-        # in different processes), producing duplicate POV records for one bug
+        # in different processes), producing duplicate PoC records for one bug
         # and contradictory CRASH FOUND / NOT A CRASH logs. The worker monitor is
         # the single promoter; this run-level monitor stays for get_stats() and
         # run-wide crash logging only.
@@ -98,7 +98,7 @@ class WorkerDispatcher:
         """
         Callback when FuzzerMonitor finds a new crash.
 
-        Creates POV record, generates report, and activates POV.
+        Creates PoC record, generates report, and activates PoC.
         Note: This is called from FuzzerMonitor's background thread.
 
         Args:
@@ -106,8 +106,8 @@ class WorkerDispatcher:
         """
         import base64
         from pathlib import Path
-        from .models import POV
-        from .pov_packager import POVPackager
+        from .models import POC
+        from .poc_packager import POCPackager
         from .utils import generate_id
 
         logger.info(
@@ -147,23 +147,23 @@ class WorkerDispatcher:
                             f"[FuzzerMonitor] Re-verified crash: vuln_type={vuln_type}"
                         )
 
-            # 3. Create POV record
-            pov_id = generate_id()
+            # 3. Create PoC record
+            poc_id = generate_id()
             run_workspace = Path(self.run.workspace_path)
             results_dir = run_workspace / "results"
-            povs_dir = results_dir / "povs"
-            povs_dir.mkdir(parents=True, exist_ok=True)
+            pocs_dir = results_dir / "pocs"
+            pocs_dir.mkdir(parents=True, exist_ok=True)
 
-            # Copy crash file to povs directory
-            pov_blob_path = povs_dir / f"crash_{crash_record.crash_hash[:16]}.bin"
-            pov_blob_path.write_bytes(crash_blob)
+            # Copy crash file to pocs directory
+            poc_blob_path = pocs_dir / f"crash_{crash_record.crash_hash[:16]}.bin"
+            poc_blob_path.write_bytes(crash_blob)
 
             # Determine source type from crash_record
-            source = crash_record.source  # "global_fuzzer" | "sp_fuzzer"
+            source = crash_record.source  # "global_fuzzer" | "vh_fuzzer"
 
-            # Look up the POVAgent that triggered this SP Fuzzer
+            # Look up the POCAgent that triggered this VH Fuzzer
             agent_id = None
-            if source == "sp_fuzzer" and crash_record.sp_id:
+            if source == "vh_fuzzer" and crash_record.vh_id:
                 try:
                     from ..db import get_database
 
@@ -171,34 +171,34 @@ class WorkerDispatcher:
                     if db is not None:
                         agent_doc = db.agents.find_one(
                             {
-                                "sp_id": crash_record.sp_id,
+                                "vh_id": crash_record.vh_id,
                                 "run_id": ObjectId(self.run.run_id),
-                                "agent_type": "POVAgent",
+                                "agent_type": "POCAgent",
                             }
                         )
                         if agent_doc:
                             agent_id = str(agent_doc["_id"])
                             logger.info(
-                                f"[FuzzerMonitor] Linked SP Fuzzer POV to POVAgent {agent_id[:8]}"
+                                f"[FuzzerMonitor] Linked VH Fuzzer PoC to POCAgent {agent_id[:8]}"
                             )
                 except Exception as e:
                     logger.debug(
-                        f"[FuzzerMonitor] Failed to look up POVAgent for SP: {e}"
+                        f"[FuzzerMonitor] Failed to look up POCAgent for VH: {e}"
                     )
 
-            pov = POV(
-                pov_id=pov_id,
+            poc = POC(
+                poc_id=poc_id,
                 run_id=self.run.run_id,
-                suspicious_point_id=crash_record.sp_id or "",  # SP ID if from SP Fuzzer
+                vulnerability_hypothesis_id=crash_record.vh_id or "",  # VH ID if from VH Fuzzer
                 generation_id=generate_id(),
-                source=source,  # Track POV source
+                source=source,  # Track PoC source
                 source_worker_id=crash_record.worker_id,  # Track which worker found it
-                agent_id=agent_id,  # POVAgent that initiated fuzzing (if SP Fuzzer)
+                agent_id=agent_id,  # POCAgent that initiated fuzzing (if VH Fuzzer)
                 iteration=0,
                 attempt=1,
                 variant=1,
                 blob=crash_blob_b64,
-                blob_path=str(pov_blob_path),
+                blob_path=str(poc_blob_path),
                 gen_blob=f"""# Fuzzer-discovered crash
 # Source: {source}
 # Hash: {crash_record.crash_hash}
@@ -207,10 +207,10 @@ class WorkerDispatcher:
 
 import base64
 
-POV_BLOB_B64 = "{crash_blob_b64}"
+POC_BLOB_B64 = "{crash_blob_b64}"
 
 def generate(variant: int = 1) -> bytes:
-    return base64.b64decode(POV_BLOB_B64)
+    return base64.b64decode(POC_BLOB_B64)
 """,
                 vuln_type=vuln_type,
                 harness_name=crash_record.fuzzer_name,
@@ -218,7 +218,7 @@ def generate(variant: int = 1) -> bytes:
                 sanitizer_output=sanitizer_output[:10000] if sanitizer_output else "",
                 description=f"Fuzzer-discovered crash ({source})",
                 # The monitor has already deduplicated this crash and knows its
-                # identity; carrying it onto the POV is what lets the POV count
+                # identity; carrying it onto the PoC is what lets the PoC count
                 # be a count of bugs. Without it every fuzzer-found crash
                 # reached the database unsigned and was counted on its own.
                 signature=crash_record.signature,
@@ -226,15 +226,15 @@ def generate(variant: int = 1) -> bytes:
                 is_active=True,
             )
 
-            # Save POV to database
-            self.repos.povs.save(pov)
-            logger.info(f"[FuzzerMonitor] POV {pov_id[:8]} created (pending report)")
+            # Save PoC to database
+            self.repos.pocs.save(poc)
+            logger.info(f"[FuzzerMonitor] PoC {poc_id[:8]} created (pending report)")
 
-            # 3. Package POV with report
+            # 3. Package PoC with report
             analyzer_socket = (
                 self.analyze_result.socket_path if self.analyze_result else None
             )
-            packager = POVPackager(
+            packager = POCPackager(
                 str(results_dir),
                 run_id=self.run.run_id,
                 worker_id=crash_record.worker_id,
@@ -243,17 +243,17 @@ def generate(variant: int = 1) -> bytes:
             )
 
             # Package synchronously (we're in a background thread)
-            pov_dict = pov.to_dict()
-            zip_path = packager.package_pov(pov_dict, None)  # No SP for fuzzer crashes
+            poc_dict = poc.to_dict()
+            zip_path = packager.package_poc(poc_dict, None)  # No VH for fuzzer crashes
 
             if zip_path:
-                logger.info(f"[FuzzerMonitor] ✅ POV {pov_id[:8]} packaged: {zip_path}")
-                # Activate POV
-                self.repos.povs.update(pov_id, {"is_successful": True})
-                self.repos.runs.add_pov(self.run.run_id, pov_id)
-                logger.info(f"[FuzzerMonitor] ✅ POV {pov_id[:8]} activated!")
+                logger.info(f"[FuzzerMonitor] ✅ PoC {poc_id[:8]} packaged: {zip_path}")
+                # Activate PoC
+                self.repos.pocs.update(poc_id, {"is_successful": True})
+                self.repos.runs.add_poc(self.run.run_id, poc_id)
+                logger.info(f"[FuzzerMonitor] ✅ PoC {poc_id[:8]} activated!")
 
-                # Update worker's pov_generated count
+                # Update worker's poc_generated count
                 try:
                     worker_obj = self.repos.workers.find_by_id(crash_record.worker_id)
                     if not worker_obj:
@@ -266,17 +266,17 @@ def generate(variant: int = 1) -> bytes:
                             worker_obj = Worker.from_dict(doc)
                             crash_record.worker_id = worker_obj.worker_id
                     if worker_obj:
-                        current_count = worker_obj.pov_generated or 0
+                        current_count = worker_obj.poc_generated or 0
                         self.repos.workers.update(
                             worker_obj.worker_id,
-                            {"pov_generated": current_count + 1},
+                            {"poc_generated": current_count + 1},
                         )
                 except Exception as e:
                     logger.debug(
-                        f"[FuzzerMonitor] Failed to update worker POV count: {e}"
+                        f"[FuzzerMonitor] Failed to update worker PoC count: {e}"
                     )
             else:
-                logger.warning(f"[FuzzerMonitor] Failed to package POV {pov_id[:8]}")
+                logger.warning(f"[FuzzerMonitor] Failed to package PoC {poc_id[:8]}")
 
         except Exception as e:
             logger.error(f"[FuzzerMonitor] Error processing crash: {e}")
@@ -640,7 +640,7 @@ def generate(variant: int = 1) -> bytes:
             "run_workspace_path": str(run_workspace),
             "project_name": self.project_name,
             "log_dir": str(log_dir) if log_dir else None,
-            # Image the fuzzer binary runs in (has its libs); PoV verify uses it.
+            # Image the fuzzer binary runs in (has its libs); PoC verify uses it.
             "docker_image": self.config.docker_image,
             "detect_leaks": self.config.detect_leaks,
             # Model routing -- built into a ModelRouter at the worker boundary.
@@ -668,13 +668,13 @@ def generate(variant: int = 1) -> bytes:
             if self.run.scan_mode.value == "delta"
             else None,
             "budget_limit": self.config.budget_limit,
-            "pov_count": self.config.pov_count,
+            "poc_count": self.config.poc_count,
             # Run-wide, not per-worker: each worker enforces it against the
             # same Redis ledger, so the sum across workers is what is capped.
             "max_parallel_fuzzers": self.config.max_parallel_fuzzers,
             # Per-worker, unlike the ceiling above. Configured since the
             # beginning and read by nothing until now.
-            "sp_max_count": self.config.fuzzer_worker.sp_max_count,
+            "vh_max_count": self.config.fuzzer_worker.vh_max_count,
             # A worker is its own process and reads none of the main process's
             # configuration, so the agent counts have to travel with the
             # assignment.
@@ -793,21 +793,21 @@ def generate(variant: int = 1) -> bytes:
         finished = status["completed"] + status["failed"]
         return finished == status["total"] and status["total"] > 0
 
-    def get_verified_pov_count(self) -> int:
+    def get_verified_poc_count(self) -> int:
         """How many distinct bugs have been proved, not how many inputs prove them.
 
         One overflow reachable three ways is one finding. Counting rows made the
         stopping rule fire on the third input to a bug already reported, and
         made the summary claim three where the answer was one.
 
-        POVs written before signatures existed, or whose signature could not be
+        PoCs written before signatures existed, or whose signature could not be
         computed, fall back to counting individually -- an unsigned row is not
         evidence that it repeats another.
         """
         try:
-            rows = list(self.repos.povs.find_by_run(str(self.run.run_id)) or [])
+            rows = list(self.repos.pocs.find_by_run(str(self.run.run_id)) or [])
         except Exception as e:
-            logger.warning(f"Could not read POVs to count distinct bugs: {e}")
+            logger.warning(f"Could not read PoCs to count distinct bugs: {e}")
             rows = []
 
         signatures = set()
@@ -823,14 +823,14 @@ def generate(variant: int = 1) -> bytes:
         if signatures or unsigned:
             return len(signatures) + unsigned
 
-        # Nothing came back row by row. That is usually the truth -- no POV has
+        # Nothing came back row by row. That is usually the truth -- no PoC has
         # been verified yet -- but it is also what a failed read looks like,
         # and answering zero to the stopping rule means a run that has proved
         # its bug keeps going until the clock runs out, then reports a timeout.
         # The plain count is the safety net: it can overcount a bug found twice,
         # never hide one that was found.
         try:
-            return self.repos.povs.count(
+            return self.repos.pocs.count(
                 {"run_id": self._run_oid, "is_successful": True}
             )
         except Exception:
@@ -894,7 +894,7 @@ def generate(variant: int = 1) -> bytes:
         """
         Shutdown all Global Fuzzers and FuzzerMonitors.
 
-        Called when run truly ends (timeout/budget/pov_target/manual).
+        Called when run truly ends (timeout/budget/poc_target/manual).
         This performs final sweep to catch any remaining crashes.
         """
         import asyncio
@@ -1029,7 +1029,7 @@ def generate(variant: int = 1) -> bytes:
         Run ends when one of:
         - Timeout reached
         - Budget exceeded
-        - POV target reached
+        - PoC target reached
         - User manual shutdown (Ctrl+C)
 
         Note: "All workers completed" does NOT end the run!
@@ -1049,7 +1049,7 @@ def generate(variant: int = 1) -> bytes:
         start_time = datetime.now()
         timeout_delta = timedelta(minutes=timeout_minutes)
         last_status = None
-        last_pov_count = 0
+        last_poc_count = 0
         global_fuzzer_only_logged = False  # Only log once
 
         # How many times this loop can possibly need to poll, from its own
@@ -1068,9 +1068,9 @@ def generate(variant: int = 1) -> bytes:
         max_polls = int(timeout_delta.total_seconds() // poll_seconds) + 10
         polls = 0
 
-        if self.pov_count_target > 0:
+        if self.poc_count_target > 0:
             logger.info(
-                f"Waiting for run to complete (timeout: {timeout_minutes}min, pov_target: {self.pov_count_target})"
+                f"Waiting for run to complete (timeout: {timeout_minutes}min, poc_target: {self.poc_count_target})"
             )
         else:
             logger.info(f"Waiting for run to complete (timeout: {timeout_minutes}min)")
@@ -1101,9 +1101,9 @@ def generate(variant: int = 1) -> bytes:
                         "elapsed_minutes": elapsed.total_seconds() / 60,
                         # Carried on every exit path, not just the one that
                         # stops on it: the summary otherwise falls back to the
-                        # generated count and reports more povs than were ever
+                        # generated count and reports more pocs than were ever
                         # verified.
-                        "pov_count": self.get_verified_pov_count(),
+                        "poc_count": self.get_verified_poc_count(),
                         **self.get_status(),
                     }
 
@@ -1119,40 +1119,40 @@ def generate(variant: int = 1) -> bytes:
                         self._stop_everything()
                         return {
                             "status": "budget_exceeded",
-                            "pov_count": self.get_verified_pov_count(),
+                            "poc_count": self.get_verified_poc_count(),
                             "elapsed_minutes": elapsed.total_seconds() / 60,
                             "error": f"Budget exceeded: ${current_cost:.2f} >= ${self.config.budget_limit:.2f}",
                             **self.get_status(),
                         }
 
                 # ================================================================
-                # Exit condition 3: POV target reached
+                # Exit condition 3: PoC target reached
                 # ================================================================
-                current_pov_count = self.get_verified_pov_count()
-                if current_pov_count != last_pov_count:
+                current_poc_count = self.get_verified_poc_count()
+                if current_poc_count != last_poc_count:
                     logger.info(
-                        f"Verified POVs: {current_pov_count}"
+                        f"Verified PoCs: {current_poc_count}"
                         + (
-                            f"/{self.pov_count_target}"
-                            if self.pov_count_target > 0
+                            f"/{self.poc_count_target}"
+                            if self.poc_count_target > 0
                             else ""
                         )
                     )
-                    last_pov_count = current_pov_count
+                    last_poc_count = current_poc_count
 
                 if (
-                    self.pov_count_target > 0
-                    and current_pov_count >= self.pov_count_target
+                    self.poc_count_target > 0
+                    and current_poc_count >= self.poc_count_target
                 ):
                     logger.info(
-                        f"POV target reached! ({current_pov_count}/{self.pov_count_target})"
+                        f"PoC target reached! ({current_poc_count}/{self.poc_count_target})"
                     )
                     logger.info("Initiating graceful shutdown...")
                     self._stop_everything()
                     return {
-                        "status": "pov_target_reached",
+                        "status": "poc_target_reached",
                         "elapsed_minutes": elapsed.total_seconds() / 60,
-                        "pov_count": current_pov_count,
+                        "poc_count": current_poc_count,
                         **self.get_status(),
                     }
 
@@ -1179,10 +1179,10 @@ def generate(variant: int = 1) -> bytes:
                     logger.info("")
                     logger.info("=" * 60)
                     logger.info(
-                        f"All Workers Completed with {current_pov_count} POV(s) found"
+                        f"All Workers Completed with {current_poc_count} PoC(s) found"
                     )
                     logger.info("Global Fuzzer continues running...")
-                    logger.info("Waiting for: timeout / budget / POV target / Ctrl+C")
+                    logger.info("Waiting for: timeout / budget / PoC target / Ctrl+C")
                     logger.info("=" * 60)
                     logger.info("")
                     global_fuzzer_only_logged = True
@@ -1202,14 +1202,14 @@ def generate(variant: int = 1) -> bytes:
         Get results from all completed workers.
 
         Returns:
-            List of worker results with duration info and SP count
+            List of worker results with duration info and VH count
         """
         workers = self.repos.workers.find_by_run(self.run.run_id)
         results = []
 
         for worker in workers:
-            # Count SPs for this worker (by sources array with $elemMatch)
-            sp_count = self.repos.suspicious_points.count(
+            # Count VHs for this worker (by sources array with $elemMatch)
+            vh_count = self.repos.vulnerability_hypotheses.count(
                 {
                     "run_id": self._run_oid,
                     "sources": {
@@ -1222,8 +1222,8 @@ def generate(variant: int = 1) -> bytes:
             )
 
             # Count merged duplicates for this worker
-            # (SPs where this worker's description was merged into existing SP)
-            merged_count = self.repos.suspicious_points.count(
+            # (VHs where this worker's description was merged into existing VH)
+            merged_count = self.repos.vulnerability_hypotheses.count(
                 {
                     "run_id": self._run_oid,
                     "merged_duplicates": {
@@ -1235,18 +1235,18 @@ def generate(variant: int = 1) -> bytes:
                 }
             )
 
-            # Query actual successful POV count from DB (more reliable than worker's self-report)
-            # This handles cases where worker was killed but POVs were already saved
+            # Query actual successful PoC count from DB (more reliable than worker's self-report)
+            # This handles cases where worker was killed but PoCs were already saved
             #
-            # Count POVs by suspicious_point_id to include cross-fuzzer hits:
-            # - A POV created for fuzzer "xml" might crash on "xpath" instead
-            # - The cross-fuzzer POV has harness_name="xpath" but same suspicious_point_id
-            # - We want to count it for the worker that created the original SP
+            # Count PoCs by vulnerability_hypothesis_id to include cross-fuzzer hits:
+            # - A PoC created for fuzzer "xml" might crash on "xpath" instead
+            # - The cross-fuzzer PoC has harness_name="xpath" but same vulnerability_hypothesis_id
+            # - We want to count it for the worker that created the original VH
             #
-            # Get all SP IDs created by this worker
-            worker_sp_ids = [
-                sp.suspicious_point_id
-                for sp in self.repos.suspicious_points.find_all(
+            # Get all VH IDs created by this worker
+            worker_vh_ids = [
+                vh.vulnerability_hypothesis_id
+                for vh in self.repos.vulnerability_hypotheses.find_all(
                     {
                         "run_id": self._run_oid,
                         "sources": {
@@ -1259,43 +1259,43 @@ def generate(variant: int = 1) -> bytes:
                 )
             ]
 
-            # Count all successful POVs for those SPs (including cross-fuzzer hits)
-            if worker_sp_ids:
-                # Convert str IDs to ObjectId — POV documents store suspicious_point_id as ObjectId
-                worker_sp_oids = []
-                for sp_id in worker_sp_ids:
+            # Count all successful PoCs for those VHs (including cross-fuzzer hits)
+            if worker_vh_ids:
+                # Convert str IDs to ObjectId — PoC documents store vulnerability_hypothesis_id as ObjectId
+                worker_vh_oids = []
+                for vh_id in worker_vh_ids:
                     try:
-                        worker_sp_oids.append(ObjectId(sp_id))
+                        worker_vh_oids.append(ObjectId(vh_id))
                     except Exception:
-                        worker_sp_oids.append(sp_id)
-                actual_pov_count = self.repos.povs.count(
+                        worker_vh_oids.append(vh_id)
+                actual_poc_count = self.repos.pocs.count(
                     {
                         "run_id": self._run_oid,
-                        "suspicious_point_id": {"$in": worker_sp_oids},
+                        "vulnerability_hypothesis_id": {"$in": worker_vh_oids},
                         "is_successful": True,
                     }
                 )
             else:
-                actual_pov_count = 0
+                actual_poc_count = 0
 
-            # Also count fuzzer-discovered POVs (no SP association)
-            # These have suspicious_point_id="" because they were found directly by the fuzzer
-            fuzzer_discovered_count = self.repos.povs.count(
+            # Also count fuzzer-discovered PoCs (no VH association)
+            # These have vulnerability_hypothesis_id="" because they were found directly by the fuzzer
+            fuzzer_discovered_count = self.repos.pocs.count(
                 {
                     "run_id": self._run_oid,
                     "harness_name": worker.fuzzer,
                     "sanitizer": worker.sanitizer,
-                    "suspicious_point_id": {"$in": ["", None]},
+                    "vulnerability_hypothesis_id": {"$in": ["", None]},
                     "is_successful": True,
                 }
             )
-            actual_pov_count += fuzzer_discovered_count
+            actual_poc_count += fuzzer_discovered_count
 
             # Determine effective status:
-            # - If worker failed but has results (SPs or POVs), mark as "interrupted"
+            # - If worker failed but has results (VHs or PoCs), mark as "interrupted"
             # - This handles timeout cases where work was done but Celery task was killed
             effective_status = worker.status.value
-            if effective_status == "failed" and (sp_count > 0 or actual_pov_count > 0):
+            if effective_status == "failed" and (vh_count > 0 or actual_poc_count > 0):
                 effective_status = "interrupted"
 
             result = {
@@ -1304,9 +1304,9 @@ def generate(variant: int = 1) -> bytes:
                 "fuzzer": worker.fuzzer,
                 "sanitizer": worker.sanitizer,
                 "status": effective_status,
-                "sps_found": sp_count,
-                "sps_merged": merged_count,
-                "pov_generated": actual_pov_count,  # Use DB count instead of worker's self-report
+                "vhs_found": vh_count,
+                "vhs_merged": merged_count,
+                "poc_generated": actual_poc_count,  # Use DB count instead of worker's self-report
                 "patch_generated": worker.patch_generated or 0,
                 "error_msg": worker.error_msg,
                 "duration_seconds": worker.get_duration_seconds(),

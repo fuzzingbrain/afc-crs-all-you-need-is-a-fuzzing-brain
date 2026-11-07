@@ -2,7 +2,7 @@
 """
 Full Pipeline Integration Test
 
-Tests the complete flow from Run -> Worker -> Agents -> POV
+Tests the complete flow from Run -> Worker -> Agents -> PoC
 without calling real LLM APIs.
 
 Run with: pytest tests/test_full_pipeline.py -v
@@ -15,22 +15,22 @@ from bson import ObjectId
 # Models
 from fuzzingbrain.core.models import (
     Run,
-    SuspiciousPoint,
-    Direction,
-    POV,
+    VulnerabilityHypothesis,
+    LogicGroup,
+    POC,
 )
 from fuzzingbrain.core.models.worker import Worker
-from fuzzingbrain.core.models.suspicious_point import SPStatus
+from fuzzingbrain.core.models.vulnerability_hypothesis import VHStatus
 from fuzzingbrain.core.models.run import ScanMode
 
 # Agents
 from fuzzingbrain.agents import (
-    DirectionPlanningAgent,
-    FullSPGenerator,
-    LargeFullSPGenerator,
-    DeltaSPGenerator,
-    SPVerifier,
-    POVAgent,
+    LGPlanningAgent,
+    FullVHGenerator,
+    LargeFullVHGenerator,
+    DeltaVHGenerator,
+    VHVerifier,
+    POCAgent,
 )
 from fuzzingbrain.agents.context import AgentContext
 
@@ -78,15 +78,15 @@ class TestRunToWorkerFlow:
         assert isinstance(worker_dict["_id"], ObjectId)
 
 
-class TestDirectionPlanningAgent:
-    """Test Direction Planning Agent instantiation and setup."""
+class TestLGPlanningAgent:
+    """Test Logic group Planning Agent instantiation and setup."""
 
     def test_agent_instantiation(self):
-        """DirectionPlanningAgent should instantiate correctly."""
+        """LGPlanningAgent should instantiate correctly."""
         run_id = str(ObjectId())
         worker_id = str(ObjectId())
 
-        agent = DirectionPlanningAgent(
+        agent = LGPlanningAgent(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
             run_id=run_id,
@@ -98,33 +98,33 @@ class TestDirectionPlanningAgent:
         assert agent.fuzzer == "libpng_read_fuzzer"
 
     def test_agent_context_creation(self):
-        """AgentContext should be creatable for Direction agent."""
+        """AgentContext should be creatable for Logic group agent."""
         run_id = str(ObjectId())
         worker_id = str(ObjectId())
 
         ctx = AgentContext(
             run_id=run_id,
             worker_id=worker_id,
-            agent_type="DirectionPlanningAgent",
+            agent_type="LGPlanningAgent",
             target="full_scan",
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
         )
 
         assert ObjectId.is_valid(ctx.agent_id)
-        assert ctx.agent_type == "DirectionPlanningAgent"
+        assert ctx.agent_type == "LGPlanningAgent"
 
 
-class TestSPGenerators:
-    """Test SP Generator agents."""
+class TestVHGenerators:
+    """Test VH Generator agents."""
 
-    def test_full_sp_generator_instantiation(self):
-        """FullSPGenerator should instantiate correctly."""
+    def test_full_vh_generator_instantiation(self):
+        """FullVHGenerator should instantiate correctly."""
         run_id = str(ObjectId())
         worker_id = str(ObjectId())
-        direction_id = str(ObjectId())
+        lg_id = str(ObjectId())
 
-        agent = FullSPGenerator(
+        agent = FullVHGenerator(
             function_name="png_read_row",
             function_source="void png_read_row(...) { ... }",
             function_file="pngread.c",
@@ -133,7 +133,7 @@ class TestSPGenerators:
             callees=["png_read_filter_row"],
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
-            direction_id=direction_id,
+            lg_id=lg_id,
             run_id=run_id,
             worker_id=worker_id,
         )
@@ -141,12 +141,12 @@ class TestSPGenerators:
         assert agent.function_name == "png_read_row"
         assert agent.worker_id == worker_id
 
-    def test_large_sp_generator_instantiation(self):
-        """LargeFullSPGenerator should instantiate correctly."""
+    def test_large_vh_generator_instantiation(self):
+        """LargeFullVHGenerator should instantiate correctly."""
         run_id = str(ObjectId())
         worker_id = str(ObjectId())
 
-        agent = LargeFullSPGenerator(
+        agent = LargeFullVHGenerator(
             function_name="png_read_IDAT_data",
             function_source="/* large function */",
             function_file="pngread.c",
@@ -161,12 +161,12 @@ class TestSPGenerators:
 
         assert agent.function_name == "png_read_IDAT_data"
 
-    def test_delta_sp_generator_instantiation(self):
-        """DeltaSPGenerator should instantiate correctly."""
+    def test_delta_vh_generator_instantiation(self):
+        """DeltaVHGenerator should instantiate correctly."""
         run_id = str(ObjectId())
         worker_id = str(ObjectId())
 
-        agent = DeltaSPGenerator(
+        agent = DeltaVHGenerator(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
             run_id=run_id,
@@ -176,15 +176,15 @@ class TestSPGenerators:
         assert agent.fuzzer == "libpng_read_fuzzer"
 
 
-class TestSPVerifier:
-    """Test SP Verifier agent."""
+class TestVHVerifier:
+    """Test VH Verifier agent."""
 
     def test_verifier_instantiation(self):
-        """SPVerifier should instantiate correctly."""
+        """VHVerifier should instantiate correctly."""
         run_id = str(ObjectId())
         worker_id = str(ObjectId())
 
-        verifier = SPVerifier(
+        verifier = VHVerifier(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
             scan_mode=ScanMode.FULL,
@@ -196,57 +196,57 @@ class TestSPVerifier:
         assert verifier.scan_mode == "full"
 
     def test_verifier_set_context(self):
-        """SPVerifier.set_context should work with SP dict."""
-        verifier = SPVerifier(
+        """VHVerifier.set_context should work with VH dict."""
+        verifier = VHVerifier(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
         )
 
-        sp_dict = {
-            "suspicious_point_id": str(ObjectId()),
+        vh_dict = {
+            "vulnerability_hypothesis_id": str(ObjectId()),
             "function_name": "png_read_row",
             "score": 0.7,
             "static_reachable": True,
         }
 
         # Should NOT raise
-        verifier.set_context(suspicious_point=sp_dict)
+        verifier.set_context(vulnerability_hypothesis=vh_dict)
 
-        assert verifier.suspicious_point == sp_dict
+        assert verifier.vulnerability_hypothesis == vh_dict
 
-    def test_verifier_with_sp_model(self):
-        """SPVerifier should work with SuspiciousPoint.to_dict()."""
-        verifier = SPVerifier(
+    def test_verifier_with_vh_model(self):
+        """VHVerifier should work with VulnerabilityHypothesis.to_dict()."""
+        verifier = VHVerifier(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
         )
 
-        sp = SuspiciousPoint(
-            suspicious_point_id=str(ObjectId()),
+        vh = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=str(ObjectId()),
             run_id=str(ObjectId()),
             function_name="png_read_row",
             processor_id="verify_1",  # Non-ObjectId string
         )
 
         # to_dict should work (uses safe_object_id)
-        sp_dict = sp.to_dict()
+        vh_dict = vh.to_dict()
 
         # set_context should work
-        verifier.set_context(suspicious_point=sp_dict)
+        verifier.set_context(vulnerability_hypothesis=vh_dict)
 
-        assert verifier.suspicious_point is not None
+        assert verifier.vulnerability_hypothesis is not None
 
 
-class TestPOVAgent:
-    """Test POV Agent."""
+class TestPOCAgent:
+    """Test PoC Agent."""
 
-    def test_pov_agent_instantiation(self):
-        """POVAgent should instantiate correctly."""
+    def test_poc_agent_instantiation(self):
+        """POCAgent should instantiate correctly."""
         run_id = str(ObjectId())
         worker_id = str(ObjectId())
         mock_repos = MagicMock()
 
-        agent = POVAgent(
+        agent = POCAgent(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
             run_id=run_id,
@@ -285,92 +285,92 @@ class TestAgentPipeline:
         config = PipelineConfig()
 
         assert config.num_verify_agents >= 1
-        assert config.num_pov_agents >= 1
-        assert config.pov_min_score > 0
+        assert config.num_poc_agents >= 1
+        assert config.poc_min_score > 0
 
 
-class TestSuspiciousPointFlow:
-    """Test the SP lifecycle through the pipeline."""
+class TestVulnerabilityHypothesisFlow:
+    """Test the VH lifecycle through the pipeline."""
 
-    def test_sp_creation_for_verification(self):
-        """SP should be creatable with pending_verify status."""
-        sp = SuspiciousPoint(
-            suspicious_point_id=str(ObjectId()),
+    def test_vh_creation_for_verification(self):
+        """VH should be creatable with pending_verify status."""
+        vh = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=str(ObjectId()),
             run_id=str(ObjectId()),
-            direction_id=str(ObjectId()),
+            lg_id=str(ObjectId()),
             function_name="png_read_row",
-            status=SPStatus.PENDING_VERIFY.value,
+            status=VHStatus.PENDING_VERIFY.value,
             score=0.7,
         )
 
-        assert sp.status == "pending_verify"
+        assert vh.status == "pending_verify"
 
         # to_dict should work
-        sp_dict = sp.to_dict()
-        assert sp_dict["status"] == "pending_verify"
+        vh_dict = vh.to_dict()
+        assert vh_dict["status"] == "pending_verify"
 
-    def test_sp_claim_for_verification(self):
-        """SP should transition to verifying when claimed."""
-        sp = SuspiciousPoint(
-            suspicious_point_id=str(ObjectId()),
+    def test_vh_claim_for_verification(self):
+        """VH should transition to verifying when claimed."""
+        vh = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=str(ObjectId()),
             run_id=str(ObjectId()),
             function_name="png_read_row",
-            status=SPStatus.PENDING_VERIFY.value,
+            status=VHStatus.PENDING_VERIFY.value,
             processor_id=None,
         )
 
         # Simulate claim
-        sp.status = SPStatus.VERIFYING.value
-        sp.processor_id = "verify_1"  # Non-ObjectId processor ID
+        vh.status = VHStatus.VERIFYING.value
+        vh.processor_id = "verify_1"  # Non-ObjectId processor ID
 
         # to_dict should NOT crash (uses safe_object_id)
-        sp_dict = sp.to_dict()
-        assert sp_dict["processor_id"] == "verify_1"
+        vh_dict = vh.to_dict()
+        assert vh_dict["processor_id"] == "verify_1"
 
-    def test_sp_verified_high_score(self):
-        """High-score verified SP should go to pending_pov."""
-        sp = SuspiciousPoint(
-            suspicious_point_id=str(ObjectId()),
+    def test_vh_verified_high_score(self):
+        """High-score verified VH should go to pending_poc."""
+        vh = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=str(ObjectId()),
             run_id=str(ObjectId()),
             function_name="png_read_row",
-            status=SPStatus.VERIFYING.value,
+            status=VHStatus.VERIFYING.value,
             score=0.8,
             proceed=True,
         )
 
         # Simulate verification complete
-        sp.status = SPStatus.PENDING_POV.value
-        sp.is_checked_by_verifier = True
+        vh.status = VHStatus.PENDING_POC.value
+        vh.is_checked_by_verifier = True
 
-        assert sp.status == "pending_pov"
-        assert sp.proceed is True
+        assert vh.status == "pending_poc"
+        assert vh.proceed is True
 
-    def test_sp_verified_low_score(self):
-        """Low-score verified SP should stay verified (no POV)."""
-        sp = SuspiciousPoint(
-            suspicious_point_id=str(ObjectId()),
+    def test_vh_verified_low_score(self):
+        """Low-score verified VH should stay verified (no PoC)."""
+        vh = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=str(ObjectId()),
             run_id=str(ObjectId()),
             function_name="png_read_row",
-            status=SPStatus.VERIFYING.value,
+            status=VHStatus.VERIFYING.value,
             score=0.3,
             proceed=False,
         )
 
         # Simulate verification complete
-        sp.status = SPStatus.VERIFIED.value
-        sp.is_checked_by_verifier = True
+        vh.status = VHStatus.VERIFIED.value
+        vh.is_checked_by_verifier = True
 
-        assert sp.status == "verified"
-        assert sp.proceed is False
+        assert vh.status == "verified"
+        assert vh.proceed is False
 
 
-class TestDirectionFlow:
-    """Test Direction lifecycle."""
+class TestLogicGroupFlow:
+    """Test Logic group lifecycle."""
 
-    def test_direction_creation(self):
-        """Direction should be creatable."""
-        direction = Direction(
-            direction_id=str(ObjectId()),
+    def test_logic_group_creation(self):
+        """Logic group should be creatable."""
+        logic_group = LogicGroup(
+            lg_id=str(ObjectId()),
             run_id=str(ObjectId()),
             fuzzer="libpng_read_fuzzer",
             name="PNG Chunk Parsing",
@@ -378,47 +378,47 @@ class TestDirectionFlow:
             entry_functions=["png_read_info"],
         )
 
-        assert direction.name == "PNG Chunk Parsing"
-        assert len(direction.core_functions) == 2
+        assert logic_group.name == "PNG Chunk Parsing"
+        assert len(logic_group.core_functions) == 2
 
-    def test_direction_claim(self):
-        """Direction should be claimable with processor_id."""
-        direction = Direction(
-            direction_id=str(ObjectId()),
+    def test_logic_group_claim(self):
+        """Logic group should be claimable with processor_id."""
+        logic_group = LogicGroup(
+            lg_id=str(ObjectId()),
             run_id=str(ObjectId()),
-            name="Test Direction",
+            name="Test Logic group",
             processor_id=None,
         )
 
         # Simulate claim
-        direction.processor_id = "spg_worker_1"  # Non-ObjectId
+        logic_group.processor_id = "vhg_worker_1"  # Non-ObjectId
 
         # to_dict should NOT crash
-        direction_dict = direction.to_dict()
-        assert direction_dict["processor_id"] == "spg_worker_1"
+        logic_group_dict = logic_group.to_dict()
+        assert logic_group_dict["processor_id"] == "vhg_worker_1"
 
 
-class TestPOVFlow:
-    """Test POV creation flow."""
+class TestPOCFlow:
+    """Test PoC creation flow."""
 
-    def test_pov_creation(self):
-        """POV should be creatable."""
-        pov = POV(
-            pov_id=str(ObjectId()),
+    def test_poc_creation(self):
+        """PoC should be creatable."""
+        poc = POC(
+            poc_id=str(ObjectId()),
             run_id=str(ObjectId()),
-            suspicious_point_id=str(ObjectId()),
+            vulnerability_hypothesis_id=str(ObjectId()),
             agent_id=str(ObjectId()),
             gen_blob="import struct\nblob = struct.pack(...)",
             iteration=5,
             attempt=1,
         )
 
-        assert pov.iteration == 5
-        assert pov.attempt == 1
+        assert poc.iteration == 5
+        assert poc.attempt == 1
 
         # to_dict should work
-        pov_dict = pov.to_dict()
-        assert "_id" in pov_dict
+        poc_dict = poc.to_dict()
+        assert "_id" in poc_dict
 
 
 class TestFullPipelineIntegration:
@@ -445,61 +445,61 @@ class TestFullPipelineIntegration:
         )
         assert worker.to_dict()  # Should not crash
 
-        # 3. Create Direction
-        direction_id = str(ObjectId())
-        direction = Direction(
-            direction_id=direction_id,
+        # 3. Create Logic group
+        lg_id = str(ObjectId())
+        logic_group = LogicGroup(
+            lg_id=lg_id,
             run_id=run_id,
             fuzzer="libpng_read_fuzzer",
             name="Image Row Processing",
             processor_id=worker_id,  # Valid ObjectId
         )
-        assert direction.to_dict()  # Should not crash
+        assert logic_group.to_dict()  # Should not crash
 
-        # 4. Create SP
-        sp_id = str(ObjectId())
-        sp = SuspiciousPoint(
-            suspicious_point_id=sp_id,
+        # 4. Create VH
+        vh_id = str(ObjectId())
+        vh = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=vh_id,
             run_id=run_id,
-            direction_id=direction_id,
+            lg_id=lg_id,
             function_name="png_read_row",
-            status=SPStatus.PENDING_VERIFY.value,
+            status=VHStatus.PENDING_VERIFY.value,
             processor_id="verify_1",  # Non-ObjectId - should still work
         )
-        sp_dict = sp.to_dict()
-        assert sp_dict["processor_id"] == "verify_1"  # safe_object_id handled it
+        vh_dict = vh.to_dict()
+        assert vh_dict["processor_id"] == "verify_1"  # safe_object_id handled it
 
-        # 5. Create SPVerifier and set context
-        verifier = SPVerifier(
+        # 5. Create VHVerifier and set context
+        verifier = VHVerifier(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
             run_id=run_id,
             worker_id=worker_id,
         )
-        verifier.set_context(suspicious_point=sp_dict)
-        assert verifier.suspicious_point is not None
+        verifier.set_context(vulnerability_hypothesis=vh_dict)
+        assert verifier.vulnerability_hypothesis is not None
 
-        # 6. Simulate verification complete, create POV
-        sp.status = SPStatus.PENDING_POV.value
-        sp.is_checked_by_verifier = True
-        sp.proceed = True
-        sp.score = 0.85
+        # 6. Simulate verification complete, create PoC
+        vh.status = VHStatus.PENDING_POC.value
+        vh.is_checked_by_verifier = True
+        vh.proceed = True
+        vh.score = 0.85
 
-        pov = POV(
-            pov_id=str(ObjectId()),
+        poc = POC(
+            poc_id=str(ObjectId()),
             run_id=run_id,
-            suspicious_point_id=sp_id,
+            vulnerability_hypothesis_id=vh_id,
             agent_id=str(ObjectId()),
             gen_blob="blob = b'PNG...'",
         )
-        assert pov.to_dict()  # Should not crash
+        assert poc.to_dict()  # Should not crash
 
         print("\n=== Full Pipeline Flow Test PASSED ===")
         print(f"Run: {run_id[:8]}...")
         print(f"Worker: {worker_id[:8]}...")
-        print(f"Direction: {direction.name}")
-        print(f"SP: {sp.function_name} (score={sp.score})")
-        print(f"POV: {pov.pov_id[:8]}...")
+        print(f"Logic group: {logic_group.name}")
+        print(f"VH: {vh.function_name} (score={vh.score})")
+        print(f"PoC: {poc.poc_id[:8]}...")
 
 
 class TestAgentInstantiationInPipeline:
@@ -510,8 +510,8 @@ class TestAgentInstantiationInPipeline:
         run_id = str(ObjectId())
         worker_id = str(ObjectId())  # Real worker_id from pipeline
 
-        sp = SuspiciousPoint(
-            suspicious_point_id=str(ObjectId()),
+        vh = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=str(ObjectId()),
             run_id=run_id,
             function_name="test_func",
             processor_id="verify_1",  # Set by claim
@@ -519,30 +519,30 @@ class TestAgentInstantiationInPipeline:
 
         # Pipeline creates agent like this:
         agent_index = 1
-        verify_agent = SPVerifier(
+        verify_agent = VHVerifier(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
             scan_mode=ScanMode.FULL,
             run_id=run_id,
             worker_id=worker_id,  # Should be real worker_id, not "verify_1"
             index=agent_index,
-            target_name=sp.function_name or "",
+            target_name=vh.function_name or "",
         )
 
         # Pipeline calls set_context
-        verify_agent.set_context(suspicious_point=sp.to_dict())
+        verify_agent.set_context(vulnerability_hypothesis=vh.to_dict())
 
         assert verify_agent.worker_id == worker_id
-        assert verify_agent.suspicious_point is not None
+        assert verify_agent.vulnerability_hypothesis is not None
 
-    def test_pov_agent_like_pipeline(self):
-        """Simulate how pipeline creates POV agent."""
+    def test_poc_agent_like_pipeline(self):
+        """Simulate how pipeline creates PoC agent."""
         run_id = str(ObjectId())
         worker_id = str(ObjectId())
         mock_repos = MagicMock()
 
         # Pipeline creates agent like this:
-        pov_agent = POVAgent(
+        poc_agent = POCAgent(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
             run_id=run_id,
@@ -550,7 +550,7 @@ class TestAgentInstantiationInPipeline:
             repos=mock_repos,
         )
 
-        assert pov_agent.worker_id == worker_id
+        assert poc_agent.worker_id == worker_id
 
 
 if __name__ == "__main__":

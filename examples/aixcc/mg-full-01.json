@@ -4,10 +4,10 @@
   "repo_url": "https://github.com/AIxCyberChallenge/afc-mongoose.git",
   "scan_mode": "full",
   "target_commit": "bfc0ea79ca75c08a61d2eea9f4d5722bd298179c",
-  "task_type": "pov",
+  "task_type": "poc",
   "timeout_minutes": 120,
   "budget_limit": 100.0,
-  "pov_count": 1,
+  "poc_count": 1,
   "remove_git": true,
   "models": {
     "finder": "gpt-4.1",

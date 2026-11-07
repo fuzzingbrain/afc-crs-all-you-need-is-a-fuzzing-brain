@@ -5,7 +5,7 @@ Seed Agent
 AI-powered seed generation agent for fuzzer corpus enhancement.
 
 Uses BaseAgent to generate targeted seeds based on:
-- Direction analysis (coverage-guided seed generation)
+- Logic group analysis (coverage-guided seed generation)
 - FP (False Positive) analysis (generate seeds to find similar bugs)
 """
 
@@ -18,7 +18,7 @@ from loguru import logger
 
 from ..agents.base import BaseAgent
 from ..agents.prompts import (
-    SEED_DIRECTION_SYSTEM_PROMPT,
+    SEED_LOGIC_GROUP_SYSTEM_PROMPT,
     SEED_FP_SYSTEM_PROMPT,
     SEED_DELTA_SYSTEM_PROMPT,
 )
@@ -29,9 +29,9 @@ from ..core.models.agent import AgentType
 from .seed_tools import set_seed_context, clear_seed_context, update_seed_context
 
 
-DIRECTION_SEED_MSG = """## Direction Analysis Context
+LOGIC_GROUP_SEED_MSG = """## Logic group Analysis Context
 
-**Direction ID**: {direction_id}
+**Logic group ID**: {lg_id}
 **Target Functions**: {target_functions}
 **Risk Level**: {risk_level}
 **Risk Reason**: {risk_reason}
@@ -47,7 +47,7 @@ DIRECTION_SEED_MSG = """## Direction Analysis Context
 
 FP_SEED_MSG = """## False Positive Analysis Context
 
-**SP ID**: {sp_id}
+**VH ID**: {vh_id}
 **Function**: {function_name}
 **Vulnerability Type**: {vuln_type}
 **Description**: {description}
@@ -89,9 +89,9 @@ The commit/diff has changed specific functions, and we've identified potential v
 
 {diff_content}
 
-## Suspicious Points Identified (Potential Vulnerabilities)
+## Vulnerability Hypotheses Identified (Potential Vulnerabilities)
 
-{suspicious_points}
+{vulnerability_hypotheses}
 
 """
 
@@ -101,9 +101,9 @@ class SeedAgent(BaseAgent):
     Seed Generation Agent.
 
     Uses AI to generate targeted fuzzer seeds based on:
-    - Direction analysis results
+    - Logic group analysis results
     - False positive analysis results
-    - Delta-scan analysis (changed functions + suspicious points)
+    - Delta-scan analysis (changed functions + vulnerability hypotheses)
     """
 
     default_temperature: float = 0.8  # Higher temperature for diversity
@@ -156,7 +156,7 @@ class SeedAgent(BaseAgent):
             max_iterations: Max iterations (default 5)
             log_dir: Log directory
             index: Agent index for numbered log files
-            target_name: direction_name for log filename
+            target_name: logic_group_name for log filename
         """
         super().__init__(
             llm_client=llm_client,
@@ -177,10 +177,10 @@ class SeedAgent(BaseAgent):
         self.workspace_path = workspace_path
 
         # Current context for seed generation
-        self.direction_id: Optional[str] = None
-        self.sp_id: Optional[str] = None
+        self.lg_id: Optional[str] = None
+        self.vh_id: Optional[str] = None
         self.delta_id: Optional[str] = None
-        self.seed_type: str = "direction"  # "direction", "fp", or "delta"
+        self.seed_type: str = "logic_group"  # "logic_group", "fp", or "delta"
 
         # Stats
         self.seeds_generated = 0
@@ -196,7 +196,7 @@ class SeedAgent(BaseAgent):
             return SEED_FP_SYSTEM_PROMPT
         if self.seed_type == "delta":
             return SEED_DELTA_SYSTEM_PROMPT
-        return SEED_DIRECTION_SYSTEM_PROMPT
+        return SEED_LOGIC_GROUP_SYSTEM_PROMPT
 
     @property
     def include_seed_tools(self) -> bool:
@@ -222,20 +222,20 @@ class SeedAgent(BaseAgent):
                 "Seed Type": self.seed_type,
             }
         )
-        if self.direction_id:
-            metadata["Direction"] = self.direction_id[:8]
-        if self.sp_id:
-            metadata["SP ID"] = self.sp_id[:8]
+        if self.lg_id:
+            metadata["LogicGroup"] = self.lg_id[:8]
+        if self.vh_id:
+            metadata["VH ID"] = self.vh_id[:8]
         if self.delta_id:
             metadata["Delta ID"] = self.delta_id[:8]
         return metadata
 
     def _configure_context(self, ctx) -> None:
-        """Configure agent context with direction/SP/delta IDs and set up seed tools."""
-        if self.direction_id:
-            ctx.direction_id = self.direction_id
-        if self.sp_id:
-            ctx.sp_id = self.sp_id
+        """Configure agent context with logic_group/VH/delta IDs and set up seed tools."""
+        if self.lg_id:
+            ctx.lg_id = self.lg_id
+        if self.vh_id:
+            ctx.vh_id = self.vh_id
         if self.delta_id:
             ctx.delta_id = self.delta_id
 
@@ -247,8 +247,8 @@ class SeedAgent(BaseAgent):
         set_seed_context(
             run_id=self.run_id,
             worker_id=ctx.agent_id,  # Use the SAME agent_id that MCP server will use
-            direction_id=self.direction_id,
-            sp_id=self.sp_id,
+            lg_id=self.lg_id,
+            vh_id=self.vh_id,
             delta_id=self.delta_id,
             fuzzer_manager=self.fuzzer_manager,
             fuzzer=self.fuzzer,
@@ -316,27 +316,27 @@ Generate seeds NOW or this run will produce nothing useful."""
 
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message based on seed type."""
-        seed_type = kwargs.get("seed_type", "direction")
+        seed_type = kwargs.get("seed_type", "logic_group")
         self.seed_type = seed_type
 
-        if seed_type == "direction":
-            return self._get_direction_message(**kwargs)
+        if seed_type == "logic_group":
+            return self._get_logic_group_message(**kwargs)
         elif seed_type == "delta":
             return self._get_delta_message(**kwargs)
         else:
             return self._get_fp_message(**kwargs)
 
-    def _get_direction_message(self, **kwargs) -> str:
-        """Generate message for direction-based seed generation."""
-        direction_id = kwargs.get("direction_id", "")
+    def _get_logic_group_message(self, **kwargs) -> str:
+        """Generate message for logic group-based seed generation."""
+        lg_id = kwargs.get("lg_id", "")
         target_functions = kwargs.get("target_functions", [])
         risk_level = kwargs.get("risk_level", "unknown")
         risk_reason = kwargs.get("risk_reason", "")
 
-        self.direction_id = direction_id
+        self.lg_id = lg_id
 
-        return DIRECTION_SEED_MSG.format(
-            direction_id=direction_id,
+        return LOGIC_GROUP_SEED_MSG.format(
+            lg_id=lg_id,
             target_functions=", ".join(target_functions) if target_functions else "N/A",
             risk_level=risk_level,
             risk_reason=risk_reason,
@@ -347,7 +347,7 @@ Generate seeds NOW or this run will produce nothing useful."""
 
     def _get_fp_message(self, **kwargs) -> str:
         """Generate message for FP-based seed generation."""
-        sp_id = kwargs.get("sp_id", "")
+        vh_id = kwargs.get("vh_id", "")
         function_name = kwargs.get("function_name", "")
         vuln_type = kwargs.get("vuln_type", "")
         description = kwargs.get("description", "")
@@ -355,10 +355,10 @@ Generate seeds NOW or this run will produce nothing useful."""
         verification_notes = kwargs.get("verification_notes", "")
         evidence = kwargs.get("evidence", "")
 
-        self.sp_id = sp_id
+        self.vh_id = vh_id
 
         return FP_SEED_MSG.format(
-            sp_id=sp_id,
+            vh_id=vh_id,
             function_name=function_name,
             vuln_type=vuln_type,
             description=description,
@@ -375,7 +375,7 @@ Generate seeds NOW or this run will produce nothing useful."""
 
         delta_id = kwargs.get("delta_id", "")
         changed_functions = kwargs.get("changed_functions", [])
-        suspicious_points = kwargs.get("suspicious_points", [])
+        vulnerability_hypotheses = kwargs.get("vulnerability_hypotheses", [])
         diff_content = kwargs.get("diff_content", "")
 
         self.delta_id = delta_id
@@ -396,16 +396,16 @@ Generate seeds NOW or this run will produce nothing useful."""
         else:
             changes_text = "(No changed functions provided)"
 
-        # Format suspicious points
-        if suspicious_points:
-            sp_text = "\n".join(
+        # Format vulnerability hypotheses
+        if vulnerability_hypotheses:
+            vh_text = "\n".join(
                 [
-                    f"- **{sp.get('vuln_type', 'unknown')}** in `{sp.get('function', 'unknown')}`: {sp.get('description', 'No description')}"
-                    for sp in suspicious_points
+                    f"- **{vh.get('vuln_type', 'unknown')}** in `{vh.get('function', 'unknown')}`: {vh.get('description', 'No description')}"
+                    for vh in vulnerability_hypotheses
                 ]
             )
         else:
-            sp_text = "(No suspicious points identified yet - generate seeds to help find them)"
+            vh_text = "(No vulnerability hypotheses identified yet - generate seeds to help find them)"
 
         # The diff itself, not only the names mapped out of it. Mapping needs a
         # function index; the diff needs nothing, and it carries what the names
@@ -426,7 +426,7 @@ Generate seeds NOW or this run will produce nothing useful."""
             fuzzer_source=self.fuzzer_source or "(Fuzzer source not available)",
             changed_functions=changes_text,
             diff_content=diff_text,
-            suspicious_points=sp_text,
+            vulnerability_hypotheses=vh_text,
         )
 
     def _setup_context(self) -> None:
@@ -495,18 +495,18 @@ Generate seeds NOW or this run will produce nothing useful."""
 
         return result
 
-    async def generate_direction_seeds(
+    async def generate_logic_group_seeds(
         self,
-        direction_id: str,
+        lg_id: str,
         target_functions: List[str] = None,
         risk_level: str = "medium",
         risk_reason: str = "",
     ) -> Dict[str, Any]:
         """
-        Generate seeds for a direction analysis.
+        Generate seeds for a logic group analysis.
 
         Args:
-            direction_id: Direction ID
+            lg_id: Logic group ID
             target_functions: List of target function names
             risk_level: Risk level (high/medium/low)
             risk_reason: Reason for the risk assessment
@@ -514,20 +514,20 @@ Generate seeds NOW or this run will produce nothing useful."""
         Returns:
             Result dict with seeds_generated count
         """
-        self.direction_id = direction_id
-        self.seed_type = "direction"
+        self.lg_id = lg_id
+        self.seed_type = "logic_group"
 
         # Update context
-        update_seed_context(direction_id=direction_id, worker_id=self.worker_id)
+        update_seed_context(lg_id=lg_id, worker_id=self.worker_id)
 
         logger.info(
-            f"[SeedAgent:{self.worker_id}] Generating direction seeds: "
-            f"direction={direction_id[:8]}"
+            f"[SeedAgent:{self.worker_id}] Generating logic group seeds: "
+            f"logic group={lg_id[:8]}"
         )
 
         result = await self.run_async(
-            seed_type="direction",
-            direction_id=direction_id,
+            seed_type="logic_group",
+            lg_id=lg_id,
             target_functions=target_functions or [],
             risk_level=risk_level,
             risk_reason=risk_reason,
@@ -537,13 +537,13 @@ Generate seeds NOW or this run will produce nothing useful."""
         return {
             "success": True,
             "seeds_generated": self.seeds_generated,
-            "direction_id": direction_id,
+            "lg_id": lg_id,
             "result": result,
         }
 
     async def generate_fp_seeds(
         self,
-        sp_id: str,
+        vh_id: str,
         function_name: str = "",
         vuln_type: str = "",
         description: str = "",
@@ -555,10 +555,10 @@ Generate seeds NOW or this run will produce nothing useful."""
         Generate seeds based on a false positive analysis.
 
         Args:
-            sp_id: Suspicious point ID
+            vh_id: Vulnerability hypothesis ID
             function_name: Function name
             vuln_type: Vulnerability type
-            description: SP description
+            description: VH description
             important_controlflow: key functions/variables note (from finder/verifier)
             verification_notes: the verifier's summary
             evidence: the verifier's concrete facts (file:line, reach_probe results)
@@ -566,17 +566,17 @@ Generate seeds NOW or this run will produce nothing useful."""
         Returns:
             Result dict with seeds_generated count
         """
-        self.sp_id = sp_id
+        self.vh_id = vh_id
         self.seed_type = "fp"
 
         # Update context
-        update_seed_context(sp_id=sp_id, worker_id=self.worker_id)
+        update_seed_context(vh_id=vh_id, worker_id=self.worker_id)
 
-        logger.info(f"[SeedAgent:{self.worker_id}] Generating FP seeds: sp={sp_id[:8]}")
+        logger.info(f"[SeedAgent:{self.worker_id}] Generating FP seeds: vh={vh_id[:8]}")
 
         result = await self.run_async(
             seed_type="fp",
-            sp_id=sp_id,
+            vh_id=vh_id,
             function_name=function_name,
             vuln_type=vuln_type,
             description=description,
@@ -589,7 +589,7 @@ Generate seeds NOW or this run will produce nothing useful."""
         return {
             "success": True,
             "seeds_generated": self.seeds_generated,
-            "sp_id": sp_id,
+            "vh_id": vh_id,
             "result": result,
         }
 
@@ -597,13 +597,13 @@ Generate seeds NOW or this run will produce nothing useful."""
         self,
         delta_id: str,
         changed_functions: List[Dict[str, Any]] = None,
-        suspicious_points: List[Dict[str, Any]] = None,
+        vulnerability_hypotheses: List[Dict[str, Any]] = None,
         diff_content: str = "",
     ) -> Dict[str, Any]:
         """
         Generate seeds for delta-scan mode.
 
-        Creates initial seeds targeting changed functions and suspicious points
+        Creates initial seeds targeting changed functions and vulnerability hypotheses
         identified during delta-scan analysis.
 
         Args:
@@ -613,7 +613,7 @@ Generate seeds NOW or this run will produce nothing useful."""
                 - file: File path
                 - static_reachable: Whether statically reachable
                 - distance: Call graph distance from fuzzer entry
-            suspicious_points: List of SP info dicts, each containing:
+            vulnerability_hypotheses: List of VH info dicts, each containing:
                 - function: Function name
                 - vuln_type: Vulnerability type (CWE)
                 - description: Brief description
@@ -630,14 +630,14 @@ Generate seeds NOW or this run will produce nothing useful."""
         logger.info(
             f"[SeedAgent:{self.worker_id}] Generating delta seeds: "
             f"delta={delta_id[:8]}, changes={len(changed_functions or [])}, "
-            f"sps={len(suspicious_points or [])}"
+            f"vhs={len(vulnerability_hypotheses or [])}"
         )
 
         result = await self.run_async(
             seed_type="delta",
             delta_id=delta_id,
             changed_functions=changed_functions or [],
-            suspicious_points=suspicious_points or [],
+            vulnerability_hypotheses=vulnerability_hypotheses or [],
             diff_content=diff_content or "",
         )
 
@@ -664,12 +664,12 @@ Generate seeds NOW or this run will produce nothing useful."""
         lines.append("├" + "─" * 60 + "┤")
         lines.append("│" + f"  Fuzzer: {self.fuzzer}".ljust(60) + "│")
         lines.append("│" + f"  Seed Type: {self.seed_type}".ljust(60) + "│")
-        if self.direction_id:
+        if self.lg_id:
             lines.append(
-                "│" + f"  Direction: {self.direction_id[:16]}...".ljust(60) + "│"
+                "│" + f"  Logic group: {self.lg_id[:16]}...".ljust(60) + "│"
             )
-        if self.sp_id:
-            lines.append("│" + f"  SP ID: {self.sp_id[:16]}...".ljust(60) + "│")
+        if self.vh_id:
+            lines.append("│" + f"  VH ID: {self.vh_id[:16]}...".ljust(60) + "│")
         if self.delta_id:
             lines.append("│" + f"  Delta ID: {self.delta_id[:16]}...".ljust(60) + "│")
         lines.append("├" + "─" * 60 + "┤")

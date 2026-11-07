@@ -11,11 +11,11 @@ from bson import ObjectId
 
 from fuzzingbrain.core.utils import safe_object_id, is_valid_object_id
 from fuzzingbrain.core.models import (
-    SuspiciousPoint,
-    Direction,
+    VulnerabilityHypothesis,
+    LogicGroup,
     Run,
     Fuzzer,
-    POV,
+    POC,
     LLMCall,
     CallGraphNode,
 )
@@ -95,85 +95,85 @@ class TestSafeObjectId:
         assert str(result) == value.lower()
 
 
-class TestSuspiciousPointModel:
-    """Tests for SuspiciousPoint model."""
+class TestVulnerabilityHypothesisModel:
+    """Tests for VulnerabilityHypothesis model."""
 
     def test_to_dict_with_valid_objectids(self):
         """to_dict should work with valid ObjectIds."""
-        sp = SuspiciousPoint(
-            suspicious_point_id=str(ObjectId()),
+        vh = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=str(ObjectId()),
             run_id=str(ObjectId()),
-            direction_id=str(ObjectId()),
+            lg_id=str(ObjectId()),
             function_name="test_func",
             processor_id=str(ObjectId()),  # Valid ObjectId
         )
-        result = sp.to_dict()
+        result = vh.to_dict()
         assert "_id" in result
         assert isinstance(result["_id"], ObjectId)
         assert isinstance(result["processor_id"], ObjectId)
 
     def test_to_dict_with_custom_processor_id(self):
         """to_dict should handle non-ObjectId processor_id (e.g., 'verify_1')."""
-        sp = SuspiciousPoint(
-            suspicious_point_id=str(ObjectId()),
+        vh = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=str(ObjectId()),
             run_id=str(ObjectId()),
             function_name="test_func",
             processor_id="verify_1",  # NOT a valid ObjectId
         )
         # Should NOT raise - safe_object_id handles it
-        result = sp.to_dict()
+        result = vh.to_dict()
         assert result["processor_id"] == "verify_1"
 
     def test_from_dict_round_trip(self):
         """from_dict should correctly parse to_dict output."""
-        original = SuspiciousPoint(
-            suspicious_point_id=str(ObjectId()),
+        original = VulnerabilityHypothesis(
+            vulnerability_hypothesis_id=str(ObjectId()),
             run_id=str(ObjectId()),
             function_name="test_func",
             score=0.8,
         )
         dict_form = original.to_dict()
-        restored = SuspiciousPoint.from_dict(dict_form)
+        restored = VulnerabilityHypothesis.from_dict(dict_form)
         assert restored.function_name == original.function_name
         assert restored.score == original.score
 
 
-class TestDirectionModel:
-    """Tests for Direction model."""
+class TestLogicGroupModel:
+    """Tests for Logic group model."""
 
     def test_to_dict_with_valid_objectids(self):
         """to_dict should work with valid ObjectIds."""
-        direction = Direction(
-            direction_id=str(ObjectId()),
+        logic_group = LogicGroup(
+            lg_id=str(ObjectId()),
             run_id=str(ObjectId()),
-            name="Test Direction",
+            name="Test Logic group",
             processor_id=str(ObjectId()),
         )
-        result = direction.to_dict()
+        result = logic_group.to_dict()
         assert "_id" in result
         assert isinstance(result["processor_id"], ObjectId)
 
     def test_to_dict_with_custom_processor_id(self):
         """to_dict should handle non-ObjectId processor_id."""
-        direction = Direction(
-            direction_id=str(ObjectId()),
+        logic_group = LogicGroup(
+            lg_id=str(ObjectId()),
             run_id=str(ObjectId()),
-            name="Test Direction",
-            processor_id="spg_agent_1",  # NOT a valid ObjectId
+            name="Test Logic group",
+            processor_id="vhg_agent_1",  # NOT a valid ObjectId
         )
-        result = direction.to_dict()
-        assert result["processor_id"] == "spg_agent_1"
+        result = logic_group.to_dict()
+        assert result["processor_id"] == "vhg_agent_1"
 
     def test_from_dict_round_trip(self):
         """from_dict should correctly parse to_dict output."""
-        original = Direction(
-            direction_id=str(ObjectId()),
+        original = LogicGroup(
+            lg_id=str(ObjectId()),
             run_id=str(ObjectId()),
-            name="Test Direction",
+            name="Test Logic group",
             risk_reason="Test risk reason",
         )
         dict_form = original.to_dict()
-        restored = Direction.from_dict(dict_form)
+        restored = LogicGroup.from_dict(dict_form)
         assert restored.name == original.name
         assert restored.risk_reason == original.risk_reason
 
@@ -240,18 +240,18 @@ class TestCallGraphNodeModel:
         assert result["fuzzer_id"] == "libpng_read_fuzzer"
 
 
-class TestPOVModel:
-    """Tests for POV model."""
+class TestPOCModel:
+    """Tests for PoC model."""
 
     def test_to_dict_basic(self):
         """to_dict should produce valid MongoDB document."""
-        pov = POV(
-            pov_id=str(ObjectId()),
+        poc = POC(
+            poc_id=str(ObjectId()),
             run_id=str(ObjectId()),
-            suspicious_point_id=str(ObjectId()),
+            vulnerability_hypothesis_id=str(ObjectId()),
             gen_blob="test code",  # Correct field name
         )
-        result = pov.to_dict()
+        result = poc.to_dict()
         assert "_id" in result
         assert isinstance(result["_id"], ObjectId)
 

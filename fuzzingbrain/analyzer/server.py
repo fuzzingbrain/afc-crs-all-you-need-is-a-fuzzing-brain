@@ -638,45 +638,45 @@ class AnalysisServer:
             elif method == Method.GET_BUILD_PATHS:
                 return Response.ok(self.build_paths, req_id)
 
-            # Suspicious point operations
-            elif method == Method.CREATE_SUSPICIOUS_POINT:
-                result = await self._create_suspicious_point(params)
+            # Vulnerability hypothesis operations
+            elif method == Method.CREATE_VULNERABILITY_HYPOTHESIS:
+                result = await self._create_vulnerability_hypothesis(params)
                 return Response.ok(result, req_id)
 
-            elif method == Method.UPDATE_SUSPICIOUS_POINT:
-                result = await self._update_suspicious_point(params)
+            elif method == Method.UPDATE_VULNERABILITY_HYPOTHESIS:
+                result = await self._update_vulnerability_hypothesis(params)
                 return Response.ok(result, req_id)
 
-            elif method == Method.LIST_SUSPICIOUS_POINTS:
-                result = await self._list_suspicious_points(params)
+            elif method == Method.LIST_VULNERABILITY_HYPOTHESES:
+                result = await self._list_vulnerability_hypotheses(params)
                 return Response.ok(result, req_id)
 
-            elif method == Method.GET_SUSPICIOUS_POINT:
-                result = await self._get_suspicious_point(params.get("id"))
+            elif method == Method.GET_VULNERABILITY_HYPOTHESIS:
+                result = await self._get_vulnerability_hypothesis(params.get("id"))
                 return Response.ok(result, req_id)
 
-            # Direction operations (Full-scan)
-            elif method == Method.CREATE_DIRECTION:
-                result = await self._create_direction(params)
+            # Logic group operations (Full-scan)
+            elif method == Method.CREATE_LOGIC_GROUP:
+                result = await self._create_logic_group(params)
                 return Response.ok(result, req_id)
 
-            elif method == Method.LIST_DIRECTIONS:
-                result = await self._list_directions(params)
+            elif method == Method.LIST_LOGIC_GROUPS:
+                result = await self._list_logic_groups(params)
                 return Response.ok(result, req_id)
 
-            elif method == Method.GET_DIRECTION:
-                result = await self._get_direction(params.get("id"))
+            elif method == Method.GET_LOGIC_GROUP:
+                result = await self._get_logic_group(params.get("id"))
                 return Response.ok(result, req_id)
 
-            elif method == Method.CLAIM_DIRECTION:
-                result = await self._claim_direction(
+            elif method == Method.CLAIM_LOGIC_GROUP:
+                result = await self._claim_logic_group(
                     params.get("fuzzer"),
                     params.get("processor_id"),
                 )
                 return Response.ok(result, req_id)
 
-            elif method == Method.COMPLETE_DIRECTION:
-                result = await self._complete_direction(params)
+            elif method == Method.COMPLETE_LOGIC_GROUP:
+                result = await self._complete_logic_group(params)
                 return Response.ok(result, req_id)
 
             else:
@@ -1115,15 +1115,15 @@ class AnalysisServer:
         contents = []
         resolved_paths = []
         resolved_files: List[Path] = []
-        for sp in source_paths:
-            source_file = self._resolve_source_file(sp)
+        for src_path in source_paths:
+            source_file = self._resolve_source_file(src_path)
             if source_file:
                 try:
                     contents.append(source_file.read_text())
-                    resolved_paths.append(sp)
+                    resolved_paths.append(src_path)
                     resolved_files.append(source_file)
                 except Exception as e:
-                    self._log(f"Failed to read {sp}: {e}", "DEBUG")
+                    self._log(f"Failed to read {src_path}: {e}", "DEBUG")
 
         # The header comes with it: see _harness_companion_headers for what
         # withholding it cost on curl-delta-02.
@@ -1339,17 +1339,17 @@ class AnalysisServer:
         )
 
     # =========================================================================
-    # Suspicious Point Operations
+    # Vulnerability Hypothesis Operations
     # =========================================================================
 
-    def _find_existing_sps_sync(self, function_name: str) -> List[dict]:
-        """Sync: Find existing SPs for a function."""
-        existing_sps = self.repos.suspicious_points.find_by_function(
+    def _find_existing_vhs_sync(self, function_name: str) -> List[dict]:
+        """Sync: Find existing VHs for a function."""
+        existing_vhs = self.repos.vulnerability_hypotheses.find_by_function(
             self.run_id, function_name
         )
-        return [sp.to_dict() for sp in existing_sps] if existing_sps else []
+        return [vh.to_dict() for vh in existing_vhs] if existing_vhs else []
 
-    def _merge_sp_source_sync(
+    def _merge_vh_source_sync(
         self,
         duplicate_id: str,
         harness_name: str,
@@ -1357,12 +1357,12 @@ class AnalysisServer:
         description: str,
         score: float,
     ) -> bool:
-        """Sync: Merge source into existing SP."""
-        source_added = self.repos.suspicious_points.add_source(
+        """Sync: Merge source into existing VH."""
+        source_added = self.repos.vulnerability_hypotheses.add_source(
             duplicate_id, harness_name, sanitizer
         )
-        self.repos.suspicious_points.add_merged_duplicate(
-            sp_id=duplicate_id,
+        self.repos.vulnerability_hypotheses.add_merged_duplicate(
+            vh_id=duplicate_id,
             description=description,
             harness_name=harness_name,
             sanitizer=sanitizer,
@@ -1370,7 +1370,7 @@ class AnalysisServer:
         )
         return source_added
 
-    def _save_new_sp_sync(
+    def _save_new_vh_sync(
         self,
         function_name: str,
         harness_name: str,
@@ -1378,33 +1378,33 @@ class AnalysisServer:
         description: str,
         score: float,
         important_controlflow: str,
-        direction_id: str = "",
+        lg_id: str = "",
         agent_id: str = "",
     ) -> str:
-        """Sync: Create and save a new SP."""
-        from ..core.models import SuspiciousPoint
+        """Sync: Create and save a new VH."""
+        from ..core.models import VulnerabilityHypothesis
 
-        sp = SuspiciousPoint(
+        vh = VulnerabilityHypothesis(
             run_id=self.run_id,
             function_name=function_name,
-            direction_id=direction_id,
+            lg_id=lg_id,
             created_by_agent_id=agent_id if agent_id else None,
             sources=[{"harness_name": harness_name, "sanitizer": sanitizer}],
             description=description,
             score=score,
             important_controlflow=important_controlflow,
         )
-        self.repos.suspicious_points.save(sp)
-        return sp.suspicious_point_id
+        self.repos.vulnerability_hypotheses.save(vh)
+        return vh.vulnerability_hypothesis_id
 
-    async def _create_suspicious_point(self, params: dict) -> dict:
+    async def _create_vulnerability_hypothesis(self, params: dict) -> dict:
         """
-        Create a new suspicious point or merge with existing duplicate.
+        Create a new vulnerability hypothesis or merge with existing duplicate.
 
         Uses LLM to check for duplicates in the same function. If a duplicate
-        is found, merges the source instead of creating a new SP.
+        is found, merges the source instead of creating a new VH.
         """
-        from ..core.sp_dedup import check_sp_duplicate_async
+        from ..core.vh_dedup import check_vh_duplicate_async
 
         if not self.repos:
             raise RuntimeError("Database not connected")
@@ -1415,24 +1415,24 @@ class AnalysisServer:
         description = params.get("description", "")
         score = params.get("score", 0.0)
         important_controlflow = params.get("important_controlflow", "")
-        direction_id = params.get("direction_id", "")
-        agent_id = params.get("agent_id", "")  # Agent that created this SP
+        lg_id = params.get("lg_id", "")
+        agent_id = params.get("agent_id", "")  # Agent that created this VH
 
         # Check for duplicates in the same function (MongoDB query in thread pool)
-        existing_sp_dicts = await self._run_sync(
-            self._find_existing_sps_sync, function_name
+        existing_vh_dicts = await self._run_sync(
+            self._find_existing_vhs_sync, function_name
         )
 
-        if existing_sp_dicts:
+        if existing_vh_dicts:
             # Use LLM to check for semantic duplicates (async LLM call)
-            duplicate_id = await check_sp_duplicate_async(
-                description, existing_sp_dicts
+            duplicate_id = await check_vh_duplicate_async(
+                description, existing_vh_dicts
             )
 
             if duplicate_id:
                 # Found a duplicate - merge the source (MongoDB in thread pool)
                 source_added = await self._run_sync(
-                    self._merge_sp_source_sync,
+                    self._merge_vh_source_sync,
                     duplicate_id,
                     harness_name,
                     sanitizer,
@@ -1441,54 +1441,54 @@ class AnalysisServer:
                 )
 
                 self._log(
-                    f"Merged SP source: {harness_name}/{sanitizer} -> existing SP {duplicate_id[:8]}... "
+                    f"Merged VH source: {harness_name}/{sanitizer} -> existing VH {duplicate_id[:8]}... "
                     f"in {function_name} (source_added={source_added})"
                 )
                 return {
                     "id": duplicate_id,
                     "merged": True,
                     "created": False,
-                    "message": f"Merged with existing SP in {function_name}",
+                    "message": f"Merged with existing VH in {function_name}",
                 }
 
-        # No duplicate found - create new SP (MongoDB in thread pool)
-        sp_id = await self._run_sync(
-            self._save_new_sp_sync,
+        # No duplicate found - create new VH (MongoDB in thread pool)
+        vh_id = await self._run_sync(
+            self._save_new_vh_sync,
             function_name,
             harness_name,
             sanitizer,
             description,
             score,
             important_controlflow,
-            direction_id,
+            lg_id,
             agent_id,
         )
 
         self._log(
-            f"Created suspicious point: {sp_id} in {function_name} "
-            f"(harness={harness_name}, sanitizer={sanitizer}, direction={direction_id[:8] if direction_id else 'none'})"
+            f"Created vulnerability hypothesis: {vh_id} in {function_name} "
+            f"(harness={harness_name}, sanitizer={sanitizer}, logic group={lg_id[:8] if lg_id else 'none'})"
         )
 
         return {
-            "id": sp_id,
+            "id": vh_id,
             "created": True,
             "merged": False,
         }
 
-    def _update_suspicious_point_sync(
-        self, suspicious_point_id: str, updates: dict
+    def _update_vulnerability_hypothesis_sync(
+        self, vulnerability_hypothesis_id: str, updates: dict
     ) -> bool:
-        """Sync implementation of _update_suspicious_point."""
-        return self.repos.suspicious_points.update(suspicious_point_id, updates)
+        """Sync implementation of _update_vulnerability_hypothesis."""
+        return self.repos.vulnerability_hypotheses.update(vulnerability_hypothesis_id, updates)
 
-    async def _update_suspicious_point(self, params: dict) -> dict:
-        """Update a suspicious point."""
+    async def _update_vulnerability_hypothesis(self, params: dict) -> dict:
+        """Update a vulnerability hypothesis."""
         if not self.repos:
             raise RuntimeError("Database not connected")
 
-        suspicious_point_id = params.get("id")
-        if not suspicious_point_id:
-            raise ValueError("Missing suspicious point id")
+        vulnerability_hypothesis_id = params.get("id")
+        if not vulnerability_hypothesis_id:
+            raise ValueError("Missing vulnerability hypothesis id")
 
         updates = {}
         if "is_checked_by_verifier" in params:
@@ -1506,8 +1506,8 @@ class AnalysisServer:
             updates["evidence"] = params["evidence"] or ""
         if "verification_notes" in params:
             updates["verification_notes"] = params["verification_notes"]
-        if "pov_guidance" in params:
-            updates["pov_guidance"] = params["pov_guidance"]
+        if "poc_guidance" in params:
+            updates["poc_guidance"] = params["poc_guidance"]
         # The verifier may correct an imprecise finder hypothesis.
         if "description" in params:
             updates["description"] = params["description"]
@@ -1515,50 +1515,50 @@ class AnalysisServer:
             updates["important_controlflow"] = params["important_controlflow"]
         if params.get("is_checked_by_verifier"):
             updates["checked_at"] = datetime.now()
-        # Track which agent verified this SP
+        # Track which agent verified this VH
         if params.get("agent_id") and params.get("is_checked_by_verifier"):
             from bson import ObjectId
 
             updates["verified_by_agent_id"] = ObjectId(params["agent_id"])
 
         self._log(
-            f"Updating suspicious point {suspicious_point_id[:8]}... with: is_checked_by_verifier={updates.get('is_checked_by_verifier')}, score={updates.get('score')}"
+            f"Updating vulnerability hypothesis {vulnerability_hypothesis_id[:8]}... with: is_checked_by_verifier={updates.get('is_checked_by_verifier')}, score={updates.get('score')}"
         )
         success = await self._run_sync(
-            self._update_suspicious_point_sync, suspicious_point_id, updates
+            self._update_vulnerability_hypothesis_sync, vulnerability_hypothesis_id, updates
         )
         if success:
-            self._log(f"Updated suspicious point: {suspicious_point_id[:8]}...")
+            self._log(f"Updated vulnerability hypothesis: {vulnerability_hypothesis_id[:8]}...")
         else:
             self._log(
-                f"Failed to update suspicious point: {suspicious_point_id[:8]}... (not found or no changes)",
+                f"Failed to update vulnerability hypothesis: {vulnerability_hypothesis_id[:8]}... (not found or no changes)",
                 "WARNING",
             )
         return {"updated": success}
 
-    def _list_suspicious_points_sync(
+    def _list_vulnerability_hypotheses_sync(
         self, filter_unchecked: bool, filter_real: bool, filter_important: bool
     ) -> dict:
-        """Sync implementation of _list_suspicious_points."""
+        """Sync implementation of _list_vulnerability_hypotheses."""
         if filter_unchecked:
-            points = self.repos.suspicious_points.find_unchecked(self.run_id)
+            points = self.repos.vulnerability_hypotheses.find_unchecked(self.run_id)
         elif filter_real:
-            points = self.repos.suspicious_points.find_real(self.run_id)
+            points = self.repos.vulnerability_hypotheses.find_real(self.run_id)
         elif filter_important:
-            points = self.repos.suspicious_points.find_important(self.run_id)
+            points = self.repos.vulnerability_hypotheses.find_important(self.run_id)
         else:
-            points = self.repos.suspicious_points.find_by_run(self.run_id)
+            points = self.repos.vulnerability_hypotheses.find_by_run(self.run_id)
 
-        counts = self.repos.suspicious_points.count_by_status(self.run_id)
+        counts = self.repos.vulnerability_hypotheses.count_by_status(self.run_id)
 
         return {
-            "suspicious_points": [sp.to_dict() for sp in points],
+            "vulnerability_hypotheses": [vh.to_dict() for vh in points],
             "count": len(points),
             "stats": counts,
         }
 
-    async def _list_suspicious_points(self, params: dict) -> dict:
-        """List suspicious points with optional filters."""
+    async def _list_vulnerability_hypotheses(self, params: dict) -> dict:
+        """List vulnerability hypotheses with optional filters."""
         if not self.repos:
             raise RuntimeError("Database not connected")
 
@@ -1567,37 +1567,37 @@ class AnalysisServer:
         filter_important = params.get("filter_important", False)
 
         return await self._run_sync(
-            self._list_suspicious_points_sync,
+            self._list_vulnerability_hypotheses_sync,
             filter_unchecked,
             filter_real,
             filter_important,
         )
 
-    def _get_suspicious_point_sync(self, suspicious_point_id: str) -> Optional[dict]:
-        """Sync implementation of _get_suspicious_point."""
-        sp = self.repos.suspicious_points.find_by_id(suspicious_point_id)
-        if sp:
-            return sp.to_dict()
+    def _get_vulnerability_hypothesis_sync(self, vulnerability_hypothesis_id: str) -> Optional[dict]:
+        """Sync implementation of _get_vulnerability_hypothesis."""
+        vh = self.repos.vulnerability_hypotheses.find_by_id(vulnerability_hypothesis_id)
+        if vh:
+            return vh.to_dict()
         return None
 
-    async def _get_suspicious_point(self, suspicious_point_id: str) -> Optional[dict]:
-        """Get a single suspicious point by ID."""
-        if not self.repos or not suspicious_point_id:
+    async def _get_vulnerability_hypothesis(self, vulnerability_hypothesis_id: str) -> Optional[dict]:
+        """Get a single vulnerability hypothesis by ID."""
+        if not self.repos or not vulnerability_hypothesis_id:
             return None
         return await self._run_sync(
-            self._get_suspicious_point_sync, suspicious_point_id
+            self._get_vulnerability_hypothesis_sync, vulnerability_hypothesis_id
         )
 
     # =========================================================================
-    # Direction operations (Full-scan)
+    # Logic group operations (Full-scan)
     # =========================================================================
 
-    def _create_direction_sync(self, params: dict) -> dict:
-        """Sync implementation of _create_direction."""
-        from ..core.models import Direction
+    def _create_logic_group_sync(self, params: dict) -> dict:
+        """Sync implementation of _create_logic_group."""
+        from ..core.models import LogicGroup
 
         agent_id = params.get("agent_id", "")
-        direction = Direction(
+        logic_group = LogicGroup(
             run_id=self.run_id,
             created_by_agent_id=agent_id if agent_id else None,
             name=params.get("name", ""),
@@ -1610,124 +1610,124 @@ class AnalysisServer:
             fuzzer=params.get("fuzzer", ""),
         )
 
-        success = self.repos.directions.save(direction)
+        success = self.repos.logic_groups.save(logic_group)
         if success:
             return {
-                "id": direction.direction_id,
+                "id": logic_group.lg_id,
                 "created": True,
-                "name": direction.name,
-                "risk_level": direction.risk_level,
+                "name": logic_group.name,
+                "risk_level": logic_group.risk_level,
             }
         else:
-            return {"created": False, "error": "Failed to save direction"}
+            return {"created": False, "error": "Failed to save logic group"}
 
-    async def _create_direction(self, params: dict) -> dict:
-        """Create a new direction for Full-scan analysis."""
+    async def _create_logic_group(self, params: dict) -> dict:
+        """Create a new logic group for Full-scan analysis."""
         if not self.repos:
             return {"created": False, "error": "Database not available"}
 
-        result = await self._run_sync(self._create_direction_sync, params)
+        result = await self._run_sync(self._create_logic_group_sync, params)
         if result.get("created"):
             self._log(
-                f"Created direction: {result.get('name')} ({result.get('risk_level')})"
+                f"Created logic group: {result.get('name')} ({result.get('risk_level')})"
             )
         return {"id": result.get("id"), "created": result.get("created", False)}
 
-    def _list_directions_sync(
+    def _list_logic_groups_sync(
         self, fuzzer: Optional[str], status: Optional[str]
     ) -> dict:
-        """Sync implementation of _list_directions."""
+        """Sync implementation of _list_logic_groups."""
         if fuzzer:
-            directions = self.repos.directions.find_by_fuzzer(self.run_id, fuzzer)
+            logic_groups = self.repos.logic_groups.find_by_fuzzer(self.run_id, fuzzer)
         else:
-            directions = self.repos.directions.find_by_run(self.run_id)
+            logic_groups = self.repos.logic_groups.find_by_run(self.run_id)
 
         if status:
-            directions = [d for d in directions if d.status == status]
+            logic_groups = [d for d in logic_groups if d.status == status]
 
-        directions.sort(key=lambda d: d.get_priority_score(), reverse=True)
-        stats = self.repos.directions.get_stats(self.run_id, fuzzer)
+        logic_groups.sort(key=lambda d: d.get_priority_score(), reverse=True)
+        stats = self.repos.logic_groups.get_stats(self.run_id, fuzzer)
 
         return {
-            "directions": [_serialize_doc(d.to_dict()) for d in directions],
-            "count": len(directions),
+            "logic_groups": [_serialize_doc(d.to_dict()) for d in logic_groups],
+            "count": len(logic_groups),
             "stats": stats,
         }
 
-    async def _list_directions(self, params: dict) -> dict:
-        """List directions with optional filters."""
+    async def _list_logic_groups(self, params: dict) -> dict:
+        """List logic groups with optional filters."""
         if not self.repos:
-            return {"directions": [], "count": 0, "stats": {}}
+            return {"logic_groups": [], "count": 0, "stats": {}}
 
         fuzzer = params.get("fuzzer")
         status = params.get("status")
-        return await self._run_sync(self._list_directions_sync, fuzzer, status)
+        return await self._run_sync(self._list_logic_groups_sync, fuzzer, status)
 
-    def _get_direction_sync(self, direction_id: str) -> Optional[dict]:
-        """Sync implementation of _get_direction."""
-        direction = self.repos.directions.find_by_id(direction_id)
-        if direction:
-            return _serialize_doc(direction.to_dict())
+    def _get_logic_group_sync(self, lg_id: str) -> Optional[dict]:
+        """Sync implementation of _get_logic_group."""
+        logic_group = self.repos.logic_groups.find_by_id(lg_id)
+        if logic_group:
+            return _serialize_doc(logic_group.to_dict())
         return None
 
-    async def _get_direction(self, direction_id: str) -> Optional[dict]:
-        """Get a single direction by ID."""
-        if not self.repos or not direction_id:
+    async def _get_logic_group(self, lg_id: str) -> Optional[dict]:
+        """Get a single logic group by ID."""
+        if not self.repos or not lg_id:
             return None
-        return await self._run_sync(self._get_direction_sync, direction_id)
+        return await self._run_sync(self._get_logic_group_sync, lg_id)
 
-    def _claim_direction_sync(self, fuzzer: str, processor_id: str) -> Optional[dict]:
-        """Sync implementation of _claim_direction."""
-        direction = self.repos.directions.claim(self.run_id, fuzzer, processor_id)
-        if direction:
+    def _claim_logic_group_sync(self, fuzzer: str, processor_id: str) -> Optional[dict]:
+        """Sync implementation of _claim_logic_group."""
+        logic_group = self.repos.logic_groups.claim(self.run_id, fuzzer, processor_id)
+        if logic_group:
             return {
-                "direction": _serialize_doc(direction.to_dict()),
-                "name": direction.name,
+                "logic_group": _serialize_doc(logic_group.to_dict()),
+                "name": logic_group.name,
             }
         return None
 
-    async def _claim_direction(self, fuzzer: str, processor_id: str) -> Optional[dict]:
-        """Claim a pending direction for analysis."""
+    async def _claim_logic_group(self, fuzzer: str, processor_id: str) -> Optional[dict]:
+        """Claim a pending logic group for analysis."""
         if not self.repos or not fuzzer or not processor_id:
             return None
 
-        result = await self._run_sync(self._claim_direction_sync, fuzzer, processor_id)
+        result = await self._run_sync(self._claim_logic_group_sync, fuzzer, processor_id)
         if result:
-            self._log(f"Direction claimed: {result.get('name')} by {processor_id}")
-            return result.get("direction")
+            self._log(f"Logic group claimed: {result.get('name')} by {processor_id}")
+            return result.get("logic_group")
         return None
 
-    def _complete_direction_sync(
-        self, direction_id: str, sp_count: int, functions_analyzed: int
+    def _complete_logic_group_sync(
+        self, lg_id: str, vh_count: int, functions_analyzed: int
     ) -> bool:
-        """Sync implementation of _complete_direction."""
-        return self.repos.directions.complete(
-            direction_id,
-            sp_count=sp_count,
+        """Sync implementation of _complete_logic_group."""
+        return self.repos.logic_groups.complete(
+            lg_id,
+            vh_count=vh_count,
             functions_analyzed=functions_analyzed,
         )
 
-    async def _complete_direction(self, params: dict) -> dict:
-        """Mark a direction as completed."""
+    async def _complete_logic_group(self, params: dict) -> dict:
+        """Mark a logic group as completed."""
         if not self.repos:
             return {"updated": False, "error": "Database not available"}
 
-        direction_id = params.get("id")
-        if not direction_id:
-            return {"updated": False, "error": "Direction ID required"}
+        lg_id = params.get("id")
+        if not lg_id:
+            return {"updated": False, "error": "Logic group ID required"}
 
         success = await self._run_sync(
-            self._complete_direction_sync,
-            direction_id,
-            params.get("sp_count", 0),
+            self._complete_logic_group_sync,
+            lg_id,
+            params.get("vh_count", 0),
             params.get("functions_analyzed", 0),
         )
 
         if success:
-            self._log(f"Direction completed: {direction_id}")
+            self._log(f"Logic group completed: {lg_id}")
             return {"updated": True}
         else:
-            return {"updated": False, "error": "Failed to update direction"}
+            return {"updated": False, "error": "Failed to update logic group"}
 
     # =========================================================================
     # Lifecycle

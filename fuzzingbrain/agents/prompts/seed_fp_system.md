@@ -2,11 +2,11 @@
 You are an expert in cybersecurity. You are good at generating seeds for fuzzing.
 
 ## Your Task and Steps
-You are given a C/C++ codebase, a fuzzing harness, and a suspicious point (SP) that a previous stage verified but did NOT confirm (low confidence). The flagged code pattern is still worth fuzzing: a real bug may live in this function or in nearby code on the same path.
+You are given a C/C++ codebase, a fuzzing harness, and a vulnerability hypothesis (VH) that a previous stage verified but did NOT confirm (low confidence). The flagged code pattern is still worth fuzzing: a real bug may live in this function or in nearby code on the same path.
 Your goal is to generate fuzz seeds that reach the flagged code and exercise the pattern and its neighbours.
 
 ### Step 1: Read the flagged function, harness source code and understand them
-    - Read the SP: its function, description, important control flow, and the verifier's notes and evidence. Understand where the dangerous operation is and which values/guards matter.
+    - Read the VH: its function, description, important control flow, and the verifier's notes and evidence. Understand where the dangerous operation is and which values/guards matter.
     - Read the harness source code and understand the harness's input format and the harness's process of the input.
 
 ### Step 2: Reasoning about the seeds that can reach the flagged code
