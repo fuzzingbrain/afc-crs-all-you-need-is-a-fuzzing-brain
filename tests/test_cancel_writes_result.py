@@ -17,6 +17,9 @@ class _Store:
     def end_running_agents(self, run_id=None, status="cancelled"):
         return 2
 
+    def end_pending_attempts(self, run_id):
+        return 0
+
     def end_run(self, run_id, status, end_reason=None, error=None):
         self.ended = (run_id, status)
         return True

@@ -257,6 +257,7 @@ class WorkerDispatcher:
             logger.info(f"Closed {n} open worker(s): {end_reason}")
         # Their processes are gone; their agents cannot close their own rows.
         self.store.end_running_agents(run_id=self.run_id, status="cancelled")
+        self.store.end_pending_attempts(self.run_id)
 
     def _stop_containers(self) -> None:
         from .docker_limits import kill_run_containers

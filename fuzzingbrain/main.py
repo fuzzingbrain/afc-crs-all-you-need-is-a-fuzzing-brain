@@ -102,6 +102,7 @@ def signal_handler(signum, frame):
                     pass
         workers = _store.end_open_workers(_current_run_id, "cancelled")
         agents = _store.end_running_agents(run_id=_current_run_id, status="cancelled")
+        _store.end_pending_attempts(_current_run_id)
         _store.end_run(_current_run_id, "cancelled")
         if _current_out is not None:
             from .core.run_processor import write_result

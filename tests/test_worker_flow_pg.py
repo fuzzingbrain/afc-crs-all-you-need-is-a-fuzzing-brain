@@ -146,7 +146,9 @@ def test_vh_create_merge_claim_and_crash(world, monkeypatch):
     assert c3.is_new and c3.signature.startswith("unsigned-")
     assert st.crash_count(w.run_id) == 2
 
-    assert st.move_vh(vh.id, "generating_poc", "poc_generated")
+    # The crash already moved its VH; the agent's own move at its end is a no-op.
+    assert st.get_vh(vh.id).status == "poc_generated"
+    assert not st.move_vh(vh.id, "generating_poc", "poc_generated")
     st.end_agent(poc_agent, "completed", end_reason="poc_target", iterations=3)
     st.end_agent(finder, "completed", end_reason="work_done", iterations=2)
 

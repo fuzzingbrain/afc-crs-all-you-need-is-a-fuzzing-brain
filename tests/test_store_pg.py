@@ -125,3 +125,27 @@ def test_messages_are_stored_once(store, run):
     }])
     assert store.conversation(cid) == [m, reply]
     assert store.run_cost(rid) == pytest.approx(0.5)
+
+
+def test_crash_moves_its_vh_to_poc_generated(store, run):
+    rid, hid, wid = run
+    aid = uuid.uuid4()
+    store.start_agent(aid, rid, wid, "DeltaVHGenerator")
+    vh = store.create_vh(rid, wid, "a.c", "dict_do", "d", 0.9, agent_id=aid, sink_code="x;")
+    assert store.claim_vh(wid, "pending_verify", "verifying").id == vh
+    assert store.move_vh(vh, "verifying", "pending_poc")
+    assert store.claim_vh(wid, "pending_poc", "generating_poc").id == vh
+    a = store.add_poc_attempt(rid, "vh_agent", hid, "address", b"X", vh_id=vh, agent_id=aid,
+                              worker_id=wid, attempt=1, variant=1, generator_code="gen")
+    store.attempt_crashed(a, "sig-vh", "heap-buffer-overflow", "out")
+    assert store.get_vh(vh).status == "poc_generated"
+
+
+def test_pending_attempts_end_as_errors_at_stop(store, run):
+    rid, hid, wid = run
+    a = store.add_poc_attempt(rid, "global_fuzzer", hid, "address", b"P")
+    done = store.add_poc_attempt(rid, "global_fuzzer", hid, "address", b"Q")
+    store.attempt_ran(done, "no_crash")
+    assert store.end_pending_attempts(rid) == 1
+    assert store.get_poc_attempt(a).status == "error"
+    assert store.get_poc_attempt(done).status == "no_crash"

@@ -891,6 +891,15 @@ class Store:
                 s.scalars(select(PocAttempt).where(*cond).order_by(PocAttempt.created_at))
             )
 
+    def end_pending_attempts(self, run_id) -> int:
+        """At a run's stop: inputs that never finished running are errors."""
+        with self.session() as s:
+            return s.execute(
+                update(PocAttempt)
+                .where(PocAttempt.run_id == as_uuid(run_id), PocAttempt.status == "pending")
+                .values(status="error")
+            ).rowcount
+
     def attempt_ran(self, attempt_id, status: str) -> None:
         """A run that did not crash (no_crash) or could not run (error)."""
         assert status in ("no_crash", "error")
@@ -940,6 +949,19 @@ class Store:
                     sanitizer_output=clean_text(sanitizer_output or "(empty)"),
                 )
             )
+            # The VH this input was built for now has its PoC.
+            vh_id = s.scalar(select(PocAttempt.vh_id).where(PocAttempt.id == aid))
+            if vh_id is not None:
+                s.execute(
+                    update(VulnerabilityHypothesis)
+                    .where(
+                        VulnerabilityHypothesis.id == vh_id,
+                        VulnerabilityHypothesis.status.in_(
+                            ("pending_poc", "generating_poc", "poc_failed")
+                        ),
+                    )
+                    .values(status="poc_generated")
+                )
             return crash_id, inserted is not None
 
     def get_crash(self, crash_id) -> Optional[Crash]:
