@@ -226,8 +226,18 @@ letting it vanish with the session's scratch directory.
 
 That first run also reported ten "distinct crashes" when only one was real:
 nine were libFuzzer timeouts, and an allocator exhausted under the run's own
-memory cap parsed as the class `out`. Both are fixed and tested; a timeout is
-not a bug.
+memory cap parsed as the class `out`. A timeout is not a bug, and the fix is
+visible on the same target: the next run met 43 timeout artifacts, filed none
+of them, and reported one crash -- the SEGV above, with a confirmed PoC and
+three hypotheses rejected (one by the verifier at 0.0, two below the finder's
+threshold).
+
+**Harness to directed** (zlib again, 12.3 min): the directed stage run on the
+harness the agent had just written. The coverage build gave it 62 executed
+functions to analyse, the seed agent added 28 inputs, and the breaker asked
+`coverage_frontier` for the frontier, read the gates, probed two lines under
+gdb and seeded 8 inputs past them. No crashes, which is the right answer for
+zlib's one-shot buffer API.
 
 ## Tests
 
