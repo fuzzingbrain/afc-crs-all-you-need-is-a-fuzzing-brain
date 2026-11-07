@@ -63,6 +63,10 @@ _CLASS_ALIASES = {
     "detected": "memory-leak",
     "SEGV": "segv",
     "DEADLYSIGNAL": "segv",
+    # "AddressSanitizer: out of memory: allocator is trying to allocate ..."
+    # The spelling has spaces, so only the first word is captured and the class
+    # came out as the bare word "out".
+    "out": "out-of-memory",
 }
 
 # Frames belonging to the fuzzing machinery rather than the program under test.

@@ -36,6 +36,11 @@ UBSAN_OPTIONS = "halt_on_error=1:print_stacktrace=1"
 # whole per-input budget) to learn what the name already said.
 CRASH_PREFIXES = ("crash-",)
 NOT_A_BUG_PREFIXES = {"timeout-": "timeout", "oom-": "out-of-memory", "leak-": "leak"}
+# Classes the sanitizer reports that are about the environment, not the code:
+# exhausting the allocator under a memory cap, and leaks (which the run turns
+# off anyway). "allocation-size-too-big" is NOT here -- an unchecked size
+# reaching the allocator is a real defect.
+NOT_A_BUG_CLASSES = ("out-of-memory", "memory-leak")
 
 AFL_BASE_ENV = {
     "AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES": "1", "AFL_SKIP_CRASHES": "1", "AFL_SKIP_CPUFREQ": "1",
@@ -263,8 +268,9 @@ class CrashMonitor:
         # A timeout or an out-of-memory prints a stack too, so frames alone do not
         # make a bug: without a sanitizer class this artifact is a slow or greedy
         # input, worth knowing about but not a crash.
-        if not sig or not sig.crash_class:
+        if not sig or not sig.crash_class or sig.crash_class in NOT_A_BUG_CLASSES:
             why = ("timeout" if "libFuzzer: timeout" in output else
+                   sig.crash_class if sig and sig.crash_class in NOT_A_BUG_CLASSES else
                    "out-of-memory" if "out-of-memory" in output else "no sanitizer report")
             self.skipped[why] = self.skipped.get(why, 0) + 1
             self.store.emit("artifact_skipped", lg=self.lg, source=source, reason=why,

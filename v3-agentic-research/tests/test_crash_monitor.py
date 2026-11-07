@@ -163,3 +163,43 @@ def test_an_afl_marked_binary_without_the_driver_is_not_driven_as_afl(tmp_path):
     (tmp_path / "fuzz").write_bytes(b"\x7fELF__AFL_SHM_ID")
     assert is_afl_target(tmp_path, "fuzz") is False
     assert is_afl_target(tmp_path, "missing") is False
+
+
+ASAN_OOM = """\
+==1==ERROR: AddressSanitizer: out of memory: allocator is trying to allocate 0x100000000 bytes
+    #0 0x55cf in operator new(unsigned long) /src/llvm-project/compiler-rt/asan_new_delete.cpp:95
+    #1 0x55cf in Assimp::FBX::ParseVectorDataArray() /src/assimp/code/FBXParser.cpp:700:5
+SUMMARY: AddressSanitizer: out-of-memory /src/assimp/code/FBXParser.cpp:700:5
+"""
+
+ALLOC_TOO_BIG = """\
+==1==ERROR: AddressSanitizer: requested allocation size 0xffffffff exceeds maximum supported size
+    #0 0x55cf in malloc /src/llvm-project/compiler-rt/asan_malloc_linux.cpp:69
+    #1 0x55cf in png_malloc /src/libpng/png.c:600:5
+SUMMARY: AddressSanitizer: allocation-size-too-big /src/libpng/png.c:600:5
+"""
+
+
+def test_exhausting_the_allocator_is_not_a_bug(tmp_path):
+    """ASan writes "out of memory" with spaces, so the class parsed as "out"."""
+    from fbv3.fuzz import signature as sigmod
+
+    assert sigmod.extract_class(ASAN_OOM) == "out-of-memory"
+    m, store = monitor(tmp_path)
+    assert m.handle("global", artifact(tmp_path), output=ASAN_OOM) is None
+    assert store.crashes() == [] and m.skipped == {"out-of-memory": 1}
+
+
+def test_an_unchecked_size_reaching_the_allocator_is_a_bug(tmp_path):
+    """allocation-size-too-big is a real defect, unlike running out of memory."""
+    m, store = monitor(tmp_path)
+    rec = m.handle("global", artifact(tmp_path), output=ALLOC_TOO_BIG)
+    assert rec and rec["crash_class"] == "allocation-size-too-big"
+
+
+def test_a_leak_is_not_counted(tmp_path):
+    leak = ("==1==ERROR: LeakSanitizer: detected memory leaks\\n"
+            "    #0 0x1 in malloc\\n    #1 0x2 in zbee_zdp /src/w/zdp.c:10:3\\n")
+    m, store = monitor(tmp_path)
+    assert m.handle("global", artifact(tmp_path), output=leak) is None
+    assert m.skipped == {"memory-leak": 1}
