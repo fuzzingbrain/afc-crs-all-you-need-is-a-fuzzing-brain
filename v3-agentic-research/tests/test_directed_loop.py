@@ -41,7 +41,10 @@ class FakePool:
         self.prompts.append((role, system, task))
         d = Path(session_root) / sid
         (d / "out").mkdir(parents=True, exist_ok=True)
-        for name, content in (self.files.get(role) or {}).items():
+        payload = self.files.get(role)
+        if callable(payload):  # a session that also leaves files of its own behind
+            payload = payload(d / "out")
+        for name, content in (payload or {}).items():
             path = d / "out" / name
             if name.endswith(".jsonl"):
                 path.write_text("".join(json.dumps(r) + "\n" for r in content))
@@ -401,3 +404,34 @@ def test_closing_leaves_a_finished_hypothesis_alone(tmp_path):
     store.move_vh(done, "poc_generated")
     assert run._close_open_vhs() == 0
     assert store.get_vh(done)["status"] == "poc_generated"
+
+
+def test_a_crash_a_verifier_stumbled_on_is_reproduced_and_kept(tmp_path):
+    """The verifier hand-wrote a crashing input; losing it would be absurd."""
+    run, pool, store = make(tmp_path)
+    run.ws.path("fuzz/poc/corpus").mkdir(parents=True, exist_ok=True)
+    run._monitor = FakeMonitor(crashing=["sig-abc.bin"])
+    vh = store.create_vh("fuzz", function_name="ConvertMeshMultiMaterial")
+
+    def verdict_with_crash(out_dir):
+        d = out_dir / "crashing"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "sig-abc.bin").write_bytes(b"AC3Db")
+        return {"verdict.json": {"score": 1.0, "evidence": "confirmed by sanitizer report",
+                                 "verification_notes": "n", "poc_guidance": "g"}}
+
+    pool.files["verifier"] = verdict_with_crash
+    run._verify(vh)
+    assert run._monitor.handled == [("verifier_agent", "sig-abc.bin")]
+    assert store.get_vh(vh)["status"] == "pending_poc"  # the PoC agent still has to own it
+    # and the PoC fuzzer gets it to mutate around
+    assert [p.name for p in run.ws.path("fuzz/poc/corpus").iterdir()] == ["verifier-sig-abc.bin"]
+
+
+def test_harvesting_is_quiet_when_a_session_crashed_on_nothing(tmp_path):
+    run, pool, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    vh = store.create_vh("fuzz", function_name="f")
+    pool.files["verifier"] = verdict(0.9)
+    run._verify(vh)
+    assert run._monitor.handled == []

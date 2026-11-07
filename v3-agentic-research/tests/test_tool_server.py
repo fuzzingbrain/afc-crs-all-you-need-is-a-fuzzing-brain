@@ -308,3 +308,19 @@ def test_the_probe_and_run_timeouts_come_from_the_session(ctx):
     (ctx["session"] / "work" / "in.bin").write_bytes(b"x")
     server.reach_probe("f", input_path="/ws/sessions/finder-abc/work/in.bin")
     assert any(a[0] == "gdb" for a in ctx["state"]["commands"])
+
+
+def test_an_input_that_crashed_is_kept_for_the_orchestrator(ctx):
+    """A crash found while verifying must outlive the session's scratch space."""
+    ctx["state"].update(run_code=1, run_output=ASAN_REPORT)
+    res = server.run_target(generator_code="def generate(n):\n    return b'AC3Db' * 20\n")
+    assert res["crashed"]
+    kept = sorted((ctx["session"] / "out" / "crashing").glob("*.bin"))
+    assert len(kept) == 1 and kept[0].name.startswith(res["signature"])
+    assert kept[0].read_bytes() == b"AC3Db" * 20
+
+
+def test_a_clean_run_keeps_nothing(ctx):
+    (ctx["session"] / "work" / "in.bin").write_bytes(b"x")
+    server.run_target(input_path="/ws/sessions/finder-abc/work/in.bin")
+    assert not (ctx["session"] / "out" / "crashing").exists()

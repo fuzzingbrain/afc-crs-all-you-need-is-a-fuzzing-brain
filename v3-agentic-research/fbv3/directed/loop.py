@@ -165,6 +165,27 @@ class DirectedRun:
     def _targets_str(self) -> str:
         return ", ".join(self.lg.entries) or self.lg.binary
 
+    def _harvest_crashes(self, result, vh_id: str | None = None) -> int:
+        """Reproduce whatever a session crashed on while it worked.
+
+        Any role can stumble on a crash -- a verifier running a candidate
+        input, a breaker probing a frontier target. The orchestrator
+        reproduces it itself, so it is recorded with the same signature and
+        dedup as the fuzzers' own finds instead of being thrown away with the
+        session's scratch space.
+        """
+        if self._monitor is None or not result.session_id:
+            return 0
+        found = 0
+        for blob in sorted((result.out_dir / "crashing").glob("*.bin"))[:12]:
+            rec = self._monitor.handle(f"{result.role}_agent", blob, vh_id=vh_id)
+            if rec is not None:
+                found += 1
+                poc_corpus = self.ws.path("fuzz/poc/corpus")
+                if poc_corpus.is_dir():  # let the PoC fuzzer mutate around it
+                    shutil.copyfile(blob, poc_corpus / f"{result.role}-{blob.name}")
+        return found
+
     def _record_seeds(self, result, role: str) -> int:
         seeds = _jsonl(result.out_dir / "seeds.jsonl") if result.session_id else []
         self.store.add_seeds(self.lg.name, result.session_id, role, seeds)
@@ -305,6 +326,7 @@ class DirectedRun:
                                     description=self.lg.description or "(no description given)")
         res = self._session("seed", system=system, task=task, subject="seed")
         self._record_seeds(res, "seed")
+        self._harvest_crashes(res)
 
     def _mapper(self) -> list[dict]:
         system, task = self._prompt("mapper", lg=self.lg.name, targets=self._targets_str(),
@@ -387,6 +409,7 @@ class DirectedRun:
             finder_score=vh["finder_score"], sink_code=vh["sink_code"] or "(not given)",
             sink_line=vh["sink_line"])
         res = self._session("verifier", system=system, task=task, subject=vh["function_name"], vh_id=vh_id)
+        self._harvest_crashes(res, vh_id)
         verdict = _json(res.out_dir / "verdict.json") if res.session_id else {}
         score = float(verdict.get("score", 0.0))
         self.store.update_vh(
@@ -488,6 +511,7 @@ class DirectedRun:
                                     description=self.lg.description or "(no description given)")
         res = self._session("breaker", system=system, task=task, subject="breaker")
         self._record_seeds(res, "breaker")
+        self._harvest_crashes(res)
 
     # -- the scheduler -------------------------------------------------------------------
 

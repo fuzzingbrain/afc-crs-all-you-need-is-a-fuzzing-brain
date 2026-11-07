@@ -163,7 +163,28 @@ def _run_input(cinput: str, binary: str | None = None, timeout: int = 0) -> dict
         sig = sigmod.compute_signature(output, harness_names=CTX.get("harness_names") or [])
         out.update(crash_class=sig.crash_class, signature=sig.short, where=sig.describe(),
                    top_frames=[list(f) for f in sig.frames[:5]])
+        _keep_crashing_input(cinput, sig.short)
     return out
+
+
+def _keep_crashing_input(cinput: str, signature: str) -> None:
+    """Keep an input that made the target report, wherever it was found.
+
+    Any role can stumble on a crash while reading or probing. The session's
+    scratch space is thrown away, so the input is copied where the
+    orchestrator looks for it and can reproduce it itself.
+    """
+    try:
+        src = _to_host(cinput)
+        if not src.is_file():
+            return
+        keep = _out() / "crashing"
+        keep.mkdir(parents=True, exist_ok=True)
+        dst = keep / f"{signature or 'unknown'}-{hashlib.sha1(src.read_bytes()).hexdigest()[:12]}.bin"
+        if not dst.exists():
+            shutil.copyfile(src, dst)
+    except (OSError, ValueError):
+        pass
 
 
 def _resolve_input(input_path: str, generator_code: str, label: str) -> tuple[str, str]:
