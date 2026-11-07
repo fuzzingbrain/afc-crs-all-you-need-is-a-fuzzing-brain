@@ -1,0 +1,47 @@
+{
+  "project_name": "wireshark",
+  "label": "aixcc-delta",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-wireshark.git",
+  "scan_mode": "delta",
+  "base_commit": "ae6c15079f00e0d07d0c79501616b7a91a21e0f1",
+  "delta_commit": "challenges/ws-delta-04",
+  "task_type": "poc",
+  "timeout_minutes": 60,
+  "budget_limit": 30.0,
+  "poc_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "handler_json"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "handler_json": [
+        "artifact/aixcc/ws-delta-04/harness_src/handler_json/fuzzshark.c"
+      ]
+    },
+    "docker_image": "aixcc-afc/wireshark:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "handler_json": "artifact/aixcc/ws-delta-04/fuzzers/handler_json/handler_json"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/ws-delta-04/graph.sqlite"
+  },
+  "concurrency": 5
+}

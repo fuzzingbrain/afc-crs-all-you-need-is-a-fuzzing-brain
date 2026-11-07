@@ -1,0 +1,47 @@
+{
+  "project_name": "libexif",
+  "label": "aixcc-delta",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-libexif.git",
+  "scan_mode": "delta",
+  "base_commit": "23435ad1d36b5d28fd7befbfb290907060b586b2",
+  "delta_commit": "challenges/ex-delta-02",
+  "task_type": "poc",
+  "timeout_minutes": 60,
+  "budget_limit": 30.0,
+  "poc_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "exif_from_data_fuzzer"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "exif_from_data_fuzzer": [
+        "artifact/aixcc/ex-delta-02/harness_src/exif_from_data_fuzzer/exif_from_data_fuzzer.cc"
+      ]
+    },
+    "docker_image": "aixcc-afc/libexif:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "exif_from_data_fuzzer": "artifact/aixcc/ex-delta-02/fuzzers/exif_from_data_fuzzer/exif_from_data_fuzzer"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/ex-delta-02/graph.sqlite"
+  },
+  "concurrency": 5
+}

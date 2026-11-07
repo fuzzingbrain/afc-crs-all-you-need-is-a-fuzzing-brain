@@ -12,6 +12,7 @@ Run processing: everything between reading the task and the final summary.
     6. runs row closed, final summary from the database
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -432,6 +433,10 @@ class RunProcessor:
                 self.store.end_run(self.run_id, "error", error=traceback.format_exc())
             except Exception as db_err:
                 logger.error(f"Could not close the run row: {db_err}")
+            try:
+                write_result(Path(self.paths.workspace_path), self.store, self.run_id, "error", None, 0)
+            except Exception as w_err:
+                logger.error(f"Could not write result.json: {w_err}")
             return {"run_id": self.run_id, "status": "error", "message": str(e)}
 
     def _run(self, analyze_result) -> dict:
@@ -486,6 +491,10 @@ class RunProcessor:
             if log_dir:
                 with open(Path(log_dir) / "fuzzingbrain.log", "a", encoding="utf-8") as f:
                     f.write("\n" + WorkerColors.strip(summary) + "\n")
+            write_result(
+                Path(self.paths.workspace_path), self.store, self.run_id,
+                status, end_reason, result.get("elapsed_minutes", 0),
+            )
             return {
                 "run_id": self.run_id,
                 "status": result["status"],
@@ -501,6 +510,29 @@ class RunProcessor:
             raise
         finally:
             infra.stop()
+
+
+def write_result(out_dir: Path, store, run_id: str, status: str, end_reason, elapsed_minutes) -> Path:
+    """<output>/result.json: what a batch script reads back (no log scraping)."""
+    summary = store.run_summary(run_id)
+    doc = {
+        "run_id": run_id,
+        "status": status,
+        "end_reason": end_reason,
+        "elapsed_minutes": round(float(elapsed_minutes or 0), 2),
+        "cost": round(float(summary["cost"] or 0), 4),
+        "crashes": [
+            {"signature": c.signature, "vuln_type": c.vuln_type, "package": c.package_path}
+            for c in store.crashes(run_id)
+        ],
+        "workers": [
+            {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in w.items()}
+            for w in summary["workers"]
+        ],
+    }
+    path = Path(out_dir) / "result.json"
+    path.write_text(json.dumps(doc, indent=2) + "\n")
+    return path
 
 
 def process_run(config: Config, store) -> dict:

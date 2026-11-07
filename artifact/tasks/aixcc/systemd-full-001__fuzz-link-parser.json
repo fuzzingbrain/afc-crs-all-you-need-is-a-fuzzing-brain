@@ -1,0 +1,46 @@
+{
+  "project_name": "systemd",
+  "label": "aixcc-full",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-systemd.git",
+  "scan_mode": "full",
+  "target_commit": "9a0853cc6e5bf507286f759f9d21b04bbec06fdc",
+  "task_type": "poc",
+  "timeout_minutes": 120,
+  "budget_limit": 100.0,
+  "poc_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "fuzz-link-parser"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "fuzz-link-parser": [
+        "artifact/aixcc/systemd-full-001/harness_src/fuzz-link-parser/fuzz-link-parser.c"
+      ]
+    },
+    "docker_image": "aixcc-afc/systemd:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "fuzz-link-parser": "artifact/aixcc/systemd-full-001/fuzzers/fuzz-link-parser/fuzz-link-parser"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/systemd-full-001/graph.sqlite"
+  },
+  "concurrency": 5
+}

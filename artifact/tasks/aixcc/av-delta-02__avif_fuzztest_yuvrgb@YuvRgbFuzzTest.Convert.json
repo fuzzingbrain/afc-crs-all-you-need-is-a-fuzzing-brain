@@ -1,0 +1,47 @@
+{
+  "project_name": "libavif",
+  "label": "aixcc-delta",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-libavif.git",
+  "scan_mode": "delta",
+  "base_commit": "1a98b640c5322dfeb69a05c832b0a1ba2f277872",
+  "delta_commit": "challenges/av-delta-02",
+  "task_type": "poc",
+  "timeout_minutes": 120,
+  "budget_limit": 150.0,
+  "poc_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert": [
+        "artifact/aixcc/av-delta-02/harness_src/avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert/avif_fuzztest_yuvrgb.cc"
+      ]
+    },
+    "docker_image": "aixcc-afc/libavif:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert": "artifact/aixcc/av-delta-02/fuzzers/avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert/avif_fuzztest_yuvrgb"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/av-delta-02/graph.sqlite"
+  },
+  "concurrency": 5
+}

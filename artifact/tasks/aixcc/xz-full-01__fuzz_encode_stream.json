@@ -1,0 +1,47 @@
+{
+  "project_name": "xz",
+  "label": "aixcc-full",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-xz.git",
+  "scan_mode": "full",
+  "target_commit": "8701b13098b9799808f2be1dc1c428e242186bb4",
+  "task_type": "poc",
+  "timeout_minutes": 120,
+  "budget_limit": 100.0,
+  "poc_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "fuzz_encode_stream"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "fuzz_encode_stream": [
+        "artifact/aixcc/xz-full-01/harness_src/fuzz_encode_stream/fuzz_encode_stream.c",
+        "artifact/aixcc/xz-full-01/harness_src/fuzz_encode_stream/fuzz_common.h"
+      ]
+    },
+    "docker_image": "aixcc-afc/xz:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "fuzz_encode_stream": "artifact/aixcc/xz-full-01/fuzzers/fuzz_encode_stream/fuzz_encode_stream"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/xz-full-01/graph.sqlite"
+  },
+  "concurrency": 5
+}

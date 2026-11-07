@@ -1,0 +1,47 @@
+{
+  "project_name": "freerdp",
+  "label": "aixcc-delta",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-freerdp.git",
+  "scan_mode": "delta",
+  "base_commit": "8cab992c83a0f1f7a6834b40988cae977c545202",
+  "delta_commit": "challenges/fp-delta-02",
+  "task_type": "poc",
+  "timeout_minutes": 60,
+  "budget_limit": 30.0,
+  "poc_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "TestFuzzCryptoCertificateDataSetPEM"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "TestFuzzCryptoCertificateDataSetPEM": [
+        "artifact/aixcc/fp-delta-02/harness_src/TestFuzzCryptoCertificateDataSetPEM/TestFuzzCryptoCertificateDataSetPEM.c"
+      ]
+    },
+    "docker_image": "aixcc-afc/freerdp:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "TestFuzzCryptoCertificateDataSetPEM": "artifact/aixcc/fp-delta-02/fuzzers/TestFuzzCryptoCertificateDataSetPEM/TestFuzzCryptoCertificateDataSetPEM"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/fp-delta-02/graph.sqlite"
+  },
+  "concurrency": 5
+}

@@ -1,0 +1,46 @@
+{
+  "project_name": "wireshark",
+  "label": "aixcc-full",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-wireshark.git",
+  "scan_mode": "full",
+  "target_commit": "75ffccb4609488bcafe91d5652e31c27ad68d934",
+  "task_type": "poc",
+  "timeout_minutes": 120,
+  "budget_limit": 100.0,
+  "poc_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "handler_openvpn.udp"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "handler_openvpn.udp": [
+        "artifact/aixcc/ws-full-01/harness_src/handler_openvpn.udp/fuzzshark.c"
+      ]
+    },
+    "docker_image": "aixcc-afc/wireshark:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "handler_openvpn.udp": "artifact/aixcc/ws-full-01/fuzzers/handler_openvpn.udp/handler_openvpn.udp"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/ws-full-01/graph.sqlite"
+  },
+  "concurrency": 5
+}

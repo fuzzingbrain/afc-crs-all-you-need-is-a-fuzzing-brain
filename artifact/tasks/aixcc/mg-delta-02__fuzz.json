@@ -1,0 +1,47 @@
+{
+  "project_name": "mongoose",
+  "label": "aixcc-delta",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-mongoose.git",
+  "scan_mode": "delta",
+  "base_commit": "335f69f334d04e97189c9d9c78ff4546a7513824",
+  "delta_commit": "challenges/mg-delta-02",
+  "task_type": "poc",
+  "timeout_minutes": 60,
+  "budget_limit": 30.0,
+  "poc_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "fuzz"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "fuzz": [
+        "artifact/aixcc/mg-delta-02/harness_src/fuzz/fuzz.c"
+      ]
+    },
+    "docker_image": "aixcc-afc/mongoose:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "fuzz": "artifact/aixcc/mg-delta-02/fuzzers/fuzz/fuzz"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/mg-delta-02/graph.sqlite"
+  },
+  "concurrency": 5
+}

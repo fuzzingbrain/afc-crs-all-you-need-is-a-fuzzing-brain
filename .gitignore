@@ -73,7 +73,7 @@ experiments/
 artifact/*
 !artifact/run.sh
 !artifact/run_batch.sh
-!artifact/preflight.py
+!artifact/tasks
 !artifact/batches
 artifact/batches/*
 !artifact/batches/batch1.txt

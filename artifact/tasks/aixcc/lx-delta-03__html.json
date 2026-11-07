@@ -1,0 +1,49 @@
+{
+  "project_name": "libxml2",
+  "label": "aixcc-delta",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-libxml2.git",
+  "scan_mode": "delta",
+  "base_commit": "40bcc1944c83b15f8647ec0b6ff1d7c440d53a40",
+  "delta_commit": "challenges/lx-delta-03",
+  "task_type": "poc",
+  "timeout_minutes": 60,
+  "budget_limit": 30.0,
+  "poc_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "html"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "html": [
+        "artifact/aixcc/lx-delta-03/harness_src/html/html.c",
+        "artifact/aixcc/lx-delta-03/harness_src/html/fuzz.c",
+        "artifact/aixcc/lx-delta-03/harness_src/html/fuzz.h"
+      ]
+    },
+    "docker_image": "aixcc-afc/libxml2:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "html": "artifact/aixcc/lx-delta-03/fuzzers/html/html"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/lx-delta-03/graph.sqlite"
+  },
+  "concurrency": 5
+}

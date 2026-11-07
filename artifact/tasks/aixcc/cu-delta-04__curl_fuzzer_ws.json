@@ -1,0 +1,50 @@
+{
+  "project_name": "curl",
+  "label": "aixcc-delta",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-curl.git",
+  "scan_mode": "delta",
+  "base_commit": "157e7faac92b4c79e7202de036b45d8ef0f7b35e",
+  "delta_commit": "challenges/cu-delta-04",
+  "task_type": "poc",
+  "timeout_minutes": 60,
+  "budget_limit": 30.0,
+  "poc_count": 2,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "curl_fuzzer_ws"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "curl_fuzzer_ws": [
+        "artifact/aixcc/cu-delta-04/harness_src/curl_fuzzer_ws/curl_fuzzer.cc",
+        "artifact/aixcc/cu-delta-04/harness_src/curl_fuzzer_ws/curl_fuzzer.h",
+        "artifact/aixcc/cu-delta-04/harness_src/curl_fuzzer_ws/curl_fuzzer_callback.cc",
+        "artifact/aixcc/cu-delta-04/harness_src/curl_fuzzer_ws/curl_fuzzer_tlv.cc"
+      ]
+    },
+    "docker_image": "aixcc-afc/curl:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "curl_fuzzer_ws": "artifact/aixcc/cu-delta-04/fuzzers/curl_fuzzer_ws/curl_fuzzer_ws"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/cu-delta-04/graph.sqlite"
+  },
+  "concurrency": 5
+}

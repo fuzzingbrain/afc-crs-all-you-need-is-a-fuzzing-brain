@@ -14,62 +14,47 @@ score on that same challenge measures memorisation, not capability.
 
 ## Why store graphs at all
 
-A delta scan cannot start without a call graph. The diff-to-function mapping
-reads the `functions` collection, so when the graph is missing a worker exits in
-about 0.03 seconds reporting "No changes in diff" and zero findings — a silent
-skip that reads like a clean negative result rather than a missing prerequisite.
-
-The graph normally comes from building fuzz-introspector at run time, which is
-slow (~140 s for a project the size of libpng) and, more to the point, fragile:
-inside the official `ghcr.io/aixcc-finals/base-builder` images the introspector
-build currently fails outright, because installing `fuzz-introspector` pulls the
-current `atheris` from PyPI and its wheel build cannot find libFuzzer there.
-
-Checking the graph in removes that dependency. Build it once, verify it once,
-and every later run loads it in seconds — and a broken introspector stops being
-able to take the whole system down with it.
+A delta scan maps the diff to functions through the call graph, and a full scan
+plans from what the harness reaches. FuzzingBrain no longer builds
+fuzz-introspector at run time (it was slow, and inside the official
+`base-builder` images its build failed outright); a run reads a prebuilt graph
+from `analysis.graph` and its preflight stops the run if the graph has no
+functions or no entry for a harness.
 
 ## Layout
 
 One directory per challenge, named exactly as the challenge is:
 
 ```
-final-competition/
-└── lx-delta-01/
-    ├── mongodb/
-    │   ├── functions.json      # nodes
-    │   └── callgraph.json      # edges
-    ├── manifest.json           # provenance, counts, verified invariants
-    └── README.md               # how it was produced, known limitations
+final-competition/delta/cu-delta-05/
+├── bugs/                   # the official bugs (answers: never given to a run)
+├── manifest.json           # provenance and counts
+├── graph-manifest.json     # how the graph was produced, verified invariants
+└── README.md
 ```
 
-`mongodb/` is the contract `import_from_prebuild()` expects, and the two
-filenames are load-bearing — the importer looks for `callgraph.json`, not
-`callgraph_nodes.json`.
+The graph itself ships with the artifact data
+(`artifact/aixcc/<challenge>/graph.sqlite`): one SQLite file per software
+commit with per-harness reach marks, made from the per-harness JSON exports by
 
-**Nodes** (`functions.json`) carry `name`, `file_path`, `start_line`, `end_line`,
-`content` (the function body — this is how agents read code), plus
-`cyclomatic_complexity`, `reached_by_fuzzers` and `language`.
+```bash
+python -m fuzzingbrain.graph.convert artifact/aixcc/<challenge>/graph.sqlite \
+    --artifact artifact/aixcc/<challenge>
+```
 
-**Edges** (`callgraph.json`) carry `function_name`, `callers`, `callees`,
-`call_depth`, `fuzzer_name` and `fuzzer_id`. Only `run_id` and `function_name`
-are ever used as query keys, so a stale `fuzzer_id` is harmless.
-
-Both files use `prebuild_<work_id>` as their `run_id`; the importer remaps it to
-the live task id on load.
+**Nodes** carry `name`, `file_path`, `start_line`, `end_line`, `content` (the
+function body), `cyclomatic_complexity` and `language`; **edges** are
+caller -> callee with a direct/indirect flag; each harness has its own reach
+depths.
 
 ## Loading a graph
 
-```bash
-python -m fuzzingbrain.main \
-    --prebuild-dir examples/aixcc-challenges/final-competition/lx-delta-01 \
-    --work-id lx-delta-01 \
-    ...
+```json
+"analysis": {"graph": "artifact/aixcc/cu-delta-05/graph.sqlite"}
 ```
 
-The analysis server logs `Prebuild data detected, will skip introspector build`
-and imports the graph instead. Note these two flags exist on
-`python -m fuzzingbrain.main` but are not forwarded by `FuzzingBrain.sh`.
+The ready-made task files are `artifact/tasks/aixcc/<challenge>__<harness>.json`
+(`artifact/run.sh <task>`).
 
 ## What makes a graph correct
 

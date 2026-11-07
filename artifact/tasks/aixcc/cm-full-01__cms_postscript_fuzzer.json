@@ -1,0 +1,46 @@
+{
+  "project_name": "lcms",
+  "label": "aixcc-full",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-little-cms.git",
+  "scan_mode": "full",
+  "target_commit": "cf5b21c614c3e9da26bba12eed76ae2bd73cfeed",
+  "task_type": "poc",
+  "timeout_minutes": 120,
+  "budget_limit": 100.0,
+  "poc_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "cms_postscript_fuzzer"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "cms_postscript_fuzzer": [
+        "artifact/aixcc/cm-full-01/harness_src/cms_postscript_fuzzer/cms_postscript_fuzzer.c"
+      ]
+    },
+    "docker_image": "aixcc-afc/lcms:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "cms_postscript_fuzzer": "artifact/aixcc/cm-full-01/fuzzers/cms_postscript_fuzzer/cms_postscript_fuzzer"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/cm-full-01/graph.sqlite"
+  },
+  "concurrency": 5
+}

@@ -1,0 +1,46 @@
+{
+  "project_name": "dav1d",
+  "label": "aixcc-full",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-dav1d.git",
+  "scan_mode": "full",
+  "target_commit": "04dd00d4b4f02246676c5a2bf75037ec3f6ed45b",
+  "task_type": "poc",
+  "timeout_minutes": 120,
+  "budget_limit": 100.0,
+  "poc_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "dav1d_fuzzer_mt@NO_OOM"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "undefined"
+    ],
+    "sources": {
+      "dav1d_fuzzer_mt@NO_OOM": [
+        "artifact/aixcc/da-full-01/harness_src/dav1d_fuzzer_mt@NO_OOM/dav1d_fuzzer.c"
+      ]
+    },
+    "docker_image": "aixcc-afc/dav1d:latest",
+    "prebuilt": {
+      "binaries": {
+        "undefined": {
+          "dav1d_fuzzer_mt@NO_OOM": "artifact/aixcc/da-full-01/fuzzers/dav1d_fuzzer_mt@NO_OOM/dav1d_fuzzer_mt"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/da-full-01/graph.sqlite"
+  },
+  "concurrency": 5
+}

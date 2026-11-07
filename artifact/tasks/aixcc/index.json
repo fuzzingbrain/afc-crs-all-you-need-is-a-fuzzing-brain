@@ -1,0 +1,322 @@
+[
+  {
+    "cpv": "av2-del-02",
+    "challenge": "av-delta-02",
+    "harness": "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+    "mode": "delta",
+    "project": "libavif",
+    "task": "artifact/tasks/aixcc/av-delta-02__avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert.json"
+  },
+  {
+    "cpv": "cu2-del-06",
+    "challenge": "cu-delta-02",
+    "harness": "curl_fuzzer_ws",
+    "mode": "delta",
+    "project": "curl",
+    "task": "artifact/tasks/aixcc/cu-delta-02__curl_fuzzer_ws.json"
+  },
+  {
+    "cpv": "cu3-del-07",
+    "challenge": "cu-delta-03",
+    "harness": "curl_fuzzer_ws",
+    "mode": "delta",
+    "project": "curl",
+    "task": "artifact/tasks/aixcc/cu-delta-03__curl_fuzzer_ws.json"
+  },
+  {
+    "cpv": "cu4-del-03",
+    "challenge": "cu-delta-04",
+    "harness": "curl_fuzzer_http",
+    "mode": "delta",
+    "project": "curl",
+    "task": "artifact/tasks/aixcc/cu-delta-04__curl_fuzzer_http.json"
+  },
+  {
+    "cpv": "cu4-del-08",
+    "challenge": "cu-delta-04",
+    "harness": "curl_fuzzer_ws",
+    "mode": "delta",
+    "project": "curl",
+    "task": "artifact/tasks/aixcc/cu-delta-04__curl_fuzzer_ws.json"
+  },
+  {
+    "cpv": "cu5-del-01",
+    "challenge": "cu-delta-05",
+    "harness": "curl_fuzzer_dict",
+    "mode": "delta",
+    "project": "curl",
+    "task": "artifact/tasks/aixcc/cu-delta-05__curl_fuzzer_dict.json"
+  },
+  {
+    "cpv": "cu5-del-02",
+    "challenge": "cu-delta-05",
+    "harness": "curl_fuzzer_ftp",
+    "mode": "delta",
+    "project": "curl",
+    "task": "artifact/tasks/aixcc/cu-delta-05__curl_fuzzer_ftp.json"
+  },
+  {
+    "cpv": "ex2-del-01",
+    "challenge": "ex-delta-02",
+    "harness": "exif_from_data_fuzzer",
+    "mode": "delta",
+    "project": "libexif",
+    "task": "artifact/tasks/aixcc/ex-delta-02__exif_from_data_fuzzer.json"
+  },
+  {
+    "cpv": "ex3-del-02",
+    "challenge": "ex-delta-03",
+    "harness": "exif_from_data_fuzzer",
+    "mode": "delta",
+    "project": "libexif",
+    "task": "artifact/tasks/aixcc/ex-delta-03__exif_from_data_fuzzer.json"
+  },
+  {
+    "cpv": "fp2-del-02",
+    "challenge": "fp-delta-02",
+    "harness": "TestFuzzCryptoCertificateDataSetPEM",
+    "mode": "delta",
+    "project": "freerdp",
+    "task": "artifact/tasks/aixcc/fp-delta-02__TestFuzzCryptoCertificateDataSetPEM.json"
+  },
+  {
+    "cpv": "fp3-del-03",
+    "challenge": "fp-delta-03",
+    "harness": "TestFuzzCodecs",
+    "mode": "delta",
+    "project": "freerdp",
+    "task": "artifact/tasks/aixcc/fp-delta-03__TestFuzzCodecs.json"
+  },
+  {
+    "cpv": "lx3-del-04",
+    "challenge": "lx-delta-03",
+    "harness": "html",
+    "mode": "delta",
+    "project": "libxml2",
+    "task": "artifact/tasks/aixcc/lx-delta-03__html.json"
+  },
+  {
+    "cpv": "mg1-del-01",
+    "challenge": "mg-delta-01",
+    "harness": "fuzz",
+    "mode": "delta",
+    "project": "mongoose",
+    "task": "artifact/tasks/aixcc/mg-delta-01__fuzz.json"
+  },
+  {
+    "cpv": "mg2-del-02",
+    "challenge": "mg-delta-02",
+    "harness": "fuzz",
+    "mode": "delta",
+    "project": "mongoose",
+    "task": "artifact/tasks/aixcc/mg-delta-02__fuzz.json"
+  },
+  {
+    "cpv": "ws1-del-03",
+    "challenge": "ws-delta-01",
+    "harness": "handler_ber",
+    "mode": "delta",
+    "project": "wireshark",
+    "task": "artifact/tasks/aixcc/ws-delta-01__handler_ber.json"
+  },
+  {
+    "cpv": "ws2-del-04",
+    "challenge": "ws-delta-02",
+    "harness": "handler_icmp",
+    "mode": "delta",
+    "project": "wireshark",
+    "task": "artifact/tasks/aixcc/ws-delta-02__handler_icmp.json"
+  },
+  {
+    "cpv": "ws3-del-06",
+    "challenge": "ws-delta-03",
+    "harness": "handler_irc",
+    "mode": "delta",
+    "project": "wireshark",
+    "task": "artifact/tasks/aixcc/ws-delta-03__handler_irc.json"
+  },
+  {
+    "cpv": "ws4-del-07",
+    "challenge": "ws-delta-04",
+    "harness": "handler_json",
+    "mode": "delta",
+    "project": "wireshark",
+    "task": "artifact/tasks/aixcc/ws-delta-04__handler_json.json"
+  },
+  {
+    "cpv": "ws5-del-08",
+    "challenge": "ws-delta-05",
+    "harness": "handler_netbios",
+    "mode": "delta",
+    "project": "wireshark",
+    "task": "artifact/tasks/aixcc/ws-delta-05__handler_netbios.json"
+  },
+  {
+    "cpv": "ws7-del-13",
+    "challenge": "ws-delta-07",
+    "harness": "handler_gvcp",
+    "mode": "delta",
+    "project": "wireshark",
+    "task": "artifact/tasks/aixcc/ws-delta-07__handler_gvcp.json"
+  },
+  {
+    "cpv": "cm1-fu-01",
+    "challenge": "cm-full-01",
+    "harness": "cms_postscript_fuzzer",
+    "mode": "full",
+    "project": "lcms",
+    "task": "artifact/tasks/aixcc/cm-full-01__cms_postscript_fuzzer.json"
+  },
+  {
+    "cpv": "cm1-fu-02",
+    "challenge": "cm-full-01",
+    "harness": "cms_virtual_profile_fuzzer",
+    "mode": "full",
+    "project": "lcms",
+    "task": "artifact/tasks/aixcc/cm-full-01__cms_virtual_profile_fuzzer.json"
+  },
+  {
+    "cpv": "da1-fu-01",
+    "challenge": "da-full-01",
+    "harness": "dav1d_fuzzer_mt@NO_OOM",
+    "mode": "full",
+    "project": "dav1d",
+    "task": "artifact/tasks/aixcc/da-full-01__dav1d_fuzzer_mt@NO_OOM.json"
+  },
+  {
+    "cpv": "mg1-fu-00",
+    "challenge": "mg-full-01",
+    "harness": "fuzz",
+    "mode": "full",
+    "project": "mongoose",
+    "task": "artifact/tasks/aixcc/mg-full-01__fuzz.json"
+  },
+  {
+    "cpv": "sd1-fu-01",
+    "challenge": "systemd-full-001",
+    "harness": "fuzz-udev-rule-parse-value",
+    "mode": "full",
+    "project": "systemd",
+    "task": "artifact/tasks/aixcc/systemd-full-001__fuzz-udev-rule-parse-value.json"
+  },
+  {
+    "cpv": "sd1-fu-03",
+    "challenge": "systemd-full-001",
+    "harness": "fuzz-catalog",
+    "mode": "full",
+    "project": "systemd",
+    "task": "artifact/tasks/aixcc/systemd-full-001__fuzz-catalog.json"
+  },
+  {
+    "cpv": "sd1-fu-04",
+    "challenge": "systemd-full-001",
+    "harness": "fuzz-link-parser",
+    "mode": "full",
+    "project": "systemd",
+    "task": "artifact/tasks/aixcc/systemd-full-001__fuzz-link-parser.json"
+  },
+  {
+    "cpv": "sd1-fu-05",
+    "challenge": "systemd-full-001",
+    "harness": "fuzz-systemctl-parse-argv",
+    "mode": "full",
+    "project": "systemd",
+    "task": "artifact/tasks/aixcc/systemd-full-001__fuzz-systemctl-parse-argv.json"
+  },
+  {
+    "cpv": "ss1-fu-00",
+    "challenge": "shadowsocks-full-01",
+    "harness": "json_fuzz",
+    "mode": "full",
+    "project": "shadowsocks",
+    "task": "artifact/tasks/aixcc/shadowsocks-full-01__json_fuzz.json"
+  },
+  {
+    "cpv": "ss1-fu-01",
+    "challenge": "shadowsocks-full-01",
+    "harness": "json_fuzz",
+    "mode": "full",
+    "project": "shadowsocks",
+    "task": "artifact/tasks/aixcc/shadowsocks-full-01__json_fuzz.json"
+  },
+  {
+    "cpv": "ss1-fu-02",
+    "challenge": "shadowsocks-full-01",
+    "harness": "json_fuzz",
+    "mode": "full",
+    "project": "shadowsocks",
+    "task": "artifact/tasks/aixcc/shadowsocks-full-01__json_fuzz.json"
+  },
+  {
+    "cpv": "ss1-fu-03",
+    "challenge": "shadowsocks-full-01",
+    "harness": "json_fuzz",
+    "mode": "full",
+    "project": "shadowsocks",
+    "task": "artifact/tasks/aixcc/shadowsocks-full-01__json_fuzz.json"
+  },
+  {
+    "cpv": "ss1-fu-04",
+    "challenge": "shadowsocks-full-01",
+    "harness": "json_fuzz",
+    "mode": "full",
+    "project": "shadowsocks",
+    "task": "artifact/tasks/aixcc/shadowsocks-full-01__json_fuzz.json"
+  },
+  {
+    "cpv": "ws1-fu-01",
+    "challenge": "ws-full-01",
+    "harness": "handler_openvpn.udp",
+    "mode": "full",
+    "project": "wireshark",
+    "task": "artifact/tasks/aixcc/ws-full-01__handler_openvpn.udp.json"
+  },
+  {
+    "cpv": "ws1-fu-02",
+    "challenge": "ws-full-01",
+    "harness": "handler_telnet",
+    "mode": "full",
+    "project": "wireshark",
+    "task": "artifact/tasks/aixcc/ws-full-01__handler_telnet.json"
+  },
+  {
+    "cpv": "ws1-fu-05",
+    "challenge": "ws-full-01",
+    "harness": "handler_bat.vis",
+    "mode": "full",
+    "project": "wireshark",
+    "task": "artifact/tasks/aixcc/ws-full-01__handler_bat.vis.json"
+  },
+  {
+    "cpv": "ws1-fu-10",
+    "challenge": "ws-full-01",
+    "harness": "handler_netbios",
+    "mode": "full",
+    "project": "wireshark",
+    "task": "artifact/tasks/aixcc/ws-full-01__handler_netbios.json"
+  },
+  {
+    "cpv": "ws1-fu-11",
+    "challenge": "ws-full-01",
+    "harness": "handler_aim",
+    "mode": "full",
+    "project": "wireshark",
+    "task": "artifact/tasks/aixcc/ws-full-01__handler_aim.json"
+  },
+  {
+    "cpv": "ws1-fu-12",
+    "challenge": "ws-full-01",
+    "harness": "handler_zbee_zdp",
+    "mode": "full",
+    "project": "wireshark",
+    "task": "artifact/tasks/aixcc/ws-full-01__handler_zbee_zdp.json"
+  },
+  {
+    "cpv": "xz1-fu-01",
+    "challenge": "xz-full-01",
+    "harness": "fuzz_encode_stream",
+    "mode": "full",
+    "project": "xz",
+    "task": "artifact/tasks/aixcc/xz-full-01__fuzz_encode_stream.json"
+  }
+]

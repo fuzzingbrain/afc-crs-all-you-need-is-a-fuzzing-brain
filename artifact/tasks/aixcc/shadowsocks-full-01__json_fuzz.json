@@ -1,0 +1,46 @@
+{
+  "project_name": "shadowsocks",
+  "label": "aixcc-full",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-shadowsocks-libev.git",
+  "scan_mode": "full",
+  "target_commit": "752f84600ce8ab3620ac0ae284dc5f6ec689ee94",
+  "task_type": "poc",
+  "timeout_minutes": 120,
+  "budget_limit": 100.0,
+  "poc_count": 4,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "json_fuzz"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "json_fuzz": [
+        "artifact/aixcc/shadowsocks-full-01/harness_src/json_fuzz/json_fuzz.c"
+      ]
+    },
+    "docker_image": "aixcc-afc/shadowsocks:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "json_fuzz": "artifact/aixcc/shadowsocks-full-01/fuzzers/json_fuzz/json_fuzz"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "graph": "artifact/aixcc/shadowsocks-full-01/graph.sqlite"
+  },
+  "concurrency": 5
+}
