@@ -126,6 +126,7 @@ class DirectedRun:
         self._stop_threads = threading.Event()
         self._t0 = time.monotonic()
         self._harness_src: dict[str, str] = {}
+        self._last_fn_sample = 0.0
 
     # -- time and bookkeeping ----------------------------------------------------------
 
@@ -315,26 +316,34 @@ class DirectedRun:
 
     def _sampler(self) -> None:
         """Coverage over time, for comparing runs: libFuzzer's own counters often,
-        llvm-cov function coverage occasionally (it costs a full corpus replay)."""
-        log = self.ws.path("fuzz/global/fuzzer.log")
-        corpus = self.ws.path("fuzz/global/corpus")
-        last_fn = 0.0
+        llvm-cov function coverage occasionally (it costs a full corpus replay).
+
+        One bad sample must not end the timeline, so every round is guarded.
+        """
+        self._last_fn_sample = 0.0
         while not self._stop_threads.wait(SAMPLE_S):
-            rec: dict = {}
             try:
-                if log.is_file():
-                    tail = "\n".join(log.read_text(errors="replace").splitlines()[-200:])
-                    rec.update({k: v for k, v in parse_stats(tail, int(SAMPLE_S)).items()
-                                if k in ("edges", "features", "exec_s")})
-                rec["corpus"] = sum(1 for _ in corpus.iterdir()) if corpus.is_dir() else 0
-            except OSError:
-                pass
-            if time.monotonic() - last_fn > FN_SAMPLE_S:
-                rows, err = self._collect_coverage(timeout_s=400)
-                if not err:
-                    rec["functions_covered"] = sum(1 for r in rows if r.execution_count > 0)
-                last_fn = time.monotonic()
-            self.store.add_coverage(self.lg.name, round(time.monotonic() - self._t0, 1), **rec)
+                self._sample_once()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("%s: coverage sample failed: %s", self.lg.name, exc)
+
+    def _sample_once(self) -> None:
+        log, corpus = self.ws.path("fuzz/global/fuzzer.log"), self.ws.path("fuzz/global/corpus")
+        rec: dict = {}
+        try:
+            if log.is_file():
+                tail = "\n".join(log.read_text(errors="replace").splitlines()[-200:])
+                rec.update({k: v for k, v in parse_stats(tail, int(SAMPLE_S)).items()
+                            if k in ("edges", "features", "exec_s")})
+            rec["corpus"] = sum(1 for _ in corpus.iterdir()) if corpus.is_dir() else 0
+        except OSError:
+            pass
+        if time.monotonic() - self._last_fn_sample > FN_SAMPLE_S:
+            self._last_fn_sample = time.monotonic()
+            rows, err = self._collect_coverage(timeout_s=400)
+            if not err:
+                rec["functions_covered"] = sum(1 for r in rows if r.execution_count > 0)
+        self.store.add_coverage(self.lg.name, round(time.monotonic() - self._t0, 1), **rec)
 
     # -- phase A: seeds, then the map --------------------------------------------------------
 
@@ -375,11 +384,21 @@ class DirectedRun:
         return added
 
     def _coverage_refresh(self) -> None:
+        """Re-export coverage and queue what the fuzzers have newly reached.
+
+        This thread is phase 2 of the queue: if it dies, the run quietly stops
+        growing its own work, so every round is guarded.
+        """
         while not self._stop_threads.wait(self.cfg.coverage_interval_s):
             if self._left() < 200:
                 return
-            rows, err = self._collect_coverage()
+            try:
+                rows, err = self._collect_coverage()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("%s: coverage refresh failed: %s", self.lg.name, exc)
+                continue
             if err:
+                logger.info("%s: coverage refresh skipped: %s", self.lg.name, err)
                 continue
             self._fn_rows = rows
             coverage.write_index(rows, self.function_index)

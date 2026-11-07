@@ -473,3 +473,49 @@ def test_the_workspace_copy_wins_over_the_unresolvable_one(tmp_path):
         zf.writestr("a.bin", b"resolved")
     run._seed_corpus()
     assert [p.read_bytes() for p in run.ws.path("fuzz/global/corpus").iterdir()] == [b"resolved"]
+
+
+def test_one_bad_coverage_sample_does_not_end_the_timeline(tmp_path, monkeypatch):
+    run, _, store = make(tmp_path)
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("the container went away")
+        store.add_coverage("fuzz", float(calls["n"]), edges=10)
+
+    monkeypatch.setattr(run, "_sample_once", flaky)
+    monkeypatch.setattr("fbv3.directed.loop.SAMPLE_S", 0.01)
+    import threading
+
+    t = threading.Thread(target=run._sampler, daemon=True)
+    t.start()
+    for _ in range(200):
+        if calls["n"] >= 3:
+            break
+        __import__("time").sleep(0.01)
+    run._stop_threads.set()
+    t.join(timeout=5)
+    assert calls["n"] >= 3  # it kept sampling after the failure
+    assert store.coverage("fuzz")
+
+
+def test_a_failing_coverage_export_does_not_kill_the_refresh(tmp_path, monkeypatch):
+    """This thread is phase 2 of the queue: if it dies the run stops growing work."""
+    run, _, store = make(tmp_path, coverage_interval_s=0)
+    rounds = {"n": 0}
+
+    def flaky(timeout_s=600):
+        rounds["n"] += 1
+        if rounds["n"] == 1:
+            raise RuntimeError("llvm-cov is missing")
+        if rounds["n"] == 2:
+            return [], "no coverage build"
+        run._stop_threads.set()
+        return [FunctionRow("deflate", "/src/a.c", 1, 9, 5)], ""
+
+    monkeypatch.setattr(run, "_collect_coverage", flaky)
+    run._coverage_refresh()
+    assert rounds["n"] == 3  # it survived the raise and the error
+    assert "deflate" in run._queued_fns
