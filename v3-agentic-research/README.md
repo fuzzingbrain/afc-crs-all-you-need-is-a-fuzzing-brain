@@ -245,7 +245,7 @@ zlib's one-shot buffer API.
 ## Tests
 
 ```sh
-python -m pytest            # 251 tests, no docker, no network, no agent
+python -m pytest            # 254 tests, no docker, no network, no agent
 python -m pytest -m docker  # 6 more that really build and run containers (~30s)
 ```
 
