@@ -77,6 +77,22 @@ class WorkspaceSetup:
         if r.returncode != 0:
             raise RuntimeError(f"git {' '.join(args)}: {r.stderr.strip()}")
 
+    @staticmethod
+    def resolve_ref(repo: Path, ref: str) -> str:
+        """A commit id for ref: itself, or the remote branch of that name.
+
+        A fresh clone has only the default branch locally, and
+        `checkout --detach <remote branch>` refuses the name.
+        """
+        for cand in (ref, f"origin/{ref}"):
+            r = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", f"{cand}^{{commit}}"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+        raise RuntimeError(f"{ref!r} is not a commit, branch or tag of the source")
+
     def clone_repository(self) -> Tuple[bool, str]:
         """Put the source in repo/: clone repo_url, or copy repo_path, then check out.
 
@@ -115,11 +131,12 @@ class WorkspaceSetup:
                     return False, f"git clone failed: {r.stderr.strip()}"
 
             if checkout:
-                self._git(repo_path, "checkout", "--detach", checkout)
-                logger.info(f"Checked out {checkout}")
+                sha = self.resolve_ref(repo_path, checkout)
+                self._git(repo_path, "checkout", "--detach", sha)
+                logger.info(f"Checked out {checkout} ({sha[:12]})")
             if self.config.scan_mode == "delta":
                 # Fail here, not at diff time, when the base is not in history.
-                self._git(repo_path, "cat-file", "-e", f"{self.config.base_commit}^{{commit}}")
+                self.resolve_ref(repo_path, self.config.base_commit)
             return True, "Ready"
         except subprocess.TimeoutExpired:
             return False, "timed out fetching the source"
@@ -327,6 +344,11 @@ class RunProcessor:
         # The checked-out revision, before remove_git takes the history away:
         # preflight compares it with the commit the task named.
         self.head_commit = self._git_head(workspace / "repo")
+        want = self.config.delta_commit if self.config.scan_mode == "delta" else self.config.target_commit
+        self.want_commit = (
+            WorkspaceSetup.resolve_ref(workspace / "repo", want)
+            if want and (workspace / "repo" / ".git").exists() else None
+        )
         report = sanitize_workspace(
             workspace,
             remove_git=self.config.remove_git,
@@ -356,9 +378,11 @@ class RunProcessor:
         if diff_file.exists():
             return
         diff_file.parent.mkdir(parents=True, exist_ok=True)
+        # HEAD is delta_commit, checked out above; the base may be a remote branch.
         delta = self.config.delta_commit or "HEAD"
+        base = WorkspaceSetup.resolve_ref(workspace / "repo", self.config.base_commit)
         r = subprocess.run(
-            ["git", "diff", f"{self.config.base_commit}..{delta}", "--", ".",
+            ["git", "diff", f"{base}..HEAD", "--", ".",
              ":!.aixcc", ":!*/.aixcc"],
             cwd=str(workspace / "repo"), capture_output=True, text=True, timeout=300,
         )
@@ -386,7 +410,7 @@ class RunProcessor:
             log_dir=str(log_dir) if log_dir else None,
             graph_path=self.config.graph,
             fuzzer_sources=self.config.fuzzer_sources,
-            build_coverage=self.config.build_coverage,
+            build_coverage=self.config.wants_coverage,
             prebuilt_fuzzers=self.config.prebuilt_binaries,
         )
         logger.info(f"Analyzer: sanitizers={self.config.sanitizers} (this may take a while)")
@@ -449,6 +473,7 @@ class RunProcessor:
         report = run_preflight(
             self.config, units, analyze_result,
             head_commit=getattr(self, "head_commit", None),
+            want_commit=getattr(self, "want_commit", None),
             out_dir=Path(self.paths.workspace_path),
         )
         if not report["ok"]:

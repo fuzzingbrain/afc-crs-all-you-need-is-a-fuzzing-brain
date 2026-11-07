@@ -607,6 +607,11 @@ class Config:
     def is_prebuilt(self) -> bool:
         return bool(self.prebuilt_binaries)
 
+    @property
+    def wants_coverage(self) -> bool:
+        """A coverage build is made only when FuzzingBrain builds the fuzzers."""
+        return self.build_coverage and not self.is_prebuilt
+
     def resolve_output(self) -> str:
         """The run's directory: absolute as given, otherwise under workspace/."""
         if self.output:

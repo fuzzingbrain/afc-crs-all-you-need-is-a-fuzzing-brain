@@ -56,15 +56,18 @@ class Report:
 # ------------------------------------------------------------------ source
 
 
-def check_source(r: Report, config: Config, workspace: Path, head_commit: Optional[str]) -> None:
+def check_source(r: Report, config: Config, workspace: Path, head_commit: Optional[str],
+                 want_commit: Optional[str] = None) -> None:
     repo = workspace / "repo"
     r.add("source", "repo present", repo.is_dir() and any(repo.iterdir()), str(repo))
     want = config.delta_commit if config.scan_mode == "delta" else config.target_commit
     if want:
         ok = bool(head_commit) and (
-            head_commit == want or head_commit.startswith(want) or _resolves_to(repo, want, head_commit)
+            head_commit == want or head_commit.startswith(want) or head_commit == want_commit
+            or _resolves_to(repo, want, head_commit)
         )
-        r.add("source", "revision", ok, f"HEAD {head_commit or '?'} vs {want}")
+        r.add("source", "revision", ok,
+              f"HEAD {head_commit or '?'} vs {want}" + (f" ({want_commit[:12]})" if want_commit else ""))
     if config.scan_mode == "delta":
         diff = workspace / "diff" / "ref.diff"
         r.add("source", "diff non-empty", diff.is_file() and diff.stat().st_size > 0, str(diff))
@@ -79,11 +82,14 @@ def _resolves_to(repo: Path, ref: str, head: str) -> bool:
     # only when .git is still there.
     if not (repo / ".git").exists():
         return False
-    p = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", f"{ref}^{{commit}}"],
-        capture_output=True, text=True, timeout=30,
-    )
-    return p.returncode == 0 and p.stdout.strip() == head
+    for cand in (ref, f"origin/{ref}"):
+        p = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", f"{cand}^{{commit}}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if p.returncode == 0 and p.stdout.strip() == head:
+            return True
+    return False
 
 
 # ----------------------------------------------------------------- fuzzers
@@ -160,7 +166,7 @@ def check_analysis(r: Report, config: Config, units, analyze_result) -> None:
         for u in units:
             r.add("analysis", f"graph has harness {u.name}", u.name in reach,
                   f"{reach.get(u.name, ['-', '-'])[0]} reachable" if u.name in reach else "missing")
-    if config.build_coverage:
+    if config.wants_coverage:
         cov = getattr(analyze_result, "coverage_fuzzer_path", None)
         r.add("analysis", "coverage build", bool(cov) and Path(cov).exists(), str(cov))
 
@@ -226,11 +232,12 @@ def check_models(r: Report, config: Config) -> None:
 # --------------------------------------------------------------------- run
 
 
-def run_preflight(config: Config, units, analyze_result, head_commit: Optional[str], out_dir: Path) -> Dict[str, Any]:
+def run_preflight(config: Config, units, analyze_result, head_commit: Optional[str], out_dir: Path,
+                  want_commit: Optional[str] = None) -> Dict[str, Any]:
     r = Report()
     workspace = Path(config.workspace)
     for step in (
-        lambda: check_source(r, config, workspace, head_commit),
+        lambda: check_source(r, config, workspace, head_commit, want_commit),
         lambda: check_fuzzers(r, config, units, str(config.run_id)),
         lambda: check_analysis(r, config, units, analyze_result),
         lambda: check_models(r, config),
