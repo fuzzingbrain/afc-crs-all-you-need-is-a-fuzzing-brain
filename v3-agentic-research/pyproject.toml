@@ -1,0 +1,27 @@
+[project]
+name = "fbv3"
+version = "0.1.0"
+description = "FuzzingBrain v3: agentic harness generation (AGF) + directed seed generation, on Claude Code / Codex subscriptions"
+requires-python = ">=3.11"
+dependencies = ["fastmcp>=4.1,<5"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+fbv3 = "fbv3.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "docker: needs a local Docker daemon and the project images",
+  "agent: launches a real claude/codex session (spends subscription quota)",
+]
+addopts = "-m 'not docker and not agent'"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["fbv3*"]

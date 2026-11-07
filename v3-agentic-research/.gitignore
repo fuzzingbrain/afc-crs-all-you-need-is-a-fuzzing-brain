@@ -1,0 +1,8 @@
+# The repository's .gitignore ignores **/test_* except at its root; this
+# folder keeps its own tests.
+!tests/test_*
+!tests/**/test_*
+
+.venv/
+runs/
+*.egg-info/
