@@ -15,6 +15,8 @@ import base64
 import zipfile
 from datetime import datetime
 
+import pytest
+
 from fuzzingbrain.core.poc_packager import POCPackager
 
 
@@ -207,3 +209,51 @@ def test_create_zip_contains_top_level_files_by_name(tmp_path):
     with zipfile.ZipFile(zpath) as zf:
         names = set(zf.namelist())
     assert names == {"report.md", "poc.bin"}  # flat, no 'sub/ignored.txt'
+
+
+def test_package_is_on_disk_before_the_report_agent_runs(tmp_path, monkeypatch):
+    # Reaching the PoC target cancels every agent, the report agent included;
+    # the crash's input and package must already be written by then.
+    import asyncio
+    import base64
+    import zipfile
+    from types import SimpleNamespace
+
+    import fuzzingbrain.agents.poc_report_agent as report_mod
+    import fuzzingbrain.llms.routing as routing
+
+    packaged = {}
+
+    class Store:
+        def set_crash_package(self, crash_id, path):
+            packaged["path"] = path
+
+        def set_crash_report(self, crash_id, report):
+            packaged["report"] = report
+
+    crash = SimpleNamespace(id="1d1efb87-0000-0000-0000-000000000000", run_id="r")
+    attempt = SimpleNamespace(worker_id=None)
+    poc = {"poc_id": crash.id, "crash_id": crash.id,
+           "blob": base64.b64encode(b"CRASH").decode(), "blob_path": "poc.bin"}
+    p = _packager(tmp_path)
+    monkeypatch.setattr(p, "_records", lambda cid: (Store(), crash, attempt, poc, None, []))
+    monkeypatch.setattr(routing, "model_for", lambda role: "m")
+
+    class CancelledReport:
+        def __init__(self, **kw):
+            pass
+
+        async def generate_report_async(self, poc, vh):
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(report_mod, "POCReportAgent", CancelledReport)
+
+    with pytest.raises(asyncio.CancelledError):
+        _run(p.package_crash_async(crash.id))
+
+    zip_path = tmp_path / "pocs" / "crash_1d1efb87.zip"
+    assert packaged["path"] == str(zip_path)
+    assert "report" not in packaged
+    with zipfile.ZipFile(zip_path) as zf:
+        assert zf.read("poc.bin") == b"CRASH"
+        assert "poc_details.json" in zf.namelist()

@@ -82,8 +82,31 @@ class POCPackager:
         return store, crash, attempt, poc, (vh_dict(vh) if vh else None), conversation
 
     async def package_crash_async(self, crash_id) -> Optional[str]:
+        """Write the package, then add the LLM report to it.
+
+        The input, its details and the conversation are on disk (and the
+        crash points at the zip) before the report agent starts: reaching the
+        run's PoC target stops every agent at once, the report agent included,
+        and the crash must survive that.
+        """
         store, crash, attempt, poc, vh, conversation = self._records(crash_id)
         short = str(crash.id)[:8]
+
+        folder = self.pocs_dir / f"crash_{short}"
+        folder.mkdir(parents=True, exist_ok=True)
+        zip_path = self.pocs_dir / f"crash_{short}.zip"
+        await asyncio.gather(
+            self._write_report(folder, "# Report not generated yet\n"),
+            self._write_poc_details(folder, poc),
+            self._write_vh_details(folder, vh),
+            self._write_gen_blob(folder, poc),
+            self._write_poc_binary(folder, poc),
+            self._write_conversation(folder, conversation),
+        )
+        self._create_zip(folder, zip_path)
+        store.set_crash_package(crash.id, str(zip_path))
+        logger.info(f"[POCPackager] crash {short} packaged: {zip_path}")
+
         if self.analyzer_socket_path:
             from ..tools.analyzer import set_analyzer_context
 
@@ -100,22 +123,10 @@ class POCPackager:
         )
         result = await agent.generate_report_async(poc, vh)
         report = result.report_content or f"# Report not generated\n\n{result.error or ''}\n"
-
-        folder = self.pocs_dir / f"crash_{short}"
-        folder.mkdir(parents=True, exist_ok=True)
-        await asyncio.gather(
-            self._write_report(folder, report),
-            self._write_poc_details(folder, poc),
-            self._write_vh_details(folder, vh),
-            self._write_gen_blob(folder, poc),
-            self._write_poc_binary(folder, poc),
-            self._write_conversation(folder, conversation),
-        )
-        zip_path = self.pocs_dir / f"crash_{short}.zip"
+        await self._write_report(folder, report)
         self._create_zip(folder, zip_path)
         store.set_crash_report(crash.id, report)
-        store.set_crash_package(crash.id, str(zip_path))
-        logger.info(f"[POCPackager] crash {short} packaged: {zip_path}")
+        logger.info(f"[POCPackager] crash {short} report added")
         return str(zip_path)
 
     def package_crash(self, crash_id) -> Optional[str]:
