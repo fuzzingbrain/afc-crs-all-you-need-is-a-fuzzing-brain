@@ -435,3 +435,41 @@ def test_harvesting_is_quiet_when_a_session_crashed_on_nothing(tmp_path):
     pool.files["verifier"] = verdict(0.9)
     run._verify(vh)
     assert run._monitor.handled == []
+
+
+def test_the_projects_seed_corpus_fills_the_corpus(tmp_path):
+    import zipfile
+
+    run, _, store = make(tmp_path)
+    run.ws.path("out/address").mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(run.ws.path("out/address") / "fuzz_seed_corpus.zip", "w") as zf:
+        zf.writestr("a.bin", b"first")
+        zf.writestr("sub/", b"")
+        zf.writestr("b.bin", b"second")
+    run._seed_corpus()
+    files = sorted(p.read_bytes() for p in run.ws.path("fuzz/global/corpus").iterdir())
+    assert files == [b"first", b"second"]  # the directory entry is not an input
+
+
+def test_a_seed_corpus_symlinked_into_the_container_is_reported(tmp_path, caplog):
+    """In a build's /out the sidecar is often a symlink to an absolute /out/... path."""
+    run, _, store = make(tmp_path)
+    run.lg.asan_out.mkdir(parents=True, exist_ok=True)
+    (run.lg.asan_out / "fuzz_seed_corpus.zip").symlink_to("/out/seed_corpus.zip")
+    with caplog.at_level("WARNING"):
+        run._seed_corpus()
+    assert list(run.ws.path("fuzz/global/corpus").iterdir()) == []
+    assert "only resolves in the container" in caplog.text
+
+
+def test_the_workspace_copy_wins_over_the_unresolvable_one(tmp_path):
+    import zipfile
+
+    run, _, store = make(tmp_path)
+    run.lg.asan_out.mkdir(parents=True, exist_ok=True)
+    (run.lg.asan_out / "fuzz_seed_corpus.zip").symlink_to("/out/seed_corpus.zip")
+    run.ws.path("out/address").mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(run.ws.path("out/address") / "fuzz_seed_corpus.zip", "w") as zf:
+        zf.writestr("a.bin", b"resolved")
+    run._seed_corpus()
+    assert [p.read_bytes() for p in run.ws.path("fuzz/global/corpus").iterdir()] == [b"resolved"]

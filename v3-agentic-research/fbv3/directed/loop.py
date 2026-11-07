@@ -217,18 +217,35 @@ class DirectedRun:
                       cpus=self.task.limits.ws_cpus, pids=self.task.limits.ws_pids)
 
     def _seed_corpus(self) -> None:
-        """The corpus starts from the project's own seed corpus when it ships one."""
+        """The corpus starts from the project's own seed corpus when it ships one.
+
+        The workspace copy is the one to read: in a build's /out the sidecar is
+        often a symlink to an absolute /out/... path, which resolves only
+        inside the container, and copy_runtime_bundle has already followed it.
+        """
         corpus = self.ws.path("fuzz/global/corpus")
         corpus.mkdir(parents=True, exist_ok=True)
-        zip_path = self.lg.seed_corpus_zip or (self.lg.asan_out / f"{self.lg.binary}_seed_corpus.zip")
-        if not zip_path.is_file():
+        name = f"{self.lg.binary}_seed_corpus.zip"
+        candidates = [p for p in (self.lg.seed_corpus_zip, self.ws.path("out/address") / name,
+                                  self.lg.asan_out / name) if p is not None]
+        zip_path = next((p for p in candidates if p.is_file()), None)
+        if zip_path is None:
+            unresolved = [p for p in candidates if p.is_symlink()]
+            if unresolved:
+                logger.warning("%s: the seed corpus %s could not be read (a symlink to %s, which only "
+                               "resolves in the container)", self.lg.name, unresolved[0],
+                               unresolved[0].readlink())
             return
         try:
+            added = 0
             with zipfile.ZipFile(zip_path) as zf:
                 for i, info in enumerate(zf.infolist()):
-                    if info.is_dir() or i >= 2000:
+                    if info.is_dir() or added >= 2000:
                         continue
                     (corpus / f"projseed-{i:05d}").write_bytes(zf.read(info))
+                    added += 1
+            logger.info("%s: %d input(s) from the project's seed corpus", self.lg.name, added)
+            self.store.emit("seed_corpus", lg=self.lg.name, inputs=added, source=str(zip_path))
         except (zipfile.BadZipFile, OSError) as exc:
             logger.warning("%s: seed corpus %s unreadable: %s", self.lg.name, zip_path, exc)
 
