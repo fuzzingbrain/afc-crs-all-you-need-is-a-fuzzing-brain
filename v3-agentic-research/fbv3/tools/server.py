@@ -151,7 +151,8 @@ def _target_bin() -> str:
     raise RuntimeError("there is no built fuzz target yet: call build_harness first")
 
 
-def _run_input(cinput: str, binary: str | None = None, timeout: int = 40) -> dict:
+def _run_input(cinput: str, binary: str | None = None, timeout: int = 0) -> dict:
+    timeout = timeout or int(CTX.get("run_timeout_s", 60))
     res = _dexec([binary or _target_bin(), "-runs=1", f"-timeout={max(5, timeout - 10)}", cinput],
                  timeout=timeout, env=_env_run())
     output = res["stderr"] + res["stdout"]
@@ -217,16 +218,25 @@ def reach_probe(target: str, input_path: str = "", generator_code: str = "") -> 
     if err:
         return {"ok": False, "error": err}
     binary = _target_bin()
+    # A large C++ target with full debug info takes a while just to load in gdb.
+    probe_timeout = int(CTX.get("probe_timeout_s", 240))
     gdb = _dexec(["gdb", "-q", "-batch", "-nx", "-ex", "set pagination off", "-ex", "set breakpoint pending on",
                   "-ex", f"break {target}", "-ex", "run", "-ex", "bt 25", "-ex", "info args",
-                  "--args", binary, "-runs=1", path], timeout=120, env={"ASAN_OPTIONS": GDB_ASAN})
+                  "--args", binary, "-runs=1", path], timeout=probe_timeout, env={"ASAN_OPTIONS": GDB_ASAN})
     text = gdb["stdout"] + gdb["stderr"]
     reached = "Breakpoint 1, " in text
+    out = {"ok": True, "input": path, "target": target, "reached": reached,
+           "breakpoint_set": "No symbol" not in text and "not defined" not in text,
+           "hit": text[text.index("Breakpoint 1, "):][:5000] if reached else "",
+           "gdb_tail": "" if reached else _tail(text, 2500)}
+    if gdb["timed_out"] and not reached:
+        # Do not let a slow probe read as "the input does not get there".
+        out["timed_out"] = True
+        out["note"] = (f"gdb did not finish within {probe_timeout}s, so this says nothing about whether the "
+                       "input reaches the target; try a smaller input or a breakpoint closer to the entry")
     run = _run_input(path)
-    return {"ok": True, "input": path, "target": target, "reached": reached,
-            "breakpoint_set": "No symbol" not in text and "not defined" not in text,
-            "hit": text[text.index("Breakpoint 1, "):][:5000] if reached else "",
-            "gdb_tail": "" if reached else _tail(text, 2500), **{f"run_{k}": v for k, v in run.items()}}
+    out.update({f"run_{k}": v for k, v in run.items()})
+    return out
 
 
 # -- seeds -------------------------------------------------------------------------------

@@ -286,3 +286,25 @@ def test_only_the_roles_tools_are_registered():
         for name in tools:
             fake.tool(server.TOOLS[name])
         assert registered == list(tools), role
+
+
+def test_a_probe_that_times_out_does_not_claim_the_target_is_unreached(ctx, monkeypatch):
+    """A slow gdb on a big C++ binary must not read as "the input does not get there"."""
+    def slow(argv, *, timeout, env=None, workdir=""):
+        if argv and argv[0] == "gdb":
+            return {"exit_code": 124, "timed_out": True, "stdout": "Reading symbols...",
+                    "stderr": "[timeout]", "duration_s": float(timeout)}
+        return {"exit_code": 0, "timed_out": False, "stdout": "", "stderr": "", "duration_s": 0.1}
+
+    monkeypatch.setattr(server, "_dexec", slow)
+    (ctx["session"] / "work" / "in.bin").write_bytes(b"x")
+    res = server.reach_probe("Assimp::FBX::Converter", input_path="/ws/sessions/finder-abc/work/in.bin")
+    assert res["reached"] is False and res["timed_out"] is True
+    assert "says nothing about whether" in res["note"]
+
+
+def test_the_probe_and_run_timeouts_come_from_the_session(ctx):
+    server.CTX.update({"probe_timeout_s": 300, "run_timeout_s": 90})
+    (ctx["session"] / "work" / "in.bin").write_bytes(b"x")
+    server.reach_probe("f", input_path="/ws/sessions/finder-abc/work/in.bin")
+    assert any(a[0] == "gdb" for a in ctx["state"]["commands"])
