@@ -182,27 +182,49 @@ _LIST_ENDPOINTS = {
 }
 
 
-def _served_ids(provider: str) -> Optional[set]:
-    import httpx
-
-    url, env = _LIST_ENDPOINTS[provider]
+def _auth_headers(provider: str) -> Dict[str, str]:
+    env = _LIST_ENDPOINTS[provider][1]
     key = os.environ.get(env, "")
     if not key:
         raise RuntimeError(f"{env} is not set")
-    headers = {}
     if provider == "anthropic":
-        headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
-    elif provider == "google":
-        headers = {"x-goog-api-key": key}
-    else:
-        headers = {"Authorization": f"Bearer {key}"}
-    resp = httpx.get(url, headers=headers, timeout=30)
+        return {"x-api-key": key, "anthropic-version": "2023-06-01"}
+    if provider == "google":
+        return {"x-goog-api-key": key}
+    return {"Authorization": f"Bearer {key}"}
+
+
+def _served_ids(provider: str) -> Optional[set]:
+    import httpx
+
+    url = _LIST_ENDPOINTS[provider][0]
+    resp = httpx.get(url, headers=_auth_headers(provider), timeout=30)
     if resp.status_code != 200:
         raise RuntimeError(f"HTTP {resp.status_code} from {provider} model list")
     data = resp.json()
     if provider == "google":
         return {m["name"].split("/", 1)[-1] for m in data.get("models", [])}
     return {m["id"] for m in data.get("data", [])}
+
+
+def _alias_target(provider: str, model_id: str) -> Optional[str]:
+    """The dated id an alias (``claude-sonnet-4-5``) resolves to, or None.
+
+    Anthropic lists older models only by their dated id but serves the bare
+    alias too; asking for the alias by name is the only way to tell.
+    """
+    if provider != "anthropic":
+        return None
+    import httpx
+
+    url = _LIST_ENDPOINTS[provider][0].split("?", 1)[0] + "/" + model_id
+    try:
+        resp = httpx.get(url, headers=_auth_headers(provider), timeout=30)
+    except Exception:
+        return None
+    if resp.status_code != 200:
+        return None
+    return resp.json().get("id")
 
 
 def check_models(r: Report, config: Config) -> None:
@@ -226,7 +248,15 @@ def check_models(r: Report, config: Config) -> None:
         if isinstance(ids, Exception):
             r.add("models", f"{roles} -> {mid}", False, str(ids))
         else:
-            r.add("models", f"{roles} -> {mid}", mid in ids, f"{provider} serves {len(ids)} models")
+            if mid in ids:
+                r.add("models", f"{roles} -> {mid}", True, f"{provider} serves it")
+                continue
+            target = _alias_target(provider, mid)
+            if target:
+                r.add("models", f"{roles} -> {mid}", True, f"{provider} serves it as {target}")
+            else:
+                r.add("models", f"{roles} -> {mid}", False,
+                      f"not among the {len(ids)} models {provider} serves")
 
 
 # --------------------------------------------------------------------- run
