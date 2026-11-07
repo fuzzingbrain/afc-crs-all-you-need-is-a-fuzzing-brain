@@ -33,6 +33,26 @@ from fbv3.config import ConfigError, Task
 
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)-28s %(message)s"
 
+EXAMPLES = """\
+examples:
+  # let an agent pick the targets, write harnesses for them, then hunt bugs
+  fbv3 %(cmd)s --project libpng --image gcr.io/oss-fuzz/libpng
+
+  # one target you name, with the existing fuzzer source it replaces
+  fbv3 %(cmd)s --project zlib --image gcr.io/oss-fuzz/zlib \\
+      --function compress2 --describe "the compression entry point" \\
+      --overlay /src/compress_fuzzer.c --duration 1800
+
+  # a fuzz target that already exists: the directed stage alone
+  fbv3 %(cmd)s --project binutils --image gcr.io/oss-fuzz/binutils \\
+      --prebuilt out/ --binary fuzz_disassemble --harness fuzz_disassemble.c
+
+the knobs: --duration (directed seconds per target), --rounds (harness rounds),
+--sessions (agent sessions at once, default 1), --stage, --mode, --backend,
+--no-research / --no-review / --no-breaker, and --set a.b=value for any other
+task field. --dry-run prints the task the flags resolved to and starts nothing.
+"""
+
 
 def _add_task_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("task", nargs="?", help="a task JSON file (otherwise describe the task with the flags)")
@@ -252,12 +272,18 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="run a task (preflight, then the stages)",
-                         description="Run a task. Preflight runs first; nothing starts unless it passes.")
+                         description="Run a task. Preflight runs first; nothing starts unless it passes.",
+                         epilog=EXAMPLES % {"cmd": "run"},
+                         formatter_class=argparse.RawDescriptionHelpFormatter)
     _add_task_args(run)
     run.add_argument("--dry-run", action="store_true", help="print the resolved task and stop")
     run.set_defaults(func=cmd_run)
 
-    check = sub.add_parser("check", help="preflight only: logins, images, prebuilt paths")
+    check = sub.add_parser("check", help="preflight only: logins, images, prebuilt paths",
+                           description="Check a task without starting it: docker, the images, both "
+                                       "subscriptions, the prebuilt paths.",
+                           epilog=EXAMPLES % {"cmd": "check"},
+                           formatter_class=argparse.RawDescriptionHelpFormatter)
     _add_task_args(check)
     check.add_argument("--fast", action="store_true", help="do not build the workspace image")
     check.set_defaults(func=cmd_check)
