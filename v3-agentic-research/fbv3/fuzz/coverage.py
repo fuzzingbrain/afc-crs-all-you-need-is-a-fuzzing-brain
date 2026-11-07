@@ -58,6 +58,17 @@ llvm-cov export -instr-profile={prof_dir}/merged.profdata -skip-expansions -Xdem
 """
 
 
+def _plain_name(name: str, file: str) -> str:
+    """``trees.c:pqdownheap`` -> ``pqdownheap``.
+
+    llvm-cov qualifies a function with internal linkage by its file, because
+    two translation units may each define one. The agents read the source and
+    the mapper submits what they see there, so the index keeps the bare name.
+    """
+    prefix = file.rsplit("/", 1)[-1] + ":"
+    return name[len(prefix):] if name.startswith(prefix) else name
+
+
 def parse_export(data: dict) -> list[FunctionRow]:
     rows: list[FunctionRow] = []
     for export in data.get("data", []):
@@ -68,7 +79,8 @@ def parse_export(data: dict) -> list[FunctionRow]:
             regions = fn.get("regions") or []
             start = min((r[0] for r in regions), default=0)
             end = max((r[2] for r in regions), default=start)
-            rows.append(FunctionRow(fn.get("name", ""), filenames[0], int(start), int(end), int(fn.get("count", 0))))
+            rows.append(FunctionRow(_plain_name(fn.get("name", ""), filenames[0]), filenames[0],
+                                    int(start), int(end), int(fn.get("count", 0))))
     merged: dict[tuple, FunctionRow] = {}
     for row in rows:  # one row per instantiation: keep the max count, widest span
         cur = merged.get((row.name, row.file))

@@ -14,7 +14,7 @@ EXPORT = {
         "functions": [
             {"name": "deflate", "count": 17, "filenames": ["/src/zlib/deflate.c"],
              "regions": [[100, 1, 180, 2, 17, 0, 0, 0]]},
-            {"name": "never_run", "count": 0, "filenames": ["/src/zlib/infback.c"],
+            {"name": "infback.c:never_run", "count": 0, "filenames": ["/src/zlib/infback.c"],
              "regions": [[10, 1, 40, 2, 0, 0, 0, 0]]},
             {"name": "libfuzzer_internal", "count": 5, "filenames": ["/src/libfuzzer/FuzzerLoop.cpp"],
              "regions": [[1, 1, 5, 2, 5, 0, 0, 0]]},
@@ -27,6 +27,14 @@ EXPORT = {
         ]
     }]
 }
+
+
+def test_a_static_functions_name_is_the_one_in_the_source():
+    """llvm-cov qualifies internal linkage by file: trees.c:pqdownheap."""
+    rows = {r.name: r for r in coverage.parse_export(EXPORT)}
+    assert "never_run" in rows and "infback.c:never_run" not in rows
+    assert coverage._plain_name("deflate", "/src/zlib/deflate.c") == "deflate"
+    assert coverage._plain_name("other.c:f", "/src/zlib/deflate.c") == "other.c:f"
 
 
 def test_parse_export_keeps_project_functions_only():
