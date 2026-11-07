@@ -217,6 +217,12 @@ reproduced outside the agent afterwards:
 | --- | --- | --- |
 | heap-buffer-overflow | `FBXConverter.cpp:1345` in `ConvertMeshMultiMaterial` | 849 bytes |
 | heap-buffer-overflow | `FBXConverter.cpp:1611` in `ConvertWeights` | 1307 bytes |
+| SEGV (NULL deref) | `FBXMeshGeometry.cpp:171` in the `MeshGeometry` constructor | 372 bytes |
+
+The third came from a second run, through the path that keeps a crash a
+session stumbled on: the verifier made the target report while checking its
+hypothesis, and the orchestrator reproduced that input itself rather than
+letting it vanish with the session's scratch directory.
 
 That first run also reported ten "distinct crashes" when only one was real:
 nine were libFuzzer timeouts, and an allocator exhausted under the run's own
@@ -226,7 +232,7 @@ not a bug.
 ## Tests
 
 ```sh
-python -m pytest            # 249 tests, no docker, no network, no agent
+python -m pytest            # 251 tests, no docker, no network, no agent
 python -m pytest -m docker  # 6 more that really build and run containers (~30s)
 ```
 
