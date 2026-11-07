@@ -196,7 +196,8 @@ def parse_args(argv=None) -> argparse.Namespace:
         description=(
             "Run FuzzingBrain on one task. Describe the task in a JSON file "
             "(--config), on the command line, or both: a flag overrides the "
-            "same field in the file. Field reference: docs/task_full.jsonc."
+            "same field in the file. Fields: fuzzingbrain/core/config.py (FIELDS); "
+            "examples: examples/aixcc/cu-delta-05.json, examples/aixcc/mg-full-01.json."
         ),
     )
     parser.add_argument("--config", type=str, help="Task file (JSON)")

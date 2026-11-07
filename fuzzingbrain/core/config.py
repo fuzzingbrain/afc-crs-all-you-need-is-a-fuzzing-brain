@@ -6,8 +6,10 @@ A run is described by one JSON task file; any field in it can also be given, or
 overridden, on the command line. Everything about the run lives there. The
 environment (.env) holds only API keys and where PostgreSQL and Redis are.
 
-The JSON layout, every field and its rules are in FIELDS below; docs/task_full.jsonc
-is the annotated copy.
+The JSON layout, every field and its rules are in FIELDS below. Complete
+examples: examples/aixcc/cu-delta-05.json (delta scan) and
+examples/aixcc/mg-full-01.json (full scan); artifact/tasks/aixcc/ has one per
+benchmark harness.
 """
 
 import argparse
