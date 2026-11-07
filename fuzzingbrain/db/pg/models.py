@@ -655,6 +655,8 @@ class LLMCall(Base):
             "NOT success OR (input_tokens IS NOT NULL AND output_tokens IS NOT NULL)",
             name="tokens_on_success",
         ),
+        # A cost is always computed from prices, and they are kept with it.
+        CheckConstraint("(cost IS NULL) = (prices IS NULL)", name="cost_with_prices"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -677,6 +679,9 @@ class LLMCall(Base):
     cache_creation_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     reasoning_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 6))
+    # The unit prices the cost was computed from ($ per 1M tokens, and the
+    # price table's key): a later price change does not rewrite history.
+    prices: Mapped[Optional[dict]] = mapped_column(JSONB)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     success: Mapped[bool] = mapped_column(Boolean, nullable=False)
     error_msg: Mapped[Optional[str]] = mapped_column(Text)

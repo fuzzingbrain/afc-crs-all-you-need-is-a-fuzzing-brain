@@ -132,14 +132,13 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
     # Install this run's model router (single source of truth for role -> model),
     # now that worker logging is configured so its resolved map lands in worker.log.
-    # task fields win over env; from_sources validates and set_active_router logs.
     from ..llms.routing import ModelRouter, set_active_router
 
-    _router = ModelRouter.from_sources(
-        task={
+    _router = ModelRouter.from_task(
+        {
             "models": assignment.get("models"),
             "force_model": assignment.get("force_model"),
-            "strict_models": assignment.get("strict_models"),
+            "allow_fallback": assignment["allow_fallback"],
         }
     )
     set_active_router(_router)

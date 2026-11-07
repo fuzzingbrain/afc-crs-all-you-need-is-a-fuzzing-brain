@@ -120,7 +120,7 @@ def test_messages_are_stored_once(store, run):
     [cid] = store.insert_llm_calls([{
         "run_id": uuid.UUID(rid), "worker_id": wid, "role": "finder",
         "model": "m", "params": {}, "provider": "p", "input_tokens": 1,
-        "output_tokens": 1, "cost": 0.5, "latency_ms": 3, "success": True,
+        "output_tokens": 1, "cost": 0.5, "prices": {"input": 1.0, "output": 1.0}, "latency_ms": 3, "success": True,
         "input_message_ids": [ids1[sha]], "output_message_id": rid_map[rsha],
     }])
     assert store.conversation(cid) == [m, reply]

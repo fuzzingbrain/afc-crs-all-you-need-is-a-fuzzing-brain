@@ -155,7 +155,7 @@ class POCFullscanStrategy(POCBaseStrategy):
         planning_agent = LGPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
-            model=model_for(Role.VERIFIER),
+            model=model_for(Role.LG_PLANNER),
             run_id=self.run_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
@@ -196,7 +196,7 @@ class POCFullscanStrategy(POCBaseStrategy):
         planning_agent = LGPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
-            model=model_for(Role.VERIFIER),
+            model=model_for(Role.LG_PLANNER),
             run_id=self.run_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,

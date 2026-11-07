@@ -1,48 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-LLM Configuration
+LLM client settings.
 
-Configuration management for LLM clients. API keys come from .env only.
-
-Priority (highest to lowest):
-1. Code parameters (client.call(model=...))
-2. Environment variables (LLM_DEFAULT_MODEL, etc.)
-3. Default values
+Which model a role uses is the task's choice (llms/routing.py); keys come
+from .env; generation parameters are the constants below. Nothing here reads
+other environment variables.
 """
 
 import os
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import List, Optional
 
-from .models import (
-    ModelInfo,
-    Provider,
-    TaskType,
-    CLAUDE_OPUS_4_5,
-    DEFAULT_FALLBACK,
-    get_model_by_id,
-)
+from .models import Provider
 
 
 @dataclass
 class LLMConfig:
-    """LLM Client Configuration"""
+    """LLM client settings."""
 
-    # Model selection
-    default_model: ModelInfo = field(default_factory=lambda: CLAUDE_OPUS_4_5)
-
-    # Task-specific models
-    task_models: Dict[TaskType, ModelInfo] = field(default_factory=dict)
-
-    # Fallback settings
-    fallback_enabled: bool = True
-    fallback_models: List[ModelInfo] = field(
-        default_factory=lambda: DEFAULT_FALLBACK.copy()
-    )
+    # Rounds of retrying every allowed model (30s apart) before a call fails.
     max_fallback_attempts: int = 3
-    allow_expensive_fallback: bool = (
-        True  # Allow fallback to expensive models (opus, o1, o3, etc.)
-    )
 
     # Generation parameters
     # The values every run used while llm_config.yaml set them; kept so new
@@ -64,9 +41,6 @@ class LLMConfig:
     # Logging
     log_requests: bool = True
     log_responses: bool = False  # Can be verbose
-
-    # Source of config (for debugging)
-    config_source: str = "default"
 
     def get_api_key(self, provider: Provider) -> Optional[str]:
         """The provider's API key, from the environment (.env)."""
@@ -91,94 +65,9 @@ class LLMConfig:
         """Get list of providers with available API keys"""
         return [p for p in Provider if self.has_api_key(p)]
 
-    def get_model_for_task(self, task_type: TaskType) -> ModelInfo:
-        """Get model for a specific task type"""
-        if task_type in self.task_models:
-            return self.task_models[task_type]
-        return self.default_model
-
-    @classmethod
-    def from_env(cls) -> "LLMConfig":
-        """Create config from environment variables"""
-        config = cls()
-        config.config_source = "environment"
-
-        # Default model from env
-        default_model_id = os.environ.get("LLM_DEFAULT_MODEL")
-        if default_model_id:
-            model = get_model_by_id(default_model_id)
-            if model:
-                config.default_model = model
-
-        # Fallback enabled
-        fallback_env = os.environ.get("LLM_FALLBACK_ENABLED", "true")
-        config.fallback_enabled = fallback_env.lower() in ("true", "1", "yes")
-
-        # Temperature
-        temp_env = os.environ.get("LLM_TEMPERATURE")
-        if temp_env:
-            try:
-                config.temperature = float(temp_env)
-            except ValueError:
-                pass
-
-        # Max tokens
-        max_tokens_env = os.environ.get("LLM_MAX_TOKENS")
-        if max_tokens_env:
-            try:
-                config.max_tokens = int(max_tokens_env)
-            except ValueError:
-                pass
-
-        # Timeout
-        timeout_env = os.environ.get("LLM_TIMEOUT")
-        if timeout_env:
-            try:
-                config.timeout = float(timeout_env)
-            except ValueError:
-                pass
-
-        retries_env = os.environ.get("LLM_MAX_RETRIES")
-        if retries_env:
-            try:
-                config.max_retries = max(0, int(retries_env))
-            except ValueError:
-                pass
-
-        return config
-
     @classmethod
     def load(cls) -> "LLMConfig":
-        """
-        Load config with priority:
-        1. Environment variables (override)
-        2. Default values
-        """
-        config = cls()
-        config.config_source = "default"
-
-        # Override with environment variables
-        env_model = os.environ.get("LLM_DEFAULT_MODEL")
-        if env_model:
-            model = get_model_by_id(env_model)
-            if model:
-                config.default_model = model
-                config.config_source += " + env override"
-
-        fallback_env = os.environ.get("LLM_FALLBACK_ENABLED")
-        if fallback_env:
-            config.fallback_enabled = fallback_env.lower() in ("true", "1", "yes")
-
-        # Check FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK (shared with core config)
-        expensive_fallback_env = os.environ.get("FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK")
-        if expensive_fallback_env:
-            config.allow_expensive_fallback = expensive_fallback_env.lower() in (
-                "true",
-                "1",
-                "yes",
-            )
-
-        return config
+        return cls()
 
 
 # Global default config

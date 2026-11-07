@@ -7,7 +7,7 @@ charged at full price and the budget over-counts (stopping runs early and
 hiding the savings).
 """
 
-from fuzzingbrain.llms.client import _calculate_cost
+from fuzzingbrain.llms.models import call_cost, get_model_info
 
 # A model with known per-million prices keeps the math exact.
 ANTHROPIC = "claude-sonnet-4-6"
@@ -15,7 +15,7 @@ OPENAI = "gpt-4o"
 
 
 def _input_cost(model, total, read=0, create=0):
-    ci, _, _ = _calculate_cost(model, total, 0, read, create)
+    ci, _, _, _ = call_cost(get_model_info(model), total, 0, read, create)
     return ci
 
 
@@ -44,9 +44,16 @@ def test_anthropic_cache_creation_is_premium():
 
 
 def test_openai_cached_input_half_price():
+    # gpt-4o's table price for cached input is half the input price.
     full = _input_cost(OPENAI, 1000)
     cached = _input_cost(OPENAI, 1000, read=1000)
     assert abs(cached - full * 0.5) < 1e-12
+
+
+def test_prices_come_from_the_table():
+    info = get_model_info(ANTHROPIC)
+    _, _, _, prices = call_cost(info, 10, 10)
+    assert prices["input"] == info.price_input and prices["output"] == info.price_output
 
 
 def test_parts_clamped_to_total():

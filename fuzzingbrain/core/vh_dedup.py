@@ -16,40 +16,10 @@ VH_DEDUP_MAX_COMPARE = 20
 
 
 def _dedup_model() -> Optional[str]:
-    """The configured model for a fast yes/no judgement.
+    """The run's utility model: a fast yes/no judgement."""
+    from ..llms.routing import Role, model_for
 
-    Returns None when the config cannot be read, which leaves the client on its
-    own default rather than on a name picked here -- the point of the change is
-    that this module stops choosing.
-    """
-    # Prefer the run's active router, which honours model_profile /
-    # FB_MODEL_PROFILE (e.g. period-correct -> GPT-4.1 for the utility role).
-    # The old path used get_default_config().get_model_for_task(FAST_JUDGMENT),
-    # whose hardcoded table (models.py) is all-Claude and ignores the profile.
-    # On an OpenAI-only run that resolved to Claude, failed auth, exhausted the
-    # all-Claude fallback chain, and left every VH un-deduplicated (duplicate
-    # VHs per function).
-    try:
-        from ..llms.routing import active_router, Role
-
-        info = active_router().model_for(Role.UTILITY)
-        mid = getattr(info, "id", None)
-        if mid:
-            return mid
-    except Exception as e:
-        logger.debug(f"[VHDedup] router unavailable, trying config default: {e}")
-
-    try:
-        from ..llms.config import get_default_config
-        from ..llms.models import TaskType
-
-        info = get_default_config().get_model_for_task(TaskType.FAST_JUDGMENT)
-        # ModelInfo.id is the API model id; .name is the human-readable label
-        # and would not resolve as a model.
-        return getattr(info, "id", None)
-    except Exception as e:  # config missing, import cycle, unknown task type
-        logger.debug(f"[VHDedup] Falling back to client default model: {e}")
-        return None
+    return model_for(Role.UTILITY).id
 
 
 def check_vh_duplicate(

@@ -575,7 +575,7 @@ Your PoC must:
         model_name = (
             self.model.id
             if hasattr(self.model, "id")
-            else (self.model or self.llm_client.config.default_model.id)
+            else (self.model or self.llm_client._model_info(None).id)
         )
         self._log(f"Using model: {model_name}", level="INFO")
 

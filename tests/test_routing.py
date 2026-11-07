@@ -1,148 +1,108 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit tests for the central model router (fuzzingbrain/llms/routing.py).
+"""Model routing: the task names the models; nothing is defaulted."""
 
-Covers the resolution cascade (force > override > profile > base), boundary
-parsing (task wins over env), fail-fast validation, strict-mode parsing, and the
-resolved-map output. Run: venv/bin/python -m pytest tests/test_routing.py -q
-"""
 import pytest
 
-from fuzzingbrain.llms.routing import (
-    Role,
-    Profile,
-    PROFILES,
-    RoutingConfig,
-    ModelRouter,
-)
+from fuzzingbrain.llms.models import UnknownModelError
+from fuzzingbrain.llms.routing import ModelRouter, Role, RoutingConfig, TASK_ROLES
+
+PERIOD_CORRECT = {
+    "finder": "gpt-4.1", "seed": "gpt-4.1", "utility": "gpt-4.1",
+    "verifier": "o3", "poc": "o3",
+}
 
 
-# --- profile contents -------------------------------------------------------
-
-def test_period_correct_profile_is_all_openai_period_models():
-    r = ModelRouter.from_sources(task={"model_profile": "period-correct"}, env={})
-    m = r.resolved_map()
-    assert m == {
-        "finder": "gpt-4.1",
-        "verifier": "o3",
-        "poc": "o3",
-        "seed": "gpt-4.1",
-        "utility": "gpt-4.1-mini",
-        "compression": "gpt-4.1-nano",
-    }
-    # every resolved role came from the profile, nothing fell to base
-    for role in Role:
-        assert r.source_for(role) == "profile"
+def test_every_role_from_models():
+    r = ModelRouter.from_task({"models": PERIOD_CORRECT})
+    for role in TASK_ROLES:
+        assert r.model_for(role).id == PERIOD_CORRECT[role]
 
 
-def test_current_profile_reproduces_todays_picks():
-    r = ModelRouter.from_sources(task={"model_profile": "current"}, env={})
-    m = r.resolved_map()
-    assert m["finder"] == "claude-sonnet-4-5-20250929"
-    assert m["seed"] == "claude-opus-4-5-20251101"
-    assert m["utility"] == "claude-opus-4-5-20251101"
+def test_lg_planner_uses_the_verifier_model():
+    r = ModelRouter.from_task({"models": dict(PERIOD_CORRECT, verifier="gpt-4.1-mini")})
+    assert r.model_for(Role.LG_PLANNER).id == "gpt-4.1-mini"
+    assert r.resolved_map()["lg_planner"] == "gpt-4.1-mini"
 
 
-def test_default_profile_when_nothing_set():
-    r = ModelRouter.from_sources(task={}, env={})
-    assert r.profile == "current"
+def test_force_model_sets_every_role():
+    r = ModelRouter.from_task({"force_model": "claude-sonnet-4-5"})
+    assert {m for m in r.resolved_map().values()} == {"claude-sonnet-4-5"}
+    assert set(r.resolved_map()) == {x.value for x in Role}
 
 
-# --- cascade precedence -----------------------------------------------------
-
-def test_force_model_overrides_everything():
-    r = ModelRouter.from_sources(
-        task={"model_profile": "period-correct", "force_model": "o3",
-              "models": {"finder": "gpt-4.1"}},
-        env={},
-    )
-    for role in Role:
-        assert r.model_for(role).id == "o3"
-        assert r.source_for(role) == "force"
+def test_force_model_and_models_are_exclusive():
+    with pytest.raises(ValueError, match="not both"):
+        RoutingConfig.from_task({"force_model": "o3", "models": PERIOD_CORRECT})
 
 
-def test_per_role_override_beats_profile():
-    r = ModelRouter.from_sources(
-        task={"model_profile": "period-correct", "models": {"verifier": "gpt-4.1-mini"}},
-        env={},
-    )
-    assert r.model_for(Role.VERIFIER).id == "gpt-4.1-mini"
-    assert r.source_for(Role.VERIFIER) == "override"
-    # untouched roles still come from the profile
-    assert r.model_for(Role.FINDER).id == "gpt-4.1"
-    assert r.source_for(Role.FINDER) == "profile"
+def test_no_model_is_an_error():
+    with pytest.raises(ValueError, match="no model"):
+        RoutingConfig.from_task({})
 
 
-def test_env_override_applies_when_task_absent():
-    r = ModelRouter.from_sources(
-        task={"model_profile": "period-correct"},
-        env={"FB_MODEL_VERIFIER": "gpt-4.1-mini"},
-    )
-    assert r.model_for(Role.VERIFIER).id == "gpt-4.1-mini"
-    assert r.source_for(Role.VERIFIER) == "override"
+def test_missing_role_is_an_error():
+    with pytest.raises(ValueError, match="missing roles"):
+        RoutingConfig.from_task({"models": {"finder": "o3"}})
 
 
-def test_task_override_wins_over_env():
-    r = ModelRouter.from_sources(
-        task={"model_profile": "period-correct", "models": {"verifier": "o3"}},
-        env={"FB_MODEL_VERIFIER": "gpt-4.1-mini"},
-    )
-    assert r.model_for(Role.VERIFIER).id == "o3"
+def test_unknown_role_is_an_error():
+    with pytest.raises(ValueError, match="unknown roles"):
+        RoutingConfig.from_task({"models": dict(PERIOD_CORRECT, planner="o3")})
 
 
-def test_force_from_env_legacy_var():
-    r = ModelRouter.from_sources(
-        task={"model_profile": "period-correct"},
-        env={"LLM_DEFAULT_MODEL": "gpt-4.1"},
-    )
-    for role in Role:
-        assert r.model_for(role).id == "gpt-4.1"
-        assert r.source_for(role) == "force"
+def test_unknown_model_is_an_error():
+    with pytest.raises(UnknownModelError):
+        RoutingConfig.from_task({"force_model": "gpt-9-turbo"})
+    with pytest.raises(UnknownModelError):
+        RoutingConfig.from_task({"models": dict(PERIOD_CORRECT, finder="nope-1")})
 
 
-# --- strict-mode parsing ----------------------------------------------------
-
-def test_strict_models_off_by_default():
-    assert ModelRouter.from_sources(task={}, env={}).strict_models is False
-
-
-def test_strict_models_from_task_and_env():
-    assert ModelRouter.from_sources(task={"strict_models": True}, env={}).strict_models is True
-    assert ModelRouter.from_sources(task={}, env={"FB_STRICT_MODELS": "1"}).strict_models is True
-    assert ModelRouter.from_sources(task={}, env={"FB_STRICT_MODELS": "0"}).strict_models is False
+def test_current_models_are_priced():
+    r = ModelRouter.from_task({"force_model": "claude-opus-5-5"})
+    m = r.model_for(Role.POC)
+    assert m.price_input > 0 and m.price_output > 0
 
 
-# --- fail-fast validation ---------------------------------------------------
-
-def test_unknown_profile_raises():
-    with pytest.raises(ValueError, match="unknown profile"):
-        RoutingConfig.from_sources(task={"model_profile": "does-not-exist"}, env={})
-
-
-def test_unknown_force_model_raises():
-    with pytest.raises(ValueError, match="unknown model id"):
-        RoutingConfig.from_sources(task={"force_model": "gpt-9-turbo"}, env={})
+def test_fallbacks_follow_allow_fallback():
+    off = ModelRouter.from_task({"models": PERIOD_CORRECT})
+    o3 = off.model_for(Role.POC)
+    assert off.allow_fallback is False and off.fallbacks_for(o3) == []
+    on = ModelRouter.from_task({"models": PERIOD_CORRECT, "allow_fallback": True})
+    assert [m.id for m in on.fallbacks_for(o3)] == ["gpt-4.1"]
 
 
-def test_unknown_role_in_overrides_raises():
-    with pytest.raises(ValueError, match="unknown role"):
-        RoutingConfig.from_sources(task={"models": {"planner": "o3"}}, env={})
+def test_client_retries_only_the_same_model_without_fallback():
+    from fuzzingbrain.llms.client import LLMClient
+    from fuzzingbrain.llms import routing
+
+    routing.set_active_router(ModelRouter.from_task({"models": PERIOD_CORRECT}))
+    try:
+        c = LLMClient(role="poc")
+        assert [m.id for m in c._next_models("o3")] == ["o3"]
+        c._tried_models.add("o3")
+        assert c._next_models("o3") == []
+        routing.set_active_router(
+            ModelRouter.from_task({"models": PERIOD_CORRECT, "allow_fallback": True})
+        )
+        assert [m.id for m in c._next_models("o3")] == ["gpt-4.1"]
+        assert c._model_info(None).id == "o3"  # the client's role
+    finally:
+        routing.reset_active_router()
 
 
-def test_unknown_override_model_raises():
-    with pytest.raises(ValueError, match="unknown model id"):
-        RoutingConfig.from_sources(task={"models": {"finder": "nope-1"}}, env={})
+def test_no_router_is_an_error():
+    from fuzzingbrain.llms import routing
+
+    routing.reset_active_router()
+    with pytest.raises(routing.NoRouterError):
+        routing.model_for(Role.FINDER)
 
 
-# --- invariants -------------------------------------------------------------
+def test_call_cost_records_prices():
+    from fuzzingbrain.llms.models import call_cost, get_model_info
 
-def test_every_profile_defines_every_role_and_base():
-    for name, prof in PROFILES.items():
-        assert isinstance(prof, Profile)
-        for role in Role:
-            assert prof.model_for(role) is not None, f"{name} missing {role}"
-        assert prof.base is not None
-
-
-def test_model_for_accepts_string_role():
-    r = ModelRouter.from_sources(task={"model_profile": "period-correct"}, env={})
-    assert r.model_for("finder").id == "gpt-4.1"
+    info = get_model_info("claude-sonnet-4-5")
+    cin, cout, total, prices = call_cost(info, 1_000_000, 1_000_000, cache_read_tokens=500_000)
+    assert prices["input"] == info.price_input and prices["cache_read"] < prices["input"]
+    assert total == pytest.approx(cin + cout)
+    assert cin == pytest.approx(0.5 * info.price_input + 0.5 * prices["cache_read"])

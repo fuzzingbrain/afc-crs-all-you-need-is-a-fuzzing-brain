@@ -89,8 +89,10 @@ def test_prompts_name_only_tools_the_agent_has(available):
     hints = probe.read_function_hint("png_handle_iCCP") + probe.find_callers_hint(
         "png_handle_iCCP"
     )
+    # Reading source is always Grep + Read (get_function_source is retired).
+    assert "get_function_source" not in hints and "Grep" in hints
     if available:
-        assert "get_function_source" in hints and "get_callers" in hints
+        assert "get_callers" in hints
     else:
         assert "get_function_source" not in hints and "get_callers" not in hints
         assert "Grep" in hints and "Read" in hints
@@ -118,11 +120,11 @@ def test_coverage_tools_are_withheld_without_a_coverage_build():
     assert COVERAGE & _names(include_coverage_tools=False) == set()
 
 
-def test_trace_poc_survives_a_missing_coverage_build():
-    """trace_poc traces with gdb against the ASAN binary and only falls back to
-    coverage, so it loses detail rather than breaking. Gating it with the
-    coverage tools would be the mistake this test exists to catch."""
-    assert "trace_poc" in _names(include_coverage_tools=False)
+def test_trace_poc_is_not_offered():
+    """trace_poc was superseded by reach_probe (e976b739); offering it again
+    would give the PoC agent two tools for one question."""
+    assert "trace_poc" not in _names(include_coverage_tools=True)
+    assert "trace_poc" not in _names(include_coverage_tools=False)
 
 
 def test_coverage_gate_removes_only_the_coverage_tools():
@@ -137,7 +139,6 @@ def test_the_two_gates_are_independent():
     assert GATED & both_off == set()
     assert COVERAGE & both_off == set()
     assert ALWAYS <= both_off, "reading source must survive both gates"
-    assert "trace_poc" in both_off
 
 
 def test_coverage_error_says_the_build_is_missing_not_the_context():

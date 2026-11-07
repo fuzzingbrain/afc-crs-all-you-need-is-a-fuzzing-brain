@@ -177,7 +177,7 @@ class WorkerDispatcher:
             "detect_leaks": self.config.detect_leaks,
             "models": self.config.models,
             "force_model": self.config.force_model,
-            "strict_models": not self.config.allow_fallback,
+            "allow_fallback": self.config.allow_fallback,
             "build_dir": ar.build_paths.get(san) if ar else None,
             "coverage_fuzzer_path": ar.coverage_fuzzer_path if ar else None,
             "analysis_socket_path": ar.socket_path if ar else None,

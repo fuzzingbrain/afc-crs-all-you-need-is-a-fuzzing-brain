@@ -157,3 +157,19 @@ def fresh_pg(pg_server):
     finally:
         with psycopg.connect(pg_server, autocommit=True) as conn:
             conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+# ---------------------------------------------------------------------------
+# Model routing. A worker installs the task's router before any LLM call; a
+# unit test that builds an agent or client gets one with a priced model.
+# No test makes a real call with it.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _test_router():
+    from fuzzingbrain.llms import routing
+
+    routing._active_router = routing.ModelRouter.from_task({"force_model": "claude-sonnet-4-5"})
+    yield
+    routing.reset_active_router()

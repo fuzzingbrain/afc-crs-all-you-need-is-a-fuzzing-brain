@@ -22,38 +22,27 @@ def test_default_max_retries_is_positive():
 
 def test_num_retries_passed_to_litellm():
     client = LLMClient(LLMConfig(max_retries=3))
-    params = client._prepare_call_params(MSGS, None)
+    params = client._prepare_call_params(MSGS, "claude-sonnet-4-5")
     assert params["num_retries"] == 3
 
 
 def test_zero_retries_omits_param():
     client = LLMClient(LLMConfig(max_retries=0))
-    params = client._prepare_call_params(MSGS, None)
+    params = client._prepare_call_params(MSGS, "claude-sonnet-4-5")
     assert "num_retries" not in params
 
 
-def test_env_overrides_max_retries(monkeypatch):
-    monkeypatch.setenv("LLM_MAX_RETRIES", "5")
-    assert LLMConfig.from_env().max_retries == 5
-
-
-def test_negative_env_clamped_to_zero(monkeypatch):
-    monkeypatch.setenv("LLM_MAX_RETRIES", "-2")
-    assert LLMConfig.from_env().max_retries == 0
-
-
-def test_exhausted_fallback_gives_up_after_max_rounds(monkeypatch):
-    """An always-empty fallback chain retries a bounded number of rounds and
-    then raises, instead of sleeping/clearing/recursing forever."""
+def test_exhausted_models_give_up_after_max_rounds(monkeypatch):
+    """With nothing left to try, the client retries a bounded number of
+    rounds and then raises, instead of sleeping/clearing/recursing forever."""
     client = LLMClient(LLMConfig(max_fallback_attempts=2))
 
     sleeps = []
     monkeypatch.setattr(client_mod.time, "sleep", lambda s: sleeps.append(s))
-    monkeypatch.setattr(client_mod, "get_model_by_id", lambda _id: object())
-    monkeypatch.setattr(client_mod, "get_fallback_chain", lambda *a, **k: [])
+    monkeypatch.setattr(client, "_next_models", lambda _m: [])
 
     with pytest.raises(LLMAllModelsFailedError):
-        client._try_fallback(MSGS, failed_model="any-model", original_model=None)
+        client._try_fallback(MSGS, failed_model="claude-sonnet-4-5", original_model=None)
 
     # One cooldown per retry round, capped at max_fallback_attempts.
     assert len(sleeps) == 2

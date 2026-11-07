@@ -202,13 +202,14 @@ def _served_ids(provider: str) -> Optional[set]:
 def check_models(r: Report, config: Config) -> None:
     from ..llms.routing import ModelRouter
 
-    router = ModelRouter.from_sources(
-        task={"models": config.models, "force_model": config.force_model,
-              "strict_models": not config.allow_fallback}
+    router = ModelRouter.from_task(
+        {"models": config.models, "force_model": config.force_model,
+         "allow_fallback": config.allow_fallback}
     )
     served: Dict[str, Any] = {}
-    for role, mid in sorted(router.resolved_map().items()):
-        info = router.model_for(role)
+    for info in router.distinct_models():
+        mid = info.id
+        roles = ",".join(r for r, m in sorted(router.resolved_map().items()) if m == mid)
         provider = info.provider.value
         if provider not in served:
             try:
@@ -217,9 +218,9 @@ def check_models(r: Report, config: Config) -> None:
                 served[provider] = e
         ids = served[provider]
         if isinstance(ids, Exception):
-            r.add("models", f"{role} -> {mid}", False, str(ids))
+            r.add("models", f"{roles} -> {mid}", False, str(ids))
         else:
-            r.add("models", f"{role} -> {mid}", mid in ids, f"{provider} serves {len(ids)} models")
+            r.add("models", f"{roles} -> {mid}", mid in ids, f"{provider} serves {len(ids)} models")
 
 
 # --------------------------------------------------------------------- run

@@ -33,8 +33,10 @@ from .exceptions import (
 from .models import (
     ModelInfo,
     Provider,
-    get_fallback_chain,
-    get_model_by_id,
+    UnknownModelError,
+    call_cost,
+    get_model_info,
+    litellm_model_name,
 )
 from .buffer import get_worker_buffer
 
@@ -57,63 +59,6 @@ def _jsonable(params: Dict[str, Any]) -> Dict[str, Any]:
         except (TypeError, ValueError):
             out[k] = repr(v)
     return out
-
-
-def _calculate_cost(
-    model_id: str,
-    input_tokens: int,
-    output_tokens: int,
-    cache_read_tokens: int = 0,
-    cache_creation_tokens: int = 0,
-) -> tuple:
-    """
-    Calculate cost for an LLM call, accounting for prompt-cache discounts.
-
-    ``input_tokens`` already includes the cached portions (litellm folds
-    cache_read + cache_creation into prompt_tokens). The cached portions are
-    billed at a discount, so without this adjustment a cache hit is charged at
-    full price and the budget over-counts.
-
-    Returns:
-        tuple: (cost_input, cost_output, cost_total)
-    """
-    # Try to get model info for pricing
-    model_info = get_model_by_id(model_id)
-
-    if model_info:
-        price_input = model_info.price_input  # per million
-        price_output = model_info.price_output
-    else:
-        # Conservative estimate for unknown models
-        price_input = 3.0  # $3 per million input
-        price_output = 15.0  # $15 per million output
-
-    # Split input_tokens into regular / cache-read / cache-creation, clamped so
-    # the parts never exceed the total (defensive against odd usage reports).
-    cache_read = max(0, min(cache_read_tokens, input_tokens))
-    cache_creation = max(0, min(cache_creation_tokens, input_tokens - cache_read))
-    regular_input = max(0, input_tokens - cache_read - cache_creation)
-
-    # Discount rates relative to the full input price. Cached-input pricing is
-    # provider- and family-specific: Anthropic 90% off; OpenAI gpt-5 family 90%
-    # off ($0.175 vs $1.75 etc.); OpenAI o3/o4/gpt-4.1 75% off ($0.50 vs $2.00).
-    ml = model_id.lower()
-    if "claude" in ml or "anthropic" in ml:
-        read_rate, write_rate = 0.1, 1.25
-    elif ml.startswith("gpt-5"):
-        read_rate, write_rate = 0.1, 1.0   # gpt-5 family: cached = 10% of input
-    else:
-        read_rate, write_rate = 0.25, 1.0  # o3 / o4-mini / gpt-4.1: cached = 25%
-
-    cost_input = (
-        regular_input * price_input
-        + cache_read * price_input * read_rate
-        + cache_creation * price_input * write_rate
-    ) / 1_000_000
-    cost_output = (output_tokens / 1_000_000) * price_output
-    cost_total = cost_input + cost_output
-
-    return cost_input, cost_output, cost_total
 
 
 # Configure litellm
@@ -360,7 +305,7 @@ class LLMClient:
         print(response.content)
 
         # With specific model
-        response = client.call(messages, model=CLAUDE_OPUS_4_5)
+        response = client.call(messages, model="claude-sonnet-5-5")
 
         # Async
         response = await client.acall(messages)
@@ -427,10 +372,22 @@ class LLMClient:
         buffer = get_worker_buffer()
         if buffer is None or not self.run_id:
             return
-        cost = None
+        cost = prices = None
         if success:
-            _, _, cost = _calculate_cost(
-                response.model,
+            # Priced as the model that was asked for: the provider may answer
+            # with a dated variant of the id the table prices.
+            info = None
+            for mid in (response.model, requested_model):
+                try:
+                    info = get_model_info(mid) if mid else None
+                except UnknownModelError:
+                    info = None
+                if info:
+                    break
+            if info is None:
+                raise UnknownModelError(f"cannot price the call to {response.model!r}")
+            _, _, cost, prices = call_cost(
+                info,
                 response.input_tokens,
                 response.output_tokens,
                 response.cache_read_tokens,
@@ -458,6 +415,7 @@ class LLMClient:
             "cache_creation_tokens": response.cache_creation_tokens if success else None,
             "reasoning_tokens": response.reasoning_tokens if success else None,
             "cost": cost,
+            "prices": prices,
             "latency_ms": max(int(response.latency_ms), 0),
             "success": bool(success),
             "error_msg": None if success else (error_msg or "failed"),
@@ -534,60 +492,20 @@ class LLMClient:
 
         cls._current_loop_id = current_loop_id
 
-    def _get_model_id(self, model: Union[ModelInfo, str, None]) -> str:
-        """Get litellm-compatible model ID"""
+    def _model_info(self, model: Union[ModelInfo, str, None]) -> ModelInfo:
+        """The model to call: as given, or the run's model for this client's role."""
         if model is None:
-            model = self.config.default_model
+            from .routing import model_for
 
-        if isinstance(model, str):
-            model_info = get_model_by_id(model)
-            if model_info:
-                model = model_info
-            else:
-                # Assume it's a valid model ID
-                return model
+            return model_for(self.role)
+        return get_model_info(model)
 
-        # Map to litellm format
-        if model.provider == Provider.ANTHROPIC:
-            return model.id  # litellm uses raw anthropic IDs
-        elif model.provider == Provider.OPENAI:
-            return model.id
-        elif model.provider == Provider.GOOGLE:
-            return f"gemini/{model.id}"
-        elif model.provider == Provider.XAI:
-            # Return raw model ID for xAI (we handle it separately)
-            # Remove xai/ prefix if present
-            if model.id.startswith("xai/"):
-                return model.id[4:]
-            return model.id
-        else:
-            return model.id
+    def _get_model_id(self, model: Union[ModelInfo, str, None]) -> str:
+        """The name litellm routes on."""
+        return litellm_model_name(self._model_info(model))
 
     def _get_provider(self, model: Union[ModelInfo, str, None]) -> Provider:
-        """Get provider for a model"""
-        if model is None:
-            return self.config.default_model.provider
-
-        if isinstance(model, ModelInfo):
-            return model.provider
-
-        # String model ID - try to find it
-        model_info = get_model_by_id(model)
-        if model_info:
-            return model_info.provider
-
-        # Guess from model ID
-        model_lower = model.lower()
-        if "claude" in model_lower:
-            return Provider.ANTHROPIC
-        elif "gpt" in model_lower or model_lower.startswith("o"):
-            return Provider.OPENAI
-        elif "gemini" in model_lower:
-            return Provider.GOOGLE
-        elif "grok" in model_lower or "xai" in model_lower:
-            return Provider.XAI
-
-        return Provider.OPENAI  # Default
+        return self._model_info(model).provider
 
     def _get_api_key_for_model(self, model: Union[ModelInfo, str]) -> Optional[str]:
         """Get API key for a model"""
@@ -648,33 +566,22 @@ class LLMClient:
         # Don't fallback for context length (need to reduce input)
         if isinstance(error, LLMContextLengthError):
             return False
-        # strict_models (experiment mode): a pinned model whose key was revoked or
-        # whose quota is exhausted must NOT silently fall back to some other model
-        # -- that would pollute a period-correct run with an unchosen model. Fail
-        # loud so the sweep stops on this run instead of yielding tainted data.
-        # Transient rate limits (without an insufficient-quota marker) still fall
-        # back, since they are recoverable.
-        try:
-            from .routing import active_router
-
-            strict = active_router().strict_models
-        except Exception:
-            strict = False
-        if strict:
-            es = str(error).lower()
-            terminal_key_or_quota = (
-                isinstance(error, LLMAuthError)
-                or "insufficient_quota" in es
-                or "exceeded your current quota" in es
-            )
-            if terminal_key_or_quota:
-                logger.error(
-                    f"strict_models: {type(error).__name__} on a pinned model "
-                    f"-- not falling back; aborting this run so data stays clean"
-                )
-                return False
         # Fallback for other errors
         return True
+
+    def _next_models(self, failed_model: Union[ModelInfo, str]) -> List[ModelInfo]:
+        """What a failed call may try next, not yet tried this round.
+
+        allow_fallback false: only the same model (so once it has been tried,
+        nothing until the next round). true: the same model, then the run's
+        other routed models.
+        """
+        from .routing import get_active_router
+
+        failed = self._model_info(failed_model)
+        router = get_active_router()
+        candidates = [failed] + (router.fallbacks_for(failed) if router else [])
+        return [m for m in candidates if litellm_model_name(m) not in self._tried_models]
 
     def _call_xai(
         self,
@@ -776,9 +683,7 @@ class LLMClient:
     ) -> Dict[str, Any]:
         """Prepare parameters for litellm call"""
         model_id = self._get_model_id(model)
-        api_key = self._get_api_key_for_model(
-            model if model else self.config.default_model
-        )
+        api_key = self._get_api_key_for_model(self._model_info(model))
 
         params = {
             "model": model_id,
@@ -949,7 +854,7 @@ class LLMClient:
         **kwargs,
     ) -> LLMResponse:
         """Internal call with fallback logic"""
-        current_model = model if model else self.config.default_model
+        current_model = self._model_info(model)
         model_id = self._get_model_id(current_model)
 
         # Track original model for fallback reporting
@@ -1054,7 +959,7 @@ class LLMClient:
                 requested_model=original_model_for_report,
             )
 
-            if self.config.fallback_enabled and self._should_fallback(error):
+            if self._should_fallback(error):
                 return self._try_fallback(
                     messages,
                     current_model,
@@ -1075,29 +980,7 @@ class LLMClient:
         **kwargs,
     ) -> LLMResponse:
         """Try fallback models"""
-        if isinstance(failed_model, str):
-            model_info = get_model_by_id(failed_model)
-        else:
-            model_info = failed_model
-
-        if model_info:
-            fallback_chain = get_fallback_chain(
-                model_info,
-                self._tried_models,
-                allow_expensive=self.config.allow_expensive_fallback,
-            )
-        else:
-            # Use default fallback
-            from .models import DEFAULT_FALLBACK, EXPENSIVE_MODELS
-
-            fallback_chain = [
-                m
-                for m in DEFAULT_FALLBACK
-                if m.id not in self._tried_models
-                and (
-                    self.config.allow_expensive_fallback or m.id not in EXPENSIVE_MODELS
-                )
-            ]
+        fallback_chain = self._next_models(failed_model)
 
         if not fallback_chain:
             # Whole chain exhausted. Retry it a bounded number of times (with a
@@ -1105,13 +988,13 @@ class LLMClient:
             # give up — never loop forever.
             if self._fallback_rounds >= self.config.max_fallback_attempts:
                 raise LLMAllModelsFailedError(
-                    f"All fallback models failed after {self._fallback_rounds} "
+                    f"All attempts failed after {self._fallback_rounds} "
                     "retry rounds",
                     tried_models=list(self._tried_models),
                 )
             self._fallback_rounds += 1
             logger.warning(
-                f"All fallback models exhausted (tried: {list(self._tried_models)}). "
+                f"Every allowed model failed (tried: {list(self._tried_models)}). "
                 f"Sleeping 30s before retry round "
                 f"{self._fallback_rounds}/{self.config.max_fallback_attempts}..."
             )
@@ -1127,7 +1010,7 @@ class LLMClient:
 
         # Try next fallback
         next_model = fallback_chain[0]
-        logger.info(f"Falling back to {next_model.name}")
+        logger.info(f"Retrying on {next_model.id}")
 
         return self._call_with_fallback(
             messages=messages,
@@ -1200,7 +1083,7 @@ class LLMClient:
         # Ensure litellm's cached clients are valid for current event loop
         self._ensure_clean_client_cache()
 
-        current_model = model if model else self.config.default_model
+        current_model = self._model_info(model)
         model_id = self._get_model_id(current_model)
 
         if original_model is None:
@@ -1366,7 +1249,7 @@ class LLMClient:
                 requested_model=original_model_for_report,
             )
 
-            if self.config.fallback_enabled and self._should_fallback(error):
+            if self._should_fallback(error):
                 return await self._atry_fallback(
                     messages,
                     current_model,
@@ -1387,28 +1270,7 @@ class LLMClient:
         **kwargs,
     ) -> LLMResponse:
         """Try fallback models (async)"""
-        if isinstance(failed_model, str):
-            model_info = get_model_by_id(failed_model)
-        else:
-            model_info = failed_model
-
-        if model_info:
-            fallback_chain = get_fallback_chain(
-                model_info,
-                self._tried_models,
-                allow_expensive=self.config.allow_expensive_fallback,
-            )
-        else:
-            from .models import DEFAULT_FALLBACK, EXPENSIVE_MODELS
-
-            fallback_chain = [
-                m
-                for m in DEFAULT_FALLBACK
-                if m.id not in self._tried_models
-                and (
-                    self.config.allow_expensive_fallback or m.id not in EXPENSIVE_MODELS
-                )
-            ]
+        fallback_chain = self._next_models(failed_model)
 
         if not fallback_chain:
             # Whole chain exhausted. Retry it a bounded number of times (with a
@@ -1416,13 +1278,13 @@ class LLMClient:
             # give up — never loop forever.
             if self._fallback_rounds >= self.config.max_fallback_attempts:
                 raise LLMAllModelsFailedError(
-                    f"All fallback models failed after {self._fallback_rounds} "
+                    f"All attempts failed after {self._fallback_rounds} "
                     "retry rounds",
                     tried_models=list(self._tried_models),
                 )
             self._fallback_rounds += 1
             logger.warning(
-                f"All fallback models exhausted (tried: {list(self._tried_models)}). "
+                f"Every allowed model failed (tried: {list(self._tried_models)}). "
                 f"Sleeping 30s before retry round "
                 f"{self._fallback_rounds}/{self.config.max_fallback_attempts}..."
             )
@@ -1437,7 +1299,7 @@ class LLMClient:
             )
 
         next_model = fallback_chain[0]
-        logger.info(f"Falling back to {next_model.name}")
+        logger.info(f"Retrying on {next_model.id}")
 
         return await self._acall_with_fallback(
             messages=messages,
@@ -1475,7 +1337,7 @@ class LLMClient:
         Yields content chunks as they arrive.
         Note: Fallback is not supported in streaming mode.
         """
-        current_model = model if model else self.config.default_model
+        current_model = self._model_info(model)
         params = self._prepare_call_params(messages, current_model, **kwargs)
         params["stream"] = True
 
@@ -1498,7 +1360,7 @@ class LLMClient:
 
         Yields content chunks as they arrive.
         """
-        current_model = model if model else self.config.default_model
+        current_model = self._model_info(model)
         params = self._prepare_call_params(messages, current_model, **kwargs)
         params["stream"] = True
 
