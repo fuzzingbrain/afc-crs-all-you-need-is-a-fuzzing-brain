@@ -130,20 +130,21 @@ def test_a_crash_from_a_poc_agent_is_linked_to_its_hypothesis(tmp_path):
     assert store.crashes()[0]["vh_id"] == "vh42" and rec["new"]
 
 
-def test_the_scan_only_picks_up_artifacts(tmp_path):
+def test_the_scan_reproduces_only_what_could_be_a_bug(tmp_path):
+    """libFuzzer names the artifact after what happened: a timeout- file needs
+    no container to classify, and reproducing one costs the whole input budget."""
     m, store = monitor(tmp_path)
     crashes = tmp_path / "fuzz" / "crashes"
     crashes.mkdir(parents=True)
-    (crashes / "crash-1").write_bytes(b"x")
-    (crashes / "leak-2").write_bytes(b"x")
-    (crashes / "fuzz-0.log").write_bytes(b"x")
-    (crashes / "notes.txt").write_bytes(b"x")
+    for name in ("crash-1", "crash-2", "timeout-3", "oom-4", "leak-5", "fuzz-0.log", "notes.txt"):
+        (crashes / name).write_bytes(b"x")
     handled = []
     m.handle = lambda source, art, **kw: handled.append(art.name)
     m.watch("global", crashes)
     m.scan()
     m.scan()  # a second pass must not re-handle what it saw
-    assert sorted(handled) == ["crash-1", "leak-2"]
+    assert sorted(handled) == ["crash-1", "crash-2"]
+    assert m.skipped == {"timeout": 1, "out-of-memory": 1, "leak": 1}
 
 
 @pytest.mark.parametrize("data,expected", [

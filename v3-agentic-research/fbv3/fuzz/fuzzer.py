@@ -30,7 +30,12 @@ logger = logging.getLogger(__name__)
 
 ASAN_OPTIONS = "detect_leaks=0:symbolize=1:abort_on_error=0:handle_abort=1:allocator_may_return_null=1"
 UBSAN_OPTIONS = "halt_on_error=1:print_stacktrace=1"
-CRASH_PREFIXES = ("crash-", "oom-", "leak-", "timeout-")
+# libFuzzer names an artifact after what happened to it. "crash-" is the only
+# one that can be a memory-safety bug; the others say up front that they are
+# not, and reproducing them would cost a container each (a timeout costs the
+# whole per-input budget) to learn what the name already said.
+CRASH_PREFIXES = ("crash-",)
+NOT_A_BUG_PREFIXES = {"timeout-": "timeout", "oom-": "out-of-memory", "leak-": "leak"}
 
 AFL_BASE_ENV = {
     "AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES": "1", "AFL_SKIP_CRASHES": "1", "AFL_SKIP_CPUFREQ": "1",
@@ -235,7 +240,14 @@ class CrashMonitor:
                 continue
             for art in sorted(d.iterdir()):
                 key = f"{source}:{art.name}"
-                if not art.is_file() or not art.name.startswith(CRASH_PREFIXES) or key in self._seen:
+                if not art.is_file() or key in self._seen:
+                    continue
+                named = next((w for p, w in NOT_A_BUG_PREFIXES.items() if art.name.startswith(p)), "")
+                if named:
+                    self._seen.add(key)
+                    self.skipped[named] = self.skipped.get(named, 0) + 1
+                    continue
+                if not art.name.startswith(CRASH_PREFIXES):
                     continue
                 self._seen.add(key)
                 try:
