@@ -211,6 +211,7 @@ class CrashMonitor:
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self.new_crashes = 0
+        self.skipped: dict[str, int] = {}
 
     def watch(self, source: str, crashes: Path) -> None:
         with self._lock:
@@ -247,8 +248,17 @@ class CrashMonitor:
             image=self.image, build_out=self.build_out, binary=self.binary, artifact=art,
             afl=self.afl, run_id=self.run_id)
         sig = sigmod.compute_signature(output, harness_names=self.harness_names)
-        if not sig:
-            return None  # not a sanitizer report or fatal signal (e.g. a plain timeout)
+        # A timeout or an out-of-memory prints a stack too, so frames alone do not
+        # make a bug: without a sanitizer class this artifact is a slow or greedy
+        # input, worth knowing about but not a crash.
+        if not sig or not sig.crash_class:
+            why = ("timeout" if "libFuzzer: timeout" in output else
+                   "out-of-memory" if "out-of-memory" in output else "no sanitizer report")
+            self.skipped[why] = self.skipped.get(why, 0) + 1
+            self.store.emit("artifact_skipped", lg=self.lg, source=source, reason=why,
+                            artifact=str(art), vh_id=vh_id)
+            logger.info("%s from %s is a %s, not a crash", art.name, source, why)
+            return None
         saved = self.save_dir / f"{sig.short}-{art.name}"
         if not saved.exists():
             shutil.copyfile(art, saved)

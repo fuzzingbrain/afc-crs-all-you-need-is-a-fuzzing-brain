@@ -172,3 +172,20 @@ def test_a_missing_prebuilt_target_is_reported(tmp_path):
     (tmp_path / "prebuilt").mkdir()
     with pytest.raises(FileNotFoundError):
         copy_runtime_bundle(tmp_path / "prebuilt", tmp_path / "out", "fuzz")
+
+
+def test_symbols_skip_compiler_generated_entries(tmp_path):
+    """_GLOBAL__sub_I_* and friends are not functions anyone wrote."""
+    locs = ("_GLOBAL__sub_I_Assimp.cpp\n/src/assimp/code/Assimp.cpp:0:0\n\n"
+            "__cxx_global_var_init.3\n/src/a.cc:5:0\n\n"
+            "ReadFileFromMemory\n/src/assimp/code/Importer.cpp:300:0\n\n")
+    ws = FakeWS(tmp_path, stdout=("0x1\ta\n0x2\tb\n0x3\tc\n==FBV3-SPLIT==\n" + locs).encode())
+    rows, _ = symbols.linked_functions(ws, binary="/ws/b")
+    assert [r.name for r in rows] == ["ReadFileFromMemory"]
+
+
+def test_symbols_skip_a_relative_debug_path(tmp_path):
+    """A relative path comes from a stdlib build, not the project tree."""
+    ws = FakeWS(tmp_path, stdout=b"0x1\tx\n==FBV3-SPLIT==\nstd_thing\niostream.cpp:0:0\n\n")
+    rows, err = symbols.linked_functions(ws, binary="/ws/b")
+    assert rows == [] and "debug info" in err

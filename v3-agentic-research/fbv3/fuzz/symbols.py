@@ -33,7 +33,11 @@ echo '==FBV3-SPLIT=='
 cat /tmp/fbv3_locs
 """
 
-_LOC = re.compile(r"^(/[^\s:]+|[A-Za-z]:[^\s:]+|\.{1,2}/[^\s:]+|[^\s:]+\.[ch](?:pp|xx|c)?):(\d+):(\d+)$")
+# Only absolute paths: a relative one in the debug info comes from a stdlib or
+# toolchain build, not from the project tree the agents read.
+_LOC = re.compile(r"^(/[^\s:]+):(\d+):(\d+)$")
+# Compiler-generated entry points, not code anyone wrote.
+_GENERATED = re.compile(r"^(_GLOBAL__|__cxx_global_var_init|_sub_I_|GCC_except|\.)")
 
 
 def _end_line(path: Path, start: int, limit: int = 2000) -> int:
@@ -78,6 +82,8 @@ def linked_functions(ws, *, binary: str, timeout_s: int = 600) -> tuple[list[Fun
     for i, (fname, file, line) in enumerate(records):
         name = fname if fname and fname != "??" else (names[i] if i < len(names) else "")
         if not name or name == "??" or not file or file == "??":
+            continue
+        if _GENERATED.match(name):
             continue
         if any(m in file for m in NON_PROJECT):
             continue
