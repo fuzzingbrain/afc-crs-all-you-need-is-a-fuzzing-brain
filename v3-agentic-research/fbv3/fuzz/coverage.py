@@ -58,6 +58,25 @@ llvm-cov export -instr-profile={prof_dir}/merged.profdata -skip-expansions -Xdem
 """
 
 
+# llvm-cov region: [line_start, col_start, line_end, col_end, count, file_id,
+# expanded_file_id, kind], kind 0 = Code, 1 = Expansion, 2 = Skipped, 3 = Gap.
+REGION_KIND, REGION_FILE_ID = 7, 5
+
+
+def _code_regions(regions: list) -> list:
+    """Only the function's own code regions bound its body.
+
+    A macro expanded inside a function contributes a region at the macro's
+    own line, so zlib's deflate() came out spanning lines 58-1290 -- nearly
+    the whole file -- instead of 981-1290. A finder then reads 1200 lines
+    instead of the function, and the coverage frontier reports every name in
+    the file as something that function calls.
+    """
+    code = [r for r in regions
+            if len(r) > REGION_KIND and r[REGION_KIND] == 0 and r[REGION_FILE_ID] == 0]
+    return code or regions
+
+
 def _plain_name(name: str, file: str) -> str:
     """``trees.c:pqdownheap`` -> ``pqdownheap``.
 
@@ -76,7 +95,7 @@ def parse_export(data: dict) -> list[FunctionRow]:
             filenames = fn.get("filenames") or []
             if not filenames or any(m in filenames[0] for m in NON_PROJECT):
                 continue
-            regions = fn.get("regions") or []
+            regions = _code_regions(fn.get("regions") or [])
             start = min((r[0] for r in regions), default=0)
             end = max((r[2] for r in regions), default=start)
             rows.append(FunctionRow(_plain_name(fn.get("name", ""), filenames[0]), filenames[0],

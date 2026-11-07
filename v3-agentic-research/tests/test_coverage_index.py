@@ -197,3 +197,32 @@ def test_symbols_skip_a_relative_debug_path(tmp_path):
     ws = FakeWS(tmp_path, stdout=b"0x1\tx\n==FBV3-SPLIT==\nstd_thing\niostream.cpp:0:0\n\n")
     rows, err = symbols.linked_functions(ws, binary="/ws/b")
     assert rows == [] and "debug info" in err
+
+
+def test_a_macro_expansion_does_not_stretch_a_function_over_its_file():
+    """zlib's deflate() came out as lines 58-1290 instead of 981-1290."""
+    export = {"data": [{"functions": [{
+        "name": "deflate", "count": 1150, "filenames": ["/src/zlib/deflate.c"],
+        "regions": [
+            [981, 1, 1290, 2, 1150, 0, 0, 0],   # the body
+            [1000, 5, 1005, 9, 900, 0, 0, 0],   # a branch inside it
+            [58, 20, 58, 40, 1150, 0, 0, 1],    # a macro expanded at line 58
+            [60, 1, 60, 9, 0, 0, 0, 3],         # a gap region
+            [70, 1, 90, 2, 5, 40, 0, 0],        # code attributed to another file
+        ]}]}]}
+    row = coverage.parse_export(export)[0]
+    assert (row.start_line, row.end_line) == (981, 1290)
+
+
+def test_a_function_with_only_expansion_regions_still_gets_a_span():
+    export = {"data": [{"functions": [{
+        "name": "wrapper", "count": 3, "filenames": ["/src/a.c"],
+        "regions": [[10, 1, 20, 2, 3, 0, 0, 1]]}]}]}
+    row = coverage.parse_export(export)[0]
+    assert (row.start_line, row.end_line) == (10, 20)
+
+
+def test_short_region_rows_are_tolerated():
+    export = {"data": [{"functions": [{
+        "name": "f", "count": 1, "filenames": ["/src/a.c"], "regions": [[5, 1, 9, 2, 1]]}]}]}
+    assert coverage.parse_export(export)[0].end_line == 9
