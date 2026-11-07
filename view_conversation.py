@@ -41,7 +41,7 @@ def convert_to_html(json_path: str, output_path: str = None):
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>POV Conversation - {meta["worker_id"]}</title>
+    <title>PoC Conversation - {meta["worker_id"]}</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
@@ -197,7 +197,7 @@ def convert_to_html(json_path: str, output_path: str = None):
     </div>
 
     <div class="meta">
-        <h1>POV Generation Conversation</h1>
+        <h1>PoC Generation Conversation</h1>
         <div class="meta-info">
             <div class="meta-item"><strong>Agent:</strong> {meta["agent"]}</div>
             <div class="meta-item"><strong>Run:</strong> {meta["run_id"]}</div>

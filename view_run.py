@@ -97,19 +97,19 @@ def get_run_data(run_id: str) -> dict:
     # Get workers for this run
     workers = list(db.workers.find({"run_id": actual_run_id}))
 
-    # Get suspicious points for this run
-    suspicious_points = list(db.suspicious_points.find({"run_id": actual_run_id}))
+    # Get vulnerability hypotheses for this run
+    vulnerability_hypotheses = list(db.vulnerability_hypotheses.find({"run_id": actual_run_id}))
 
-    # Get POVs for this run
-    povs = list(db.povs.find({"run_id": actual_run_id}))
+    # Get PoCs for this run
+    pocs = list(db.pocs.find({"run_id": actual_run_id}))
 
     # Convert ObjectId to string
     for w in workers:
         w["_id"] = str(w["_id"])
-    for sp in suspicious_points:
-        sp["_id"] = str(sp["_id"])
-    for pov in povs:
-        pov["_id"] = str(pov["_id"])
+    for vh in vulnerability_hypotheses:
+        vh["_id"] = str(vh["_id"])
+    for poc in pocs:
+        poc["_id"] = str(poc["_id"])
     if run:
         run["_id"] = str(run["_id"])
 
@@ -122,8 +122,8 @@ def get_run_data(run_id: str) -> dict:
     return {
         "run": run,
         "workers": workers,
-        "suspicious_points": suspicious_points,
-        "povs": povs,
+        "vulnerability_hypotheses": vulnerability_hypotheses,
+        "pocs": pocs,
         "conversations": conversations,
         "tool_calls": tool_calls,
     }
@@ -133,13 +133,13 @@ def generate_html(run_id: str, data: dict) -> str:
     """Generate HTML content for the run viewer."""
     run = data["run"]
     workers = data["workers"]
-    suspicious_points = data["suspicious_points"]
-    povs = data.get("povs", [])
+    vulnerability_hypotheses = data["vulnerability_hypotheses"]
+    pocs = data.get("pocs", [])
     conversations = data.get("conversations", [])
     tool_calls = data.get("tool_calls", [])
 
-    # Sort suspicious points by score (descending)
-    suspicious_points.sort(key=lambda x: x.get("score", 0), reverse=True)
+    # Sort vulnerability hypotheses by score (descending)
+    vulnerability_hypotheses.sort(key=lambda x: x.get("score", 0), reverse=True)
 
     # Status colors
     def status_color(status):
@@ -181,9 +181,9 @@ def generate_html(run_id: str, data: dict) -> str:
         phases = [
             ("Build", "phase_build", "#4CAF50"),  # Green
             ("Reach", "phase_reachability", "#2196F3"),  # Blue
-            ("Find SP", "phase_find_sp", "#FF9800"),  # Orange
+            ("Find VH", "phase_find_vh", "#FF9800"),  # Orange
             ("Verify", "phase_verify", "#9C27B0"),  # Purple
-            ("POV", "phase_pov", "#E91E63"),  # Pink
+            ("POC", "phase_poc", "#E91E63"),  # Pink
             ("Save", "phase_save", "#607D8B"),  # Grey
         ]
 
@@ -276,7 +276,7 @@ def generate_html(run_id: str, data: dict) -> str:
             <div class="worker-details">
                 <div><strong>Worker ID:</strong> {w.get("worker_id", "N/A")}</div>
                 <div><strong>Job Type:</strong> {w.get("task_type", "N/A")}</div>
-                <div><strong>POVs Generated:</strong> {w.get("pov_generated", 0)}</div>
+                <div><strong>PoCs Generated:</strong> {w.get("poc_generated", 0)}</div>
                 <div><strong>Patches Generated:</strong> {w.get("patch_generated", 0)}</div>
                 {f'<div class="error-msg"><strong>Error:</strong> {w.get("error_msg", "")}</div>' if w.get("error_msg") else ""}
             </div>
@@ -284,13 +284,13 @@ def generate_html(run_id: str, data: dict) -> str:
         </div>
         """
 
-    # Generate suspicious points HTML
-    sp_html = ""
-    for i, sp in enumerate(suspicious_points, 1):
-        score = sp.get("score", 0)
-        is_crash_found = sp.get("is_crash_found", False)
-        is_checked_by_verifier = sp.get("is_checked_by_verifier", False)
-        vuln_type = sp.get("vuln_type", "unknown")
+    # Generate vulnerability hypotheses HTML
+    vh_html = ""
+    for i, vh in enumerate(vulnerability_hypotheses, 1):
+        score = vh.get("score", 0)
+        is_crash_found = vh.get("is_crash_found", False)
+        is_checked_by_verifier = vh.get("is_checked_by_verifier", False)
+        vuln_type = vh.get("vuln_type", "unknown")
 
         real_badge = ""
         if is_checked_by_verifier:
@@ -300,7 +300,7 @@ def generate_html(run_id: str, data: dict) -> str:
                 real_badge = '<span class="badge badge-fp">FALSE POSITIVE</span>'
 
         controlflow_html = ""
-        for cf in sp.get("important_controlflow", []):
+        for cf in vh.get("important_controlflow", []):
             controlflow_html += f"""
             <div class="controlflow-item">
                 <span class="cf-type">{cf.get("type", "")}</span>
@@ -309,57 +309,57 @@ def generate_html(run_id: str, data: dict) -> str:
             </div>
             """
 
-        sp_html += f"""
-        <div class="sp-card" id="sp-{i}">
-            <div class="sp-header">
-                <div class="sp-title">
-                    <span class="sp-num">#{i}</span>
-                    <span class="sp-func">{sp.get("function_name", "N/A")}</span>
+        vh_html += f"""
+        <div class="vh-card" id="vh-{i}">
+            <div class="vh-header">
+                <div class="vh-title">
+                    <span class="vh-num">#{i}</span>
+                    <span class="vh-func">{vh.get("function_name", "N/A")}</span>
                     {real_badge}
                 </div>
-                <div class="sp-meta">
+                <div class="vh-meta">
                     <span class="vuln-badge" style="background-color: {vuln_color(vuln_type)}">{vuln_type}</span>
                     <span class="score-badge" style="background-color: {score_color(score)}">Score: {score:.2f}</span>
                 </div>
             </div>
-            <div class="sp-body">
-                <div class="sp-desc">{sp.get("description", "No description")}</div>
-                {f'<div class="sp-notes"><strong>Verification Notes:</strong> {sp.get("verification_notes", "")}</div>' if sp.get("verification_notes") else ""}
-                {f'<div class="sp-controlflow"><strong>Important Control Flow:</strong>{controlflow_html}</div>' if controlflow_html else ""}
+            <div class="vh-body">
+                <div class="vh-desc">{vh.get("description", "No description")}</div>
+                {f'<div class="vh-notes"><strong>Verification Notes:</strong> {vh.get("verification_notes", "")}</div>' if vh.get("verification_notes") else ""}
+                {f'<div class="vh-controlflow"><strong>Important Control Flow:</strong>{controlflow_html}</div>' if controlflow_html else ""}
             </div>
-            <div class="sp-footer">
-                <span class="sp-id">ID: {sp.get("suspicious_point_id", "N/A")}</span>
-                <span class="sp-time">Created: {sp.get("created_at", "N/A")}</span>
+            <div class="vh-footer">
+                <span class="vh-id">ID: {vh.get("vulnerability_hypothesis_id", "N/A")}</span>
+                <span class="vh-time">Created: {vh.get("created_at", "N/A")}</span>
             </div>
         </div>
         """
 
     # Summary stats
-    total_sp = len(suspicious_points)
-    confirmed = len([sp for sp in suspicious_points if sp.get("is_crash_found")])
-    checked = len([sp for sp in suspicious_points if sp.get("is_checked_by_verifier")])
-    high_score = len([sp for sp in suspicious_points if sp.get("score", 0) >= 0.8])
+    total_vh = len(vulnerability_hypotheses)
+    confirmed = len([vh for vh in vulnerability_hypotheses if vh.get("is_crash_found")])
+    checked = len([vh for vh in vulnerability_hypotheses if vh.get("is_checked_by_verifier")])
+    high_score = len([vh for vh in vulnerability_hypotheses if vh.get("score", 0) >= 0.8])
 
-    # POV stats
-    total_povs = len(povs)
-    successful_povs = [p for p in povs if p.get("is_successful")]
+    # PoC stats
+    total_pocs = len(pocs)
+    successful_pocs = [p for p in pocs if p.get("is_successful")]
 
-    # Generate POVs HTML - separate successful and all POVs
+    # Generate PoCs HTML - separate successful and all PoCs
     import html as html_module
 
-    def generate_pov_card_html(pov, idx):
-        """Generate HTML for a single POV card."""
-        pov_id = pov.get("pov_id", "N/A")
-        vuln_type = pov.get("vuln_type", "unknown")
-        harness = pov.get("harness_name", "N/A")
-        sanitizer = pov.get("sanitizer", "N/A")
-        is_successful = pov.get("is_successful", False)
-        blob_path = pov.get("blob_path", "")
-        sp_id = pov.get("suspicious_point_id", "N/A")
-        iteration = pov.get("iteration", 0)
-        attempt = pov.get("attempt", 0)
-        description = pov.get("description", "")
-        sanitizer_output = pov.get("sanitizer_output", "")
+    def generate_poc_card_html(poc, idx):
+        """Generate HTML for a single PoC card."""
+        poc_id = poc.get("poc_id", "N/A")
+        vuln_type = poc.get("vuln_type", "unknown")
+        harness = poc.get("harness_name", "N/A")
+        sanitizer = poc.get("sanitizer", "N/A")
+        is_successful = poc.get("is_successful", False)
+        blob_path = poc.get("blob_path", "")
+        vh_id = poc.get("vulnerability_hypothesis_id", "N/A")
+        iteration = poc.get("iteration", 0)
+        attempt = poc.get("attempt", 0)
+        description = poc.get("description", "")
+        sanitizer_output = poc.get("sanitizer_output", "")
 
         # Status badge
         if is_successful:
@@ -375,46 +375,46 @@ def generate_html(run_id: str, data: dict) -> str:
             sanitizer_escaped = html_module.escape(str(sanitizer_output)[:2000])
             if len(str(sanitizer_output)) > 2000:
                 sanitizer_escaped += "... (truncated)"
-            sanitizer_html = f'<div class="pov-sanitizer"><strong>Sanitizer Output:</strong><pre>{sanitizer_escaped}</pre></div>'
+            sanitizer_html = f'<div class="poc-sanitizer"><strong>Sanitizer Output:</strong><pre>{sanitizer_escaped}</pre></div>'
 
         return f"""
-        <div class="pov-card" style="border-left-color: {card_border}">
-            <div class="pov-header">
-                <div class="pov-title">
-                    <span class="pov-num">#{idx}</span>
+        <div class="poc-card" style="border-left-color: {card_border}">
+            <div class="poc-header">
+                <div class="poc-title">
+                    <span class="poc-num">#{idx}</span>
                     <span class="vuln-badge" style="background-color: {vuln_color(vuln_type)}">{vuln_type}</span>
                     {status_badge}
                 </div>
-                <div class="pov-meta">
-                    <span class="pov-harness">{harness} ({sanitizer})</span>
+                <div class="poc-meta">
+                    <span class="poc-harness">{harness} ({sanitizer})</span>
                 </div>
             </div>
-            <div class="pov-body">
-                <div class="pov-info-grid">
-                    <div><strong>POV ID:</strong> {pov_id[:16]}...</div>
-                    <div><strong>SP ID:</strong> {sp_id[:16] if sp_id != "N/A" else "N/A"}...</div>
+            <div class="poc-body">
+                <div class="poc-info-grid">
+                    <div><strong>PoC ID:</strong> {poc_id[:16]}...</div>
+                    <div><strong>VH ID:</strong> {vh_id[:16] if vh_id != "N/A" else "N/A"}...</div>
                     <div><strong>Iteration:</strong> {iteration}</div>
                     <div><strong>Attempt:</strong> {attempt}</div>
                 </div>
-                {f'<div class="pov-desc"><strong>Description:</strong> {html_module.escape(description)}</div>' if description else ""}
-                {f'<div class="pov-blob"><strong>Blob:</strong> {blob_path}</div>' if blob_path else ""}
+                {f'<div class="poc-desc"><strong>Description:</strong> {html_module.escape(description)}</div>' if description else ""}
+                {f'<div class="poc-blob"><strong>Blob:</strong> {blob_path}</div>' if blob_path else ""}
                 {sanitizer_html}
             </div>
-            <div class="pov-footer">
-                <span class="pov-time">Created: {pov.get("created_at", "N/A")}</span>
+            <div class="poc-footer">
+                <span class="poc-time">Created: {poc.get("created_at", "N/A")}</span>
             </div>
         </div>
         """
 
-    # Generate HTML for successful POVs
-    success_povs_html = ""
-    for i, pov in enumerate(successful_povs, 1):
-        success_povs_html += generate_pov_card_html(pov, i)
+    # Generate HTML for successful PoCs
+    success_pocs_html = ""
+    for i, poc in enumerate(successful_pocs, 1):
+        success_pocs_html += generate_poc_card_html(poc, i)
 
-    # Generate HTML for all POVs
-    povs_html = ""
-    for i, pov in enumerate(povs, 1):
-        povs_html += generate_pov_card_html(pov, i)
+    # Generate HTML for all PoCs
+    pocs_html = ""
+    for i, poc in enumerate(pocs, 1):
+        pocs_html += generate_poc_card_html(poc, i)
 
     # Generate conversations HTML
     conv_html = ""
@@ -580,14 +580,14 @@ def generate_html(run_id: str, data: dict) -> str:
         .worker-details {{ font-size: 14px; color: #aaa; }}
         .worker-details div {{ margin: 5px 0; }}
         .error-msg {{ color: #ff6b6b; }}
-        .sp-card {{
+        .vh-card {{
             background: #16213e;
             border-radius: 10px;
             padding: 20px;
             margin-bottom: 15px;
             border-left: 4px solid #00d4ff;
         }}
-        .sp-header {{
+        .vh-header {{
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
@@ -595,10 +595,10 @@ def generate_html(run_id: str, data: dict) -> str:
             flex-wrap: wrap;
             gap: 10px;
         }}
-        .sp-title {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
-        .sp-num {{ color: #00d4ff; font-weight: bold; font-size: 18px; }}
-        .sp-func {{ font-family: 'Monaco', 'Menlo', monospace; font-size: 16px; color: #ffd93d; }}
-        .sp-meta {{ display: flex; gap: 10px; }}
+        .vh-title {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
+        .vh-num {{ color: #00d4ff; font-weight: bold; font-size: 18px; }}
+        .vh-func {{ font-family: 'Monaco', 'Menlo', monospace; font-size: 16px; color: #ffd93d; }}
+        .vh-meta {{ display: flex; gap: 10px; }}
         .vuln-badge, .score-badge {{
             padding: 4px 10px;
             border-radius: 20px;
@@ -608,8 +608,8 @@ def generate_html(run_id: str, data: dict) -> str:
         .badge {{ padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; }}
         .badge-real {{ background: #28a745; color: white; }}
         .badge-fp {{ background: #6c757d; color: white; }}
-        .sp-body {{ margin-bottom: 15px; }}
-        .sp-desc {{
+        .vh-body {{ margin-bottom: 15px; }}
+        .vh-desc {{
             background: #0f0f23;
             padding: 15px;
             border-radius: 8px;
@@ -617,14 +617,14 @@ def generate_html(run_id: str, data: dict) -> str:
             white-space: pre-wrap;
             word-break: break-word;
         }}
-        .sp-notes {{
+        .vh-notes {{
             margin-top: 10px;
             padding: 10px;
             background: #1a3a1a;
             border-radius: 8px;
             font-size: 13px;
         }}
-        .sp-controlflow {{
+        .vh-controlflow {{
             margin-top: 10px;
             font-size: 13px;
         }}
@@ -640,7 +640,7 @@ def generate_html(run_id: str, data: dict) -> str:
         .cf-type {{ color: #17a2b8; font-weight: bold; min-width: 60px; }}
         .cf-name {{ color: #ffd93d; font-family: monospace; }}
         .cf-loc {{ color: #888; }}
-        .sp-footer {{
+        .vh-footer {{
             display: flex;
             justify-content: space-between;
             font-size: 12px;
@@ -722,15 +722,15 @@ def generate_html(run_id: str, data: dict) -> str:
             color: #aaa;
         }}
 
-        /* POV styles */
-        .pov-card {{
+        /* PoC styles */
+        .poc-card {{
             background: #16213e;
             border-radius: 10px;
             padding: 20px;
             margin-bottom: 15px;
             border-left: 4px solid #28a745;
         }}
-        .pov-header {{
+        .poc-header {{
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
@@ -738,12 +738,12 @@ def generate_html(run_id: str, data: dict) -> str:
             flex-wrap: wrap;
             gap: 10px;
         }}
-        .pov-title {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
-        .pov-num {{ color: #28a745; font-weight: bold; font-size: 18px; }}
-        .pov-meta {{ color: #888; }}
-        .pov-harness {{ font-family: monospace; }}
-        .pov-body {{ margin-bottom: 15px; }}
-        .pov-info-grid {{
+        .poc-title {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
+        .poc-num {{ color: #28a745; font-weight: bold; font-size: 18px; }}
+        .poc-meta {{ color: #888; }}
+        .poc-harness {{ font-family: monospace; }}
+        .poc-body {{ margin-bottom: 15px; }}
+        .poc-info-grid {{
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
             gap: 10px;
@@ -753,14 +753,14 @@ def generate_html(run_id: str, data: dict) -> str:
             font-size: 14px;
             margin-bottom: 10px;
         }}
-        .pov-desc {{
+        .poc-desc {{
             background: #0f0f23;
             padding: 15px;
             border-radius: 8px;
             font-size: 14px;
             margin-bottom: 10px;
         }}
-        .pov-blob {{
+        .poc-blob {{
             background: #1a3a1a;
             padding: 10px 15px;
             border-radius: 8px;
@@ -768,10 +768,10 @@ def generate_html(run_id: str, data: dict) -> str:
             font-size: 13px;
             margin-bottom: 10px;
         }}
-        .pov-sanitizer {{
+        .poc-sanitizer {{
             margin-top: 10px;
         }}
-        .pov-sanitizer pre {{
+        .poc-sanitizer pre {{
             background: #0f0f23;
             padding: 15px;
             border-radius: 8px;
@@ -781,7 +781,7 @@ def generate_html(run_id: str, data: dict) -> str:
             overflow-y: auto;
             color: #ff6b6b;
         }}
-        .pov-footer {{
+        .poc-footer {{
             font-size: 12px;
             color: #666;
             border-top: 1px solid #333;
@@ -990,8 +990,8 @@ def generate_html(run_id: str, data: dict) -> str:
         <h2>Summary</h2>
         <div class="summary-grid">
             <div class="summary-card">
-                <div class="summary-num" style="color: #00d4ff">{total_sp}</div>
-                <div class="summary-label">Total Suspicious Points</div>
+                <div class="summary-num" style="color: #00d4ff">{total_vh}</div>
+                <div class="summary-label">Total Vulnerability Hypotheses</div>
             </div>
             <div class="summary-card">
                 <div class="summary-num" style="color: #ff6b6b">{high_score}</div>
@@ -1002,7 +1002,7 @@ def generate_html(run_id: str, data: dict) -> str:
                 <div class="summary-label">Confirmed Bugs</div>
             </div>
             <div class="summary-card">
-                <div class="summary-num" style="color: #ffd93d">{checked}/{total_sp}</div>
+                <div class="summary-num" style="color: #ffd93d">{checked}/{total_vh}</div>
                 <div class="summary-label">Verified</div>
             </div>
         </div>
@@ -1010,9 +1010,9 @@ def generate_html(run_id: str, data: dict) -> str:
         <!-- Tab Navigation -->
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('workers')">Workers ({len(workers)})</button>
-            <button class="tab-btn" onclick="switchTab('suspicious')">Suspicious Points ({total_sp})</button>
-            <button class="tab-btn" onclick="switchTab('success-povs')">Success POVs ({len(successful_povs)})</button>
-            <button class="tab-btn" onclick="switchTab('all-povs')">All POVs ({total_povs})</button>
+            <button class="tab-btn" onclick="switchTab('suspicious')">Vulnerability Hypotheses ({total_vh})</button>
+            <button class="tab-btn" onclick="switchTab('success-pocs')">Success PoCs ({len(successful_pocs)})</button>
+            <button class="tab-btn" onclick="switchTab('all-pocs')">All PoCs ({total_pocs})</button>
             <button class="tab-btn" onclick="switchTab('conversations')">Conversations ({len(conversations)})</button>
             <button class="tab-btn" onclick="switchTab('tools')">Tool Calls ({len(tool_calls)})</button>
         </div>
@@ -1025,22 +1025,22 @@ def generate_html(run_id: str, data: dict) -> str:
             </div>
         </div>
 
-        <!-- Tab: Suspicious Points -->
+        <!-- Tab: Vulnerability Hypotheses -->
         <div id="tab-suspicious" class="tab-content">
-            <h2>Suspicious Points</h2>
-            {sp_html if sp_html else '<div class="no-data">No suspicious points found</div>'}
+            <h2>Vulnerability Hypotheses</h2>
+            {vh_html if vh_html else '<div class="no-data">No vulnerability hypotheses found</div>'}
         </div>
 
-        <!-- Tab: Success POVs -->
-        <div id="tab-success-povs" class="tab-content">
-            <h2>Successful POVs ({len(successful_povs)})</h2>
-            {success_povs_html if success_povs_html else '<div class="no-data">No successful POVs found</div>'}
+        <!-- Tab: Success PoCs -->
+        <div id="tab-success-pocs" class="tab-content">
+            <h2>Successful PoCs ({len(successful_pocs)})</h2>
+            {success_pocs_html if success_pocs_html else '<div class="no-data">No successful PoCs found</div>'}
         </div>
 
-        <!-- Tab: All POVs -->
-        <div id="tab-all-povs" class="tab-content">
-            <h2>All POVs ({total_povs})</h2>
-            {povs_html if povs_html else '<div class="no-data">No POVs found</div>'}
+        <!-- Tab: All PoCs -->
+        <div id="tab-all-pocs" class="tab-content">
+            <h2>All PoCs ({total_pocs})</h2>
+            {pocs_html if pocs_html else '<div class="no-data">No PoCs found</div>'}
         </div>
 
         <!-- Tab: Conversations -->
@@ -1123,7 +1123,7 @@ def main():
     # Fetch data
     data = get_run_data(run_id)
 
-    if not data["run"] and not data["workers"] and not data["suspicious_points"]:
+    if not data["run"] and not data["workers"] and not data["vulnerability_hypotheses"]:
         print(f"Warning: No data found for run {run_id}")
 
     # Generate HTML
