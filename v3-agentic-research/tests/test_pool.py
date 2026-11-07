@@ -150,3 +150,29 @@ def test_a_stopped_pool_runs_nothing():
     p.stopped.set()
     res = go(p)
     assert res.status == "error" and FakeSession.calls == []
+
+
+def test_a_session_that_dies_before_its_first_turn_moves_backend():
+    """A service-side gate or a crashed CLI must not lose the step."""
+    p, _ = pool()
+    FakeSession.script = {("finder", "codex"): ["error"]}
+    res = go(p)
+    assert res.status == "completed" and res.backend == "claude"
+    assert FakeSession.calls == [("finder", "codex"), ("finder", "claude")]
+
+
+def test_an_error_after_real_work_is_returned_as_is():
+    """It did something; its partial submissions are on disk, so do not pay twice."""
+    p, _ = pool()
+
+    class Worked(FakeSession):
+        def run(self):
+            res = super().run()
+            res.turns = 3
+            return res
+
+    p._make = Worked
+    FakeSession.script = {("finder", "codex"): ["error"]}
+    res = go(p)
+    assert res.status == "error" and res.backend == "codex"
+    assert len(FakeSession.calls) == 1

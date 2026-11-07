@@ -60,12 +60,12 @@ class AgentPool:
         order = [first] + ([b for b in BACKENDS if b != first] if self.cfg.fallback else [])
         backoff = float(self.cfg.rate_limit_backoff_s)
         last: SessionResult | None = None
-        tried_filtered: set[str] = set()
+        tried_filtered: set[str] = set()  # refused the content, or died before doing anything
         while not self.stopped.is_set():
             candidates = [b for b in order if self._available(b) and b not in tried_filtered]
             if not candidates:
                 if len(tried_filtered) == len(order):
-                    break  # every backend refused the content: nothing to wait for
+                    break  # no backend can run this: nothing to wait for
                 wait = min(backoff, self.cfg.rate_limit_backoff_max_s)
                 if deadline is not None:
                     wait = min(wait, deadline - self._now() - 1)
@@ -91,6 +91,14 @@ class AgentPool:
                 self._limited_until[backend] = self._now() + backoff
                 continue
             if last.status == "content_filtered":
+                tried_filtered.add(backend)
+                continue
+            if last.status == "error" and last.turns == 0 and backend not in tried_filtered:
+                # The session died before it did anything (a service-side gate, a
+                # crashed CLI): nothing was accomplished, so the other
+                # subscription gets the work instead of losing this step.
+                logger.warning("%s session on %s died before its first turn (%s); trying the other backend",
+                               role, backend, last.error[:200])
                 tried_filtered.add(backend)
                 continue
             return last
