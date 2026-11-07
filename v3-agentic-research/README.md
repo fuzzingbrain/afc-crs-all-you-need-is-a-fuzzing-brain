@@ -185,6 +185,38 @@ from every session's environment, each backend is checked to be on a
 subscription before a run starts, and each Claude session's `init` event is
 checked again for its key source.
 
+## What it did on its first live runs
+
+**Harness generation** (zlib, `compress2`, one target, 11.6 min, 3 sessions):
+the researcher produced a 12.8 KB API report citing file:line throughout; the
+generator built a three-phase harness -- a round trip with an oracle, the
+error paths, and a mutated/truncated stream through `uncompress2` -- that
+compiled on its first `build_harness` call and smoke-fuzzed at 769 edges and
+15k exec/s; the reviewer read zlib's documented contracts, checked each oracle
+against them, probed P4 with gdb (`deflate_slow`, `deflate_stored` and
+`inflate_fast` all reached, so the level byte really does switch strategies),
+reported the `abort()` oracle and two style issues as non-blocking, and
+accepted it. One round, address and coverage builds.
+
+**Directed** (the CyberGym case `assimp_447262177`, a prebuilt ASan target,
+17 min, one session at a time): the symbol fallback indexed 12,775 functions;
+the mapper read `/src`, had names rejected by the index, and used `nm -C` on
+the binary to resubmit the exact C++ signatures; finders raised six
+hypotheses in the FBX converter; two verified at 1.0 by hand-writing ASCII FBX
+files that make the target report; a PoC agent closed the first one and the
+orchestrator reproduced its crash itself. Two distinct real bugs, both
+reproduced outside the agent afterwards:
+
+| bug | where | input |
+| --- | --- | --- |
+| heap-buffer-overflow | `FBXConverter.cpp:1345` in `ConvertMeshMultiMaterial` | 849 bytes |
+| heap-buffer-overflow | `FBXConverter.cpp:1611` in `ConvertWeights` | 1307 bytes |
+
+That first run also reported ten "distinct crashes" when only one was real:
+nine were libFuzzer timeouts, and an allocator exhausted under the run's own
+memory cap parsed as the class `out`. Both are fixed and tested; a timeout is
+not a bug.
+
 ## Tests
 
 ```sh
