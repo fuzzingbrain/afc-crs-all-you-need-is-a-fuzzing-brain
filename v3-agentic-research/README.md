@@ -235,6 +235,14 @@ of them, and reported one crash -- the SEGV above, with a confirmed PoC and
 three hypotheses rejected (one by the verifier at 0.0, two below the finder's
 threshold).
 
+**Both stages in one command** (zlib `uncompress2`, 15.1 min): the harness
+stage accepted a harness in one round -- one that targets the 257/258 boundary
+of inflate's fast path, alternates between verbatim malformed bytes and
+well-formed streams built with `compress2`, and truncates proportionally to
+exercise the consumed-length reporting -- and the directed stage picked it up
+from the same run: 15 functions analysed, 60 seeds, 59 of 109 functions
+covered, no crashes and no false ones.
+
 **Harness to directed** (zlib again, 12.3 min): the directed stage run on the
 harness the agent had just written. The coverage build gave it 62 executed
 functions to analyse, the seed agent added 28 inputs, and the breaker asked
