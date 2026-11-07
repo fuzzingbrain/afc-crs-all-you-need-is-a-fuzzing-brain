@@ -362,3 +362,14 @@ def test_the_frontier_lane_is_off_without_a_coverage_build(tmp_path, monkeypatch
     (run.ws.path("out/coverage")).mkdir(parents=True, exist_ok=True)
     (run.ws.path("out/coverage") / "fuzz").write_bytes(b"\x7fELF")
     assert run._has_coverage()
+
+
+def test_the_summary_separates_skipped_artifacts_from_crashes(tmp_path):
+    """Slow and greedy inputs are reported, but never as bugs."""
+    run, _, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    run._monitor.skipped = {"timeout": 3, "out-of-memory": 1}
+    store.add_crash("fuzz", "k", "sig1", crash_class="heap-buffer-overflow")
+    report = run._finish()
+    assert report["crashes"] == 1 and report["crash_signatures"] == ["sig1"]
+    assert report["artifacts_skipped"] == {"timeout": 3, "out-of-memory": 1}

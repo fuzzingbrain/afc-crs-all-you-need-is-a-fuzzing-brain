@@ -188,7 +188,7 @@ checked again for its key source.
 ## Tests
 
 ```sh
-python -m pytest            # 203 tests, no docker, no network, no agent
+python -m pytest            # 224 tests, no docker, no network, no agent
 python -m pytest -m docker  # the ones that build and run containers
 ```
 
@@ -196,5 +196,6 @@ The suite covers what a naive port gets wrong: the finder and verifier
 thresholds, the fp-seed branch, the PoC attempt limit, that only a reproduced
 crash promotes a VH, that the gate re-runs its own smoke test, that a
 submission's claims are checked against the files on disk, that roles get only
-their own tools, that the harness source is never truncated into a prompt, and
-that no API key can reach a session.
+their own tools, that the harness source is never truncated into a prompt,
+that a libFuzzer timeout is not counted as a bug, and that no API key can
+reach a session.

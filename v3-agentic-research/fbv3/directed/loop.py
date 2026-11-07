@@ -470,7 +470,7 @@ class DirectedRun:
         return None
 
     def _fp_seed(self, vh_id: str) -> None:
-        if self._left() < 120 or not self.cfg.mode == "directed":
+        if self._left() < 120 or self.cfg.mode != "directed":
             return
         vh = self.store.get_vh(vh_id)
         system, task = self._prompt(
@@ -607,6 +607,9 @@ class DirectedRun:
             "pocs": sum(1 for v in vhs if v["poc_status"] == "crashed"),
             "crashes": len(crashes),
             "crash_signatures": [c["signature_short"] for c in crashes],
+            # Artifacts that were not bugs: slow inputs and greedy ones. Worth
+            # reporting (a harness this slow explores badly) but not bug counts.
+            "artifacts_skipped": dict(self._monitor.skipped) if self._monitor else {},
             "seeds": self.store.seed_count(self.lg.name),
             "coverage_final": final,
             "elapsed_s": round(time.monotonic() - self._t0, 1),
