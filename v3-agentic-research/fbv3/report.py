@@ -132,6 +132,8 @@ def load(run_dir: Path) -> dict:
     path = Path(run_dir) / "result.json"
     if path.is_file():
         return json.loads(path.read_text())
+    if not (Path(run_dir) / "fbv3.sqlite").is_file():
+        return {}  # looking at a run must not create one
     from fbv3.store import Store
 
     store = Store(Path(run_dir))

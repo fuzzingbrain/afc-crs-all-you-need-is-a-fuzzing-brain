@@ -229,3 +229,8 @@ def test_the_directed_stage_needs_a_target(tmp_path, stub, monkeypatch):
     summary = runmod.Runner(t).run()
     assert summary["status"] == "completed"
     assert "no usable fuzz target" in summary["end_reason"]
+
+
+def test_viewing_a_directory_with_no_run_creates_nothing(tmp_path):
+    assert report.load(tmp_path) == {}
+    assert list(tmp_path.iterdir()) == []
