@@ -2,15 +2,14 @@
 """
 Unit tests for MCP Tools.
 
-Tests all tool functions and their parameter validation.
-Mocks the AnalysisClient to avoid real database calls.
+Signatures and the checks that need no database; tests/test_worker_flow_pg.py
+covers the VH and logic group tools against PostgreSQL.
 
 Run with: pytest tests/test_tools.py -v
 """
 
 import pytest
 from unittest.mock import MagicMock, patch
-from bson import ObjectId
 
 # Tool implementations
 from fuzzingbrain.tools.vulnerability_hypotheses import (
@@ -21,226 +20,46 @@ from fuzzingbrain.tools.vulnerability_hypotheses import (
 )
 
 
-class TestUpdateVulnerabilityHypothesisParameters:
-    """Test update_vulnerability_hypothesis accepts all required parameters."""
-
-    def test_function_signature_has_reachability_params(self):
-        """update_vulnerability_hypothesis_impl must accept reachability_* parameters."""
+class TestVHToolSignatures:
+    def test_mcp_create_requires_sink_code(self):
         import inspect
 
-        sig = inspect.signature(update_vulnerability_hypothesis_impl)
-        params = list(sig.parameters.keys())
+        from fuzzingbrain.tools import mcp_factory
 
-        # Must have these parameters
-        assert "vulnerability_hypothesis_id" in params
-        assert "score" in params
-        assert "is_checked_by_verifier" in params
-        assert "is_crash_found" in params
-        assert "pattern" in params
-        assert "verification_notes" in params
-        assert "poc_guidance" in params
-        # NEW - these caused the validation error
-        assert "reachability_status" in params, "Missing reachability_status parameter!"
-        assert "reachability_multiplier" in params, (
-            "Missing reachability_multiplier parameter!"
-        )
-        assert "reachability_reason" in params, "Missing reachability_reason parameter!"
+        src = inspect.getsource(mcp_factory._register_vh_create_tools)
+        assert "        sink_code: str,\n" in src
 
-    @patch("fuzzingbrain.tools.vulnerability_hypotheses._get_client")
-    @patch("fuzzingbrain.tools.vulnerability_hypotheses._ensure_client")
-    def test_update_with_reachability_params(self, mock_ensure, mock_get_client):
-        """update_vulnerability_hypothesis should pass reachability params to client."""
-        mock_ensure.return_value = None
-        mock_client = MagicMock()
-        mock_client.update_vulnerability_hypothesis.return_value = {"updated": True}
-        mock_get_client.return_value = mock_client
-
-        # Set VH context
-        set_vh_context("test_fuzzer", "address", "dir123", "agent123")
-
-        # Call with reachability parameters
-        result = update_vulnerability_hypothesis_impl(
-            vulnerability_hypothesis_id="sp123",
-            score=0.8,
-            is_checked_by_verifier=True,
-            pattern="confirmed",
-            poc_guidance="Trigger via oversized input to function pointer path",
-            reachability_status="pointer_call",
-            reachability_multiplier=0.95,
-            reachability_reason="Reachable via function pointer",
-        )
-
-        # Verify client was called with reachability params
-        mock_client.update_vulnerability_hypothesis.assert_called_once()
-        call_kwargs = mock_client.update_vulnerability_hypothesis.call_args[1]
-        assert call_kwargs["reachability_status"] == "pointer_call"
-        assert call_kwargs["reachability_multiplier"] == 0.95
-        assert call_kwargs["reachability_reason"] == "Reachable via function pointer"
+    def test_context_round_trip(self):
+        set_vh_context(lg_id="lg1", agent_id="a1")
+        assert get_vh_context() == ("lg1", "a1")
+        set_vh_context()
+        assert get_vh_context() == (None, "a1")
 
 
-class TestCreateVulnerabilityHypothesisParameters:
-    """Test create_vulnerability_hypothesis accepts all required parameters."""
+class TestToolsOutsideAWorker:
+    """A VH tool called with no worker scope says so, not a database error."""
 
-    def test_function_signature(self):
-        """create_vulnerability_hypothesis_impl must have correct parameters."""
-        import inspect
+    @pytest.fixture(autouse=True)
+    def _no_scope(self):
+        from fuzzingbrain.worker import scope
 
-        sig = inspect.signature(create_vulnerability_hypothesis_impl)
-        params = list(sig.parameters.keys())
+        scope.set_scope(None)
 
-        assert "function_name" in params
-        assert "description" in params
-        assert "score" in params
-        assert "important_controlflow" in params
+    def test_create(self):
+        r = create_vulnerability_hypothesis_impl("f", "d", sink_code="x;")
+        assert r["success"] is False and "worker" in r["error"]
 
-    @patch("fuzzingbrain.tools.vulnerability_hypotheses._get_client")
-    @patch("fuzzingbrain.tools.vulnerability_hypotheses._ensure_client")
-    def test_create_vh_basic(self, mock_ensure, mock_get_client):
-        """create_vulnerability_hypothesis should work with basic params."""
-        mock_ensure.return_value = None
-        mock_client = MagicMock()
-        mock_client.create_vulnerability_hypothesis.return_value = {
-            "id": str(ObjectId()),
-            "merged": False,
-        }
-        mock_get_client.return_value = mock_client
+    def test_update(self):
+        r = update_vulnerability_hypothesis_impl(vulnerability_hypothesis_id="abc", score=0.5)
+        assert r["success"] is False
 
-        # Set VH context
-        set_vh_context("test_fuzzer", "address", "dir123", "agent123")
+    def test_logic_group_tools(self):
+        from fuzzingbrain.tools.logic_groups import create_logic_group_impl, list_logic_groups_impl
 
-        result = create_vulnerability_hypothesis_impl(
-            function_name="png_read_row",
-            description="Buffer overflow in row processing",
-            score=0.7,
-        )
-
-        assert result["success"] is True
-        mock_client.create_vulnerability_hypothesis.assert_called_once()
-
-
-class TestMCPFactoryToolSignatures:
-    """Test that MCP factory tools have correct signatures."""
-
-    def test_update_vulnerability_hypothesis_mcp_signature(self):
-        """MCP update_vulnerability_hypothesis tool must have reachability params."""
-        # Import the mcp_factory module
-
-        # Check that the module can be imported without errors
-        # The actual function is created dynamically, but we can check
-        # that the impl function has the right signature
-        import inspect
-
-        sig = inspect.signature(update_vulnerability_hypothesis_impl)
-        params = list(sig.parameters.keys())
-
-        assert "reachability_status" in params
-        assert "reachability_multiplier" in params
-        assert "reachability_reason" in params
-
-
-class TestAnalyzerClientSignatures:
-    """Test that AnalyzerClient methods have correct signatures."""
-
-    def test_update_vulnerability_hypothesis_client_signature(self):
-        """AnalyzerClient.update_vulnerability_hypothesis must have reachability params."""
-        from fuzzingbrain.analyzer.client import AnalysisClient
-        import inspect
-
-        sig = inspect.signature(AnalysisClient.update_vulnerability_hypothesis)
-        params = list(sig.parameters.keys())
-
-        assert "reachability_status" in params, "Client missing reachability_status!"
-        assert "reachability_multiplier" in params, (
-            "Client missing reachability_multiplier!"
-        )
-        assert "reachability_reason" in params, "Client missing reachability_reason!"
-
-
-class TestAnalyzerServerHandlers:
-    """Test that AnalyzerServer handles all parameters."""
-
-    def test_update_vulnerability_hypothesis_server_handles_reachability(self):
-        """Server._update_vulnerability_hypothesis must handle reachability params."""
-        # Read the server code and check it handles the params
-        import inspect
-        from fuzzingbrain.analyzer.server import AnalysisServer
-
-        # Get the source code of _update_vulnerability_hypothesis
-        source = inspect.getsource(AnalysisServer._update_vulnerability_hypothesis)
-
-        # Check that reachability params are handled
-        assert "reachability_status" in source, (
-            "Server doesn't handle reachability_status!"
-        )
-        assert "reachability_multiplier" in source, (
-            "Server doesn't handle reachability_multiplier!"
-        )
-        assert "reachability_reason" in source, (
-            "Server doesn't handle reachability_reason!"
-        )
-
-
-class TestVHContextFunctions:
-    """Test VH context management."""
-
-    def test_set_and_get_context(self):
-        """set_vh_context and get_vh_context should work."""
-        set_vh_context(
-            harness_name="test_fuzzer",
-            sanitizer="address",
-            lg_id="dir123",
-            agent_id="agent456",
-        )
-
-        harness, san, dir_id, agent_id = get_vh_context()
-        assert harness == "test_fuzzer"
-        assert san == "address"
-        assert dir_id == "dir123"
-        assert agent_id == "agent456"
-
-
-class TestToolErrorHandling:
-    """Test tool error handling."""
-
-    def test_update_without_client_returns_error(self):
-        """update_vulnerability_hypothesis should return error if no client."""
-        # Don't set up client - should fail gracefully
-        with patch("fuzzingbrain.tools.vulnerability_hypotheses._ensure_client") as mock:
-            mock.return_value = {"success": False, "error": "No client"}
-            result = update_vulnerability_hypothesis_impl(
-                vulnerability_hypothesis_id="sp123",
-                score=0.5,
-            )
-            assert result["success"] is False
-
-    def test_create_without_client_returns_error(self):
-        """create_vulnerability_hypothesis should return error if no client."""
-        with patch("fuzzingbrain.tools.vulnerability_hypotheses._ensure_client") as mock:
-            mock.return_value = {"success": False, "error": "No client"}
-            result = create_vulnerability_hypothesis_impl(
-                function_name="test",
-                description="test",
-            )
-            assert result["success"] is False
-
-
-class TestLogicGroupTools:
-    """Test logic group-related tools."""
-
-    def test_logic_group_tool_imports(self):
-        """Logic group tools should be importable."""
-        from fuzzingbrain.tools.logic_groups import (
-            create_logic_group_impl,
-            list_logic_groups_impl,
-            set_logic_group_context,
-            get_logic_group_context,
-        )
-
-        # Just verify they're callable
-        assert callable(create_logic_group_impl)
-        assert callable(list_logic_groups_impl)
-        assert callable(set_logic_group_context)
-        assert callable(get_logic_group_context)
+        assert list_logic_groups_impl()["success"] is False
+        r = create_logic_group_impl(name="n", risk_level="high", core_functions=["f"],
+                                    entry_functions=["g"], risk_reason="r")
+        assert r["success"] is False
 
 
 class TestAnalyzerTools:
@@ -476,7 +295,6 @@ class TestSeedAgentContextFlow:
                 fuzzer="test_fuzzer",
                 sanitizer="address",
                 fuzzer_manager=None,
-                repos=None,
             )
 
             # Set up lg_id before configure

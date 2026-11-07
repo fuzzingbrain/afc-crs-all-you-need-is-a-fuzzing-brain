@@ -23,9 +23,8 @@ from ..agents.prompts import (
     SEED_DELTA_SYSTEM_PROMPT,
 )
 from ..llms import LLMClient, ModelInfo
-from ..db import RepositoryManager
 from ..tools.code_viewer import set_code_viewer_context
-from ..core.models.agent import AgentType
+from ..agents.types import AgentType
 from .seed_tools import set_seed_context, clear_seed_context, update_seed_context
 
 
@@ -128,7 +127,6 @@ class SeedAgent(BaseAgent):
         fuzzer: str,
         sanitizer: str,
         fuzzer_manager,
-        repos: RepositoryManager,
         fuzzer_source: str = "",
         workspace_path: Optional[Path] = None,
         llm_client: Optional[LLMClient] = None,
@@ -148,7 +146,6 @@ class SeedAgent(BaseAgent):
             fuzzer: Fuzzer name
             sanitizer: Sanitizer type
             fuzzer_manager: FuzzerManager instance for adding seeds
-            repos: Database repository manager
             fuzzer_source: Fuzzer harness source code
             workspace_path: Path to workspace (for code viewer tools)
             llm_client: LLM client
@@ -172,7 +169,6 @@ class SeedAgent(BaseAgent):
             sanitizer=sanitizer,
         )
         self.fuzzer_manager = fuzzer_manager
-        self.repos = repos
         self.fuzzer_source = fuzzer_source
         self.workspace_path = workspace_path
 
@@ -230,12 +226,11 @@ class SeedAgent(BaseAgent):
             metadata["Delta ID"] = self.delta_id[:8]
         return metadata
 
+    def _agent_row(self) -> Dict[str, Any]:
+        return {"lg_id": self.lg_id or None}
+
     def _configure_context(self, ctx) -> None:
         """Configure agent context with logic_group/VH/delta IDs and set up seed tools."""
-        if self.lg_id:
-            ctx.lg_id = self.lg_id
-        if self.vh_id:
-            ctx.vh_id = self.vh_id
         if self.delta_id:
             ctx.delta_id = self.delta_id
 

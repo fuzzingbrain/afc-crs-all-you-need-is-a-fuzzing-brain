@@ -10,14 +10,12 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 from ..core import logger
-from ..db import RepositoryManager
 from ..analyzer import AnalysisClient
 from ..core.config import DEFAULT_MAX_PARALLEL_FUZZERS
 from ..fuzzer import (
     FuzzerManager,
     register_fuzzer_manager,
 )
-from ..fuzzer.signature import extract_class
 from .context import WorkerContext
 
 
@@ -62,21 +60,22 @@ class WorkerExecutor:
         fuzzer: str,
         sanitizer: str,
         task_type: str,
-        repos: RepositoryManager,
         run_id: str,
+        worker_id: str,
+        harness_id: str,
         scan_mode: str = "full",
         fuzzer_binary_path: str = None,
         analysis_socket_path: str = None,
         index_path: Optional[str] = None,
         diff_path: str = None,
         log_dir: str = None,
-        docker_image: str = "gcr.io/oss-fuzz-base/base-runner",
+        docker_image: str = "",
         enable_fuzzer_worker: bool = True,
-        celery_job_id: str = None,
         run_workspace_path: str = None,
         max_parallel_fuzzers: int = DEFAULT_MAX_PARALLEL_FUZZERS,
         vh_max_count: Optional[int] = None,
         fuzzer_sources: Optional[dict] = None,
+        fuzzer_worker: Optional[dict] = None,
     ):
         """
         Initialize WorkerExecutor.
@@ -87,8 +86,9 @@ class WorkerExecutor:
             fuzzer: Fuzzer name
             sanitizer: Sanitizer (address, memory, undefined)
             task_type: Job type (poc, patch, poc-patch, harness)
-            repos: Database repository manager
             run_id: Parent run ID
+            worker_id: this worker's row (inserted by the dispatcher)
+            harness_id: the harness row it works on
             scan_mode: Scan mode ("full" or "delta")
             fuzzer_binary_path: Path to pre-built fuzzer binary (from Analyzer)
             analysis_socket_path: Path to Analysis Server socket for code queries
@@ -97,7 +97,6 @@ class WorkerExecutor:
             log_dir: Main run log directory for agent logs
             docker_image: Docker image for running fuzzers
             enable_fuzzer_worker: Whether to enable FuzzerManager (default True)
-            celery_job_id: Celery task ID (for WorkerContext tracking)
             run_workspace_path: Path to main run workspace (shared repo/fuzz-tooling/diff)
             max_parallel_fuzzers: run-wide ceiling on running fuzzers
             vh_max_count: per-worker ceiling on running VH fuzzers
@@ -110,15 +109,17 @@ class WorkerExecutor:
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
         self.task_type = task_type
-        self.repos = repos
-        self.run_id = run_id
+        self.run_id = str(run_id)
+        self._worker_id = str(worker_id)
+        self.harness_id = str(harness_id)
         self.scan_mode = scan_mode
         self.log_dir = Path(log_dir) if log_dir else None
         self.docker_image = docker_image
-        self.enable_fuzzer_worker = enable_fuzzer_worker
+        # fuzzer_worker from the task file (FuzzerWorkerConfig as a dict)
+        self.fuzzer_worker = dict(fuzzer_worker or {})
+        self.enable_fuzzer_worker = enable_fuzzer_worker and self.fuzzer_worker.get("enabled", True)
         self.max_parallel_fuzzers = max_parallel_fuzzers
         self.vh_max_count = vh_max_count
-        self.celery_job_id = celery_job_id
         # {fuzzer_name: [abs source path, ...]} from the task file, carried in the
         # assignment. Read directly from disk into an in-memory blob (cached) so the
         # many agents that need the harness source never hammer the Analysis Server.
@@ -168,20 +169,12 @@ class WorkerExecutor:
 
     @property
     def worker_id(self) -> str:
-        """
-        Get worker identifier.
-
-        Returns ObjectId from WorkerContext if available (for isolation and MongoDB linking),
-        otherwise returns descriptive string for logging during initialization.
-        """
-        if self._worker_context:
-            return self._worker_context.worker_id
-        return f"worker_{self.run_id}_{self.fuzzer}_{self.sanitizer}"
+        return self._worker_id
 
     @property
     def worker_display_name(self) -> str:
         """Get human-readable worker name for logging."""
-        return f"worker_{self.run_id}_{self.fuzzer}_{self.sanitizer}"
+        return f"{self.fuzzer}/{self._worker_id[:8]}"
 
     @property
     def fuzzer_manager(self) -> Optional[FuzzerManager]:
@@ -193,11 +186,20 @@ class WorkerExecutor:
         if self._fuzzer_manager is None and self.enable_fuzzer_worker:
             if self.fuzzer_binary_path and self.fuzzer_binary_path.exists():
                 try:
-                    vh_config = None
-                    if self.vh_max_count:
-                        from ..fuzzer.models import VHFuzzerConfig
-
-                        vh_config = VHFuzzerConfig(max_count=int(self.vh_max_count))
+                    from ..fuzzer.models import GlobalFuzzerConfig, VHFuzzerConfig
+                    fw = self.fuzzer_worker
+                    g, v = GlobalFuzzerConfig(), VHFuzzerConfig()
+                    global_config = GlobalFuzzerConfig(
+                        fork_level=int(fw.get("global_fork_level", g.fork_level)),
+                        rss_limit_mb=int(fw.get("global_rss_limit_mb", g.rss_limit_mb)),
+                        max_time=int(fw.get("global_max_time", g.max_time)),
+                        timeout_per_input=int(fw.get("global_timeout_per_input", g.timeout_per_input)),
+                    )
+                    vh_config = VHFuzzerConfig(
+                        fork_level=int(fw.get("vh_fork_level", v.fork_level)),
+                        rss_limit_mb=int(fw.get("vh_rss_limit_mb", v.rss_limit_mb)),
+                        max_count=int(self.vh_max_count or fw.get("vh_max_count", v.max_count)),
+                    )
                     self._fuzzer_manager = FuzzerManager(
                         run_id=self.run_id,
                         worker_id=self.worker_id,
@@ -206,6 +208,7 @@ class WorkerExecutor:
                         workspace_path=self.workspace_path,
                         fuzzer_name=self.fuzzer,
                         sanitizer=self.sanitizer,
+                        global_config=global_config,
                         vh_config=vh_config,
                         max_parallel_fuzzers=self.max_parallel_fuzzers,
                         # Note: crash_monitor is Run-level (in Dispatcher), not Worker-level
@@ -218,6 +221,8 @@ class WorkerExecutor:
                     # scores 0 -- only POCAgent create_poc crashes counted.
                     try:
                         _mon = getattr(self._fuzzer_manager, "crash_monitor", None)
+                        if _mon is not None:
+                            _mon.check_interval = float(fw.get("crash_check_interval", 5.0))
                         if _mon is not None and getattr(_mon, "on_crash", None) is None:
                             _mon.on_crash = self._on_crash_found
                             logger.info(
@@ -228,7 +233,7 @@ class WorkerExecutor:
                         logger.warning(
                             f"[{self.worker_display_name}] Could not wire crash callback: {_e}"
                         )
-                    # Register for cross-module access using ObjectId
+                    # Register for cross-module access, by worker id
                     register_fuzzer_manager(self.worker_id, self._fuzzer_manager)
                     logger.info(
                         f"[{self.worker_display_name}] FuzzerManager initialized"
@@ -245,266 +250,69 @@ class WorkerExecutor:
         return self._fuzzer_manager
 
     def _on_crash_found(self, crash_record) -> None:
+        """A fuzzer (global or VH) found a crashing input.
+
+        It becomes a poc_attempt (source global_fuzzer or vh_fuzzer) that
+        crashed; record_crash gives it its signature and says whether the run
+        has seen that bug. A new one is reported and packaged.
         """
-        Callback when FuzzerMonitor finds a new crash.
+        from ..core.crashes import package_crash, record_crash
+        from ..db.store import get_store
 
-        The crash file IS the PoC - directly create PoC record.
-        Flow: Create PoC (inactive) -> Generate Report -> Activate PoC
-
-        Args:
-            crash_record: CrashRecord from FuzzerMonitor
-        """
-        import asyncio
-        import base64
-        from pathlib import Path
-
-        from ..core.models import POC
-        from ..core.poc_packager import POCPackager
-
-        logger.info(
-            f"[{self.worker_display_name}] ╔══════════════════════════════════════════════════════════════╗"
-        )
-        logger.info(
-            f"[{self.worker_display_name}] ║  🎯 CRASH FOUND BY FUZZER!                                   ║"
-        )
-        logger.info(
-            f"[{self.worker_display_name}] ║  Hash: {crash_record.crash_hash[:16]:<44} ║"
-        )
-        logger.info(
-            f"[{self.worker_display_name}] ║  Type: {(crash_record.vuln_type or 'unknown'):<44} ║"
-        )
-        logger.info(
-            f"[{self.worker_display_name}] ╚══════════════════════════════════════════════════════════════╝"
-        )
-
+        source = crash_record.source  # "global_fuzzer" | "vh_fuzzer"
         try:
-            # 1. Read crash file bytes
-            crash_path = Path(crash_record.crash_path)
-            if not crash_path.exists():
+            blob = Path(crash_record.crash_path).read_bytes()
+        except OSError as e:
+            logger.error(f"[{self.worker_display_name}] crash file unreadable: {e}")
+            return
+
+        store = get_store()
+        vh_id = None
+        if source == "vh_fuzzer":
+            vh = store.find_vh_by_prefix(self.worker_id, crash_record.vh_id or "")
+            if vh is None:
                 logger.error(
-                    f"[{self.worker_display_name}] Crash file not found: {crash_path}"
+                    f"[{self.worker_display_name}] VH fuzzer crash for unknown VH "
+                    f"{crash_record.vh_id!r}; recorded as the global fuzzer's"
                 )
-                return
-
-            crash_blob = crash_path.read_bytes()
-            crash_blob_b64 = base64.b64encode(crash_blob).decode("utf-8")
-
-            # 2. Create PoC record (is_successful=False - don't trigger dispatcher yet!)
-            from ..core.utils import generate_id
-
-            poc_id = generate_id()
-
-            # Get run workspace for results
-            results_dir = self.run_workspace_path / "results"
-            pocs_dir = results_dir / "pocs"
-            pocs_dir.mkdir(parents=True, exist_ok=True)
-
-            # Copy crash file to pocs directory
-            poc_blob_path = pocs_dir / f"crash_{crash_record.crash_hash[:16]}.bin"
-            poc_blob_path.write_bytes(crash_blob)
-
-            # Determine source from crash_record
-            source = crash_record.source  # "global_fuzzer" | "vh_fuzzer"
-
-            # Look up the POCAgent that triggered this VH Fuzzer
-            agent_id = None
-            if source == "vh_fuzzer" and crash_record.vh_id:
-                try:
-                    from ..db import get_database
-
-                    db = get_database()
-                    if db is not None:
-                        from bson import ObjectId
-
-                        agent_doc = db.agents.find_one(
-                            {
-                                "vh_id": crash_record.vh_id,
-                                "run_id": ObjectId(self.run_id),
-                                "agent_type": "POCAgent",
-                            }
-                        )
-                        if agent_doc:
-                            agent_id = str(agent_doc["_id"])
-                            logger.info(
-                                f"[{self.worker_display_name}] Linked VH Fuzzer PoC to POCAgent {agent_id[:8]}"
-                            )
-                except Exception as e:
-                    logger.debug(
-                        f"[{self.worker_display_name}] Failed to look up POCAgent for VH: {e}"
-                    )
-
-            poc = POC(
-                poc_id=poc_id,
-                run_id=self.run_id,
-                vulnerability_hypothesis_id=crash_record.vh_id or "",  # VH ID if from VH Fuzzer
-                generation_id=generate_id(),  # Unique generation ID
-                source=source,  # Track PoC source
-                source_worker_id=crash_record.worker_id,  # Track which worker found it
-                agent_id=agent_id,  # POCAgent that initiated fuzzing (if VH Fuzzer)
-                iteration=0,
-                attempt=1,
-                variant=1,
-                blob=crash_blob_b64,
-                blob_path=str(poc_blob_path),
-                gen_blob=f"""# Fuzzer-discovered crash
-# Source: {source}
-# Hash: {crash_record.crash_hash}
-# Type: {crash_record.vuln_type}
-# Worker: {crash_record.worker_id}
-
-import base64
-
-# PoC blob (base64 encoded)
-POC_BLOB_B64 = "{crash_blob_b64}"
-
-def generate(variant: int = 1) -> bytes:
-    return base64.b64decode(POC_BLOB_B64)
-""",
+                source = "global_fuzzer"
+            else:
+                vh_id = vh.id
+        try:
+            attempt_id = store.add_poc_attempt(
+                self.run_id,
+                source,
+                self.harness_id,
+                crash_record.sanitizer or self.sanitizer,
+                blob,
+                vh_id=vh_id,
+                worker_id=self.worker_id if source == "vh_fuzzer" else None,
+            )
+            result = record_crash(
+                attempt_id,
+                crash_record.sanitizer_output or "",
+                self.fuzzer,
+                blob,
                 vuln_type=crash_record.vuln_type,
-                harness_name=self.fuzzer,
-                sanitizer=self.sanitizer,
-                sanitizer_output=crash_record.sanitizer_output[:10000]
-                if crash_record.sanitizer_output
-                else "",
-                description=f"Fuzzer-discovered crash ({source})",
-                # The monitor already deduplicated this crash and computed its
-                # signature; carrying it onto the PoC is what lets the PoC count
-                # be a count of bugs (one signature = one bug) across workers.
-                # Without it every fuzzer-found crash reached the DB unsigned.
-                signature=crash_record.signature,
-                is_successful=False,  # NOT yet! Generate report first
-                is_active=True,
-                verified_at=None,  # Not verified yet
             )
-
-            # Save PoC to database (inactive)
-            self.repos.pocs.save(poc)
-            logger.info(
-                f"[{self.worker_display_name}] PoC {poc_id[:8]} created (pending report)"
-            )
-
-            # 3. Package PoC with report, then activate
-            packager = POCPackager(
-                str(results_dir),
-                run_id=self.run_id,
-                worker_id=self.worker_id,
-                repos=self.repos,
-                analyzer_socket_path=self.analysis_socket_path,
-            )
-
-            # Schedule: package -> activate (called from async context)
-            try:
-                loop = asyncio.get_running_loop()
-                asyncio.create_task(
-                    self._package_and_activate_poc(packager, poc, poc_id)
-                )
-            except RuntimeError:
-                # No running loop - run synchronously
-                self._package_and_activate_poc_sync(packager, poc, poc_id)
-
         except Exception as e:
-            logger.error(f"[{self.worker_display_name}] Error processing crash: {e}")
-            import traceback
+            logger.exception(f"[{self.worker_display_name}] could not record the crash: {e}")
+            return
 
-            logger.debug(traceback.format_exc())
-
-    async def _package_and_activate_poc(self, packager, poc, poc_id: str) -> None:
-        """
-        Async: Package PoC with report, then activate it.
-
-        Flow: Generate Report -> Package -> Activate (is_successful=True)
-
-        Args:
-            packager: POCPackager instance
-            poc: PoC object
-            poc_id: PoC ID for logging
-        """
-        try:
-            # 1. Package PoC with report
+        if not result.is_new:
             logger.info(
-                f"[{self.worker_display_name}] Generating report for PoC {poc_id[:8]}..."
+                f"[{self.worker_display_name}] {source} crash is a known bug "
+                f"({result.describe}, crash {result.crash_id[:8]})"
             )
-            if not extract_class(poc.sanitizer_output or ""):
-                logger.warning(
-                    f"[{self.worker_display_name}] PoC {poc_id[:8]} NOT activated: "
-                    f"no real fault class (sanitizer/fatal-signal) in its output -- "
-                    f"a plain exit() is not a memory-safety finding"
-                )
-                return
-
-            zip_path = await packager.package_poc_async(poc.to_dict(), None)
-
-            if zip_path:
-                logger.info(
-                    f"[{self.worker_display_name}] ✅ PoC {poc_id[:8]} packaged: {zip_path}"
-                )
-
-                # 2. Activate PoC (now dispatcher will detect it)
-                self.repos.pocs.update(poc_id, {"is_successful": True})
-                self.repos.runs.add_poc(self.run_id, poc_id)
-                logger.info(
-                    f"[{self.worker_display_name}] ✅ PoC {poc_id[:8]} activated!"
-                )
-            else:
-                logger.warning(
-                    f"[{self.worker_display_name}] Failed to package PoC {poc_id[:8]}"
-                )
-
-        except Exception as e:
-            logger.error(
-                f"[{self.worker_display_name}] Error packaging PoC {poc_id[:8]}: {e}"
-            )
-            import traceback
-
-            logger.debug(traceback.format_exc())
-
-    def _package_and_activate_poc_sync(self, packager, poc, poc_id: str) -> None:
-        """
-        Sync: Package PoC with report, then activate it.
-
-        Args:
-            packager: POCPackager instance
-            poc: PoC object
-            poc_id: PoC ID for logging
-        """
-        try:
-            # 1. Package PoC with report
-            logger.info(
-                f"[{self.worker_display_name}] Generating report for PoC {poc_id[:8]}..."
-            )
-            if not extract_class(poc.sanitizer_output or ""):
-                logger.warning(
-                    f"[{self.worker_display_name}] PoC {poc_id[:8]} NOT activated: "
-                    f"no real fault class (sanitizer/fatal-signal) in its output -- "
-                    f"a plain exit() is not a memory-safety finding"
-                )
-                return
-
-            zip_path = packager.package_poc(poc.to_dict(), None)
-
-            if zip_path:
-                logger.info(
-                    f"[{self.worker_display_name}] ✅ PoC {poc_id[:8]} packaged: {zip_path}"
-                )
-
-                # 2. Activate PoC (now dispatcher will detect it)
-                self.repos.pocs.update(poc_id, {"is_successful": True})
-                self.repos.runs.add_poc(self.run_id, poc_id)
-                logger.info(
-                    f"[{self.worker_display_name}] ✅ PoC {poc_id[:8]} activated!"
-                )
-            else:
-                logger.warning(
-                    f"[{self.worker_display_name}] Failed to package PoC {poc_id[:8]}"
-                )
-
-        except Exception as e:
-            logger.error(
-                f"[{self.worker_display_name}] Error packaging PoC {poc_id[:8]}: {e}"
-            )
-            import traceback
-
-            logger.debug(traceback.format_exc())
+            return
+        logger.info(
+            f"[{self.worker_display_name}] NEW crash from {source}: {result.describe} "
+            f"(crash {result.crash_id[:8]})"
+        )
+        results_dir = str(self.run_workspace_path / "results")
+        # The monitor calls this from its own thread: the report agent runs
+        # in its own event loop there, off the strategy's.
+        package_crash(result.crash_id, results_dir, self.analysis_socket_path)
 
     @property
     def graph(self):
@@ -697,12 +505,7 @@ def generate(variant: int = 1) -> bytes:
         Run the worker execution pipeline.
 
         Selects and executes the appropriate strategy based on task_type.
-        Uses WorkerContext for proper isolation and MongoDB linking.
-
-        Hierarchy:
-            Run (ObjectId)
-            └── Worker (ObjectId) ← WorkerContext provides this
-                └── Agent (ObjectId) ← AgentContext provides this
+        The worker row goes running -> completed / error in WorkerContext.
 
         Returns:
             Result dictionary with findings
@@ -711,17 +514,11 @@ def generate(variant: int = 1) -> bytes:
             f"Starting executor: {self.fuzzer} with {self.sanitizer} (mode: {self.scan_mode}, job: {self.task_type})"
         )
 
-        # Create WorkerContext for isolation
-        # This creates the Worker record in MongoDB with unique ObjectId
         with WorkerContext(
             run_id=self.run_id,
+            worker_id=self.worker_id,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
-            scan_mode=self.scan_mode,
-            project_name=self.project_name,
-            task_type=self.task_type,
-            workspace_path=str(self.workspace_path),
-            celery_job_id=self.celery_job_id,
         ) as ctx:
             self._worker_context = ctx
 
@@ -753,7 +550,7 @@ def generate(variant: int = 1) -> bytes:
                 result["fuzzer"] = self.fuzzer
                 result["sanitizer"] = self.sanitizer
                 result["task_type"] = self.task_type
-                result["worker_id"] = ctx.worker_id  # Include ObjectId in result
+                result["worker_id"] = ctx.worker_id
 
                 # Map strategy-specific fields to common result fields
                 if "poc_generated" in result:
@@ -774,4 +571,3 @@ def generate(variant: int = 1) -> bytes:
                 logger.exception(f"Executor failed: {e}")
                 raise
 
-        # Context exits here, automatically persisting to MongoDB

@@ -21,7 +21,7 @@ from .base import BaseAgent, format_tool_args
 from .prompts import POC_AGENT_SYSTEM_PROMPT
 from ..llms import LLMClient, ModelInfo
 from ..tools.poc import set_poc_context, update_poc_iteration
-from ..core.models.agent import AgentType
+from .types import AgentType
 
 
 # =============================================================================
@@ -122,8 +122,6 @@ class POCAgent(BaseAgent):
         output_dir: Optional[Path] = None,
         log_dir: Optional[Path] = None,
         workspace_path: Optional[Path] = None,
-        # Database
-        repos: Any = None,
         # Verification context
         fuzzer_path: Optional[Path] = None,
         docker_image: Optional[str] = None,
@@ -154,7 +152,6 @@ class POCAgent(BaseAgent):
             output_dir: Directory to save PoC files
             log_dir: Directory for log files
             workspace_path: Path to workspace (for reading source code)
-            repos: Database repository manager
             fuzzer_path: Path to fuzzer binary (for verification)
             docker_image: Docker image for running fuzzer
             fuzzer_code: Fuzzer source code (passed directly to avoid DB lookup)
@@ -178,7 +175,6 @@ class POCAgent(BaseAgent):
         self.max_poc_attempts = max_poc_attempts
         self.output_dir = Path(output_dir) if output_dir else None
         self.workspace_path = Path(workspace_path) if workspace_path else None
-        self.repos = repos
         self.fuzzer_path = Path(fuzzer_path) if fuzzer_path else None
         self.docker_image = docker_image
 
@@ -331,14 +327,12 @@ class POCAgent(BaseAgent):
             "Goal": "Generate crashing input (PoC)",
         }
 
-    def _configure_context(self, ctx) -> None:
-        """Configure agent context with VH ID, and register the PoC tool context."""
-        if self.vulnerability_hypothesis:
-            vh_id = self.vulnerability_hypothesis.get(
-                "vulnerability_hypothesis_id"
-            ) or self.vulnerability_hypothesis.get("_id")
-            ctx.vh_id = str(vh_id) if vh_id else None
+    def _agent_row(self) -> Dict[str, Any]:
+        vh = self.vulnerability_hypothesis or {}
+        return {"vh_id": vh.get("id") or vh.get("vulnerability_hypothesis_id")}
 
+    def _configure_context(self, ctx) -> None:
+        """Register the PoC tool context under the agent's id."""
         # After the context exists and before the MCP server starts: this is the
         # only point where the id the tools will query is knowable.
         self._setup_poc_context(ctx.agent_id)
@@ -371,39 +365,21 @@ class POCAgent(BaseAgent):
         if self._fuzzer_source is not None:
             return self._fuzzer_source
 
-        if not self.repos or not self.run_id or not self.fuzzer:
+        from ..worker.scope import get_scope
+
+        scope = get_scope()
+        if scope is None:
             return None
-
         try:
-            # Get fuzzer info from database
-            fuzzer_obj = self.repos.fuzzers.find_by_name(self.run_id, self.fuzzer)
-            if not fuzzer_obj or not fuzzer_obj.source_path:
-                logger.warning(
-                    f"[POCAgent] Fuzzer source path not found for {self.fuzzer}"
-                )
-                return None
+            from ..db.store import get_store
 
-            # Build full path: workspace/repo/{source_path}
-            if not self.workspace_path:
-                logger.warning(
-                    "[POCAgent] workspace_path not set, cannot load fuzzer source"
-                )
-                return None
-
-            source_file = self.workspace_path / "repo" / fuzzer_obj.source_path
-            if not source_file.exists():
-                logger.warning(
-                    f"[POCAgent] Fuzzer source file not found: {source_file}"
-                )
-                return None
-
-            self._fuzzer_source = source_file.read_text()
-            logger.info(f"[POCAgent] Loaded fuzzer source from {source_file}")
-            return self._fuzzer_source
-
+            harness = get_store().harness(scope.harness_id)
+            if harness and harness.source_path and Path(harness.source_path).is_file():
+                self._fuzzer_source = Path(harness.source_path).read_text(errors="replace")
+                return self._fuzzer_source
         except Exception as e:
             logger.warning(f"[POCAgent] Failed to load fuzzer source: {e}")
-            return None
+        return None
 
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message with vulnerability hypothesis context."""
@@ -514,7 +490,6 @@ Your PoC must:
             run_id=self.run_id,
             worker_id=agent_id,  # The id run_async bound the MCP server to
             output_dir=self.output_dir,
-            repos=self.repos,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             vulnerability_hypothesis_id=vh_id,
@@ -683,6 +658,7 @@ Your PoC must:
                     # through create_poc / reach_probe, so a bare-text turn is never wanted.
                     tool_choice="required",
                 )
+                self._call_key = getattr(response, "record_key", None)
             except Exception as e:
                 import traceback
 
@@ -756,6 +732,7 @@ Your PoC must:
                     )
 
                     # Execute tool via MCP
+                    self._tool_call_id = tool_id
                     tool_result = await self._execute_tool(client, tool_name, tool_args)
                     self.total_tool_calls += 1
 

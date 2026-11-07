@@ -10,11 +10,7 @@ from .context import (
     AgentContext,
     get_agent_context,
     get_all_agent_contexts,
-    # Monitoring API
-    get_agent_status,
-    get_agents_by_worker,
-    get_agents_by_run,
-    get_active_agents,
+    cancel_agents_by_worker,
 )
 from .poc_agent import POCAgent, POCResult
 from .lg_planning_agent import LGPlanningAgent
@@ -35,11 +31,7 @@ __all__ = [
     "AgentContext",
     "get_agent_context",
     "get_all_agent_contexts",
-    # Monitoring API
-    "get_agent_status",
-    "get_agents_by_worker",
-    "get_agents_by_run",
-    "get_active_agents",
+    "cancel_agents_by_worker",
     # Logic group
     "LGPlanningAgent",
     # VH Generators

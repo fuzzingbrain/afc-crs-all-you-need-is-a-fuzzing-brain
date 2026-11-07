@@ -7,8 +7,8 @@ Creates both a folder and a zip file in the results directory.
 
 Output structure:
     results/pocs/
-    ├── poc_{poc_id}.zip
-    └── poc_{poc_id}/
+    ├── crash_{crash_id}.zip
+    └── crash_{crash_id}/
         ├── report.md
         ├── poc_details.json
         ├── vh_details.json
@@ -31,150 +31,94 @@ from loguru import logger
 
 
 class POCPackager:
-    """
-    Packages verified PoCs with all related files.
-
-    Creates a folder structure and zip file containing:
-    - report.md: LLM-generated vulnerability report
-    - poc_details.json: PoC metadata
-    - vh_details.json: Vulnerability hypothesis details
-    - gen_blob.py: Python generator code
-    - poc.bin: The actual PoC binary
-    - conversation.json: PoC agent conversation history
-    - conversation.md: Human-readable conversation
+    """Writes the package of one crash: its report, input, generator, VH and
+    the PoC agent's conversation, as a folder and a zip under results/pocs/.
     """
 
-    def __init__(
-        self,
-        results_dir: str,
-        run_id: str = "",
-        worker_id: str = "",
-        repos: Any = None,
-        analyzer_socket_path: str = None,
-    ):
-        """
-        Initialize PoC Packager.
-
-        Args:
-            results_dir: Path to results directory (e.g., workspace/results)
-            run_id: Run ID for context (needed for report agent tools)
-            worker_id: Worker ID for context
-            repos: Database repository manager (for updating PoC)
-            analyzer_socket_path: Path to analyzer socket (for code analysis tools)
-        """
+    def __init__(self, results_dir: str, analyzer_socket_path: str = None):
         self.results_dir = Path(results_dir)
         self.pocs_dir = self.results_dir / "pocs"
         self.pocs_dir.mkdir(parents=True, exist_ok=True)
-        self.run_id = run_id
-        self.worker_id = worker_id or f"report_{run_id[:8]}"
-
-        # Store analyzer context for restoration in new event loop
+        # Restored in the report agent's event loop (asyncio.run starts fresh).
         self.analyzer_socket_path = analyzer_socket_path
-        self.repos = repos
 
-        # Report agent created lazily to avoid circular import
-        self._report_agent = None
+    def _records(self, crash_id):
+        from ..db.store import get_store, vh_dict
 
-    def _get_report_agent(self):
-        """Lazy initialization of report agent to avoid circular import."""
-        if self._report_agent is None:
-            from ..agents.poc_report_agent import POCReportAgent
+        store = get_store()
+        crash = store.get_crash(crash_id)
+        if crash is None:
+            raise ValueError(f"no crash {crash_id}")
+        attempt = store.get_poc_attempt(crash.first_attempt_id)
+        harness = store.harness(attempt.harness_id)
+        vh = store.get_vh(attempt.vh_id) if attempt.vh_id else None
+        gen = attempt.generator_code or (
+            "# Found by the fuzzer: the input itself is the PoC.\n"
+            "def generate(variant: int = 1) -> bytes:\n"
+            "    return open('poc.bin', 'rb').read()\n"
+        )
+        poc = {
+            "poc_id": str(crash.id),
+            "crash_id": str(crash.id),
+            "attempt_id": str(attempt.id),
+            "run_id": str(crash.run_id),
+            "vulnerability_hypothesis_id": str(attempt.vh_id) if attempt.vh_id else None,
+            "harness_name": harness.name if harness else "",
+            "sanitizer": attempt.sanitizer,
+            "vuln_type": crash.vuln_type,
+            "signature": crash.signature,
+            "source": attempt.source,
+            "attempt": attempt.attempt,
+            "variant": attempt.variant,
+            "created_at": attempt.created_at,
+            "gen_blob": gen,
+            "blob": base64.b64encode(bytes(attempt.blob)).decode("ascii"),
+            "blob_path": "poc.bin",
+            "sanitizer_output": attempt.sanitizer_output or "",
+        }
+        conversation = store.agent_conversation(attempt.agent_id) if attempt.agent_id else []
+        return store, crash, attempt, poc, (vh_dict(vh) if vh else None), conversation
 
-            from ..llms.routing import Role, model_for
+    async def package_crash_async(self, crash_id) -> Optional[str]:
+        store, crash, attempt, poc, vh, conversation = self._records(crash_id)
+        short = str(crash.id)[:8]
+        if self.analyzer_socket_path:
+            from ..tools.analyzer import set_analyzer_context
 
-            self._report_agent = POCReportAgent(
-                model=model_for(Role.UTILITY),
-                run_id=self.run_id,
-                worker_id=self.worker_id,
-                repos=self.repos,
-            )
-        return self._report_agent
+            set_analyzer_context(self.analyzer_socket_path, client_id=f"report_{short}")
 
-    async def package_poc_async(
-        self,
-        poc: Dict[str, Any],
-        vh: Dict[str, Any],
-        conversation: List[Dict[str, Any]] = None,
-    ) -> Optional[str]:
-        """
-        Package a verified PoC asynchronously.
+        from ..agents.poc_report_agent import POCReportAgent
+        from ..llms.routing import Role, model_for
 
-        Args:
-            poc: PoC record from database
-            vh: Vulnerability hypothesis record from database
-            conversation: PoC agent conversation history
+        agent = POCReportAgent(
+            model=model_for(Role.UTILITY),
+            run_id=str(crash.run_id),
+            worker_id=str(attempt.worker_id) if attempt.worker_id else "",
+            crash_id=str(crash.id),
+        )
+        result = await agent.generate_report_async(poc, vh)
+        report = result.report_content or f"# Report not generated\n\n{result.error or ''}\n"
 
-        Returns:
-            Path to the created zip file, or None if failed
-        """
-        try:
-            # Restore analyzer context in new event loop (asyncio.run creates fresh context)
-            if self.analyzer_socket_path:
-                from ..tools.analyzer import set_analyzer_context
+        folder = self.pocs_dir / f"crash_{short}"
+        folder.mkdir(parents=True, exist_ok=True)
+        await asyncio.gather(
+            self._write_report(folder, report),
+            self._write_poc_details(folder, poc),
+            self._write_vh_details(folder, vh),
+            self._write_gen_blob(folder, poc),
+            self._write_poc_binary(folder, poc),
+            self._write_conversation(folder, conversation),
+        )
+        zip_path = self.pocs_dir / f"crash_{short}.zip"
+        self._create_zip(folder, zip_path)
+        store.set_crash_report(crash.id, report)
+        store.set_crash_package(crash.id, str(zip_path))
+        logger.info(f"[POCPackager] crash {short} packaged: {zip_path}")
+        return str(zip_path)
 
-                set_analyzer_context(
-                    self.analyzer_socket_path, client_id=self.worker_id
-                )
-                logger.debug(
-                    f"[POCPackager] Restored analyzer context: {self.analyzer_socket_path}"
-                )
-
-            raw_poc_id = poc.get("poc_id") or poc.get("_id") or "unknown"
-            poc_id = str(raw_poc_id)
-            short_id = poc_id[:8] if len(poc_id) > 8 else poc_id
-
-            logger.info(f"[POCPackager] Packaging PoC {short_id}...")
-
-            # Create folder
-            poc_folder = self.pocs_dir / f"poc_{short_id}"
-            poc_folder.mkdir(parents=True, exist_ok=True)
-
-            # Generate report using PoC Report Agent (lazy init)
-            report_agent = self._get_report_agent()
-            report_result = await report_agent.generate_report_async(poc, vh)
-
-            # Write all files
-            await asyncio.gather(
-                self._write_report(poc_folder, report_result.report_content),
-                self._write_poc_details(poc_folder, poc),
-                self._write_vh_details(poc_folder, vh),
-                self._write_gen_blob(poc_folder, poc),
-                self._write_poc_binary(poc_folder, poc),
-                self._write_conversation(poc_folder, conversation),
-            )
-
-            # Create zip file
-            zip_path = self.pocs_dir / f"poc_{short_id}.zip"
-            self._create_zip(poc_folder, zip_path)
-
-            logger.info(f"[POCPackager] PoC {short_id} packaged successfully")
-            logger.info(f"[POCPackager]   Folder: {poc_folder}")
-            logger.info(f"[POCPackager]   Zip: {zip_path}")
-
-            return str(zip_path)
-
-        except Exception as e:
-            logger.error(f"[POCPackager] Failed to package PoC: {e}")
-            return None
-
-    def package_poc(
-        self,
-        poc: Dict[str, Any],
-        vh: Dict[str, Any],
-        conversation: List[Dict[str, Any]] = None,
-    ) -> Optional[str]:
-        """
-        Package a verified PoC synchronously.
-
-        Args:
-            poc: PoC record from database
-            vh: Vulnerability hypothesis record from database
-            conversation: PoC agent conversation history
-
-        Returns:
-            Path to the created zip file, or None if failed
-        """
-        return asyncio.run(self.package_poc_async(poc, vh, conversation))
+    def package_crash(self, crash_id) -> Optional[str]:
+        """Synchronous; from a thread with no running event loop."""
+        return asyncio.run(self.package_crash_async(crash_id))
 
     async def _write_report(self, folder: Path, content: str):
         """Write report.md"""
@@ -192,15 +136,13 @@ class POCPackager:
             "harness_name": poc.get("harness_name"),
             "sanitizer": poc.get("sanitizer"),
             "vuln_type": poc.get("vuln_type"),
-            "is_successful": poc.get("is_successful"),
-            "iteration": poc.get("iteration"),
+            "crash_id": poc.get("crash_id"),
+            "attempt_id": poc.get("attempt_id"),
+            "signature": poc.get("signature"),
+            "source": poc.get("source"),
             "attempt": poc.get("attempt"),
             "variant": poc.get("variant"),
             "created_at": self._serialize_datetime(poc.get("created_at")),
-            "verified_at": self._serialize_datetime(poc.get("verified_at")),
-            "blob_path": poc.get("blob_path"),
-            "architecture": poc.get("architecture"),
-            "engine": poc.get("engine"),
         }
         details_path = folder / "poc_details.json"
         details_path.write_text(
@@ -262,7 +204,7 @@ Run: python3 gen_blob.py > poc.bin
 
 if __name__ == "__main__":
     import sys
-    data = generate()
+    data = generate(1)
     sys.stdout.buffer.write(data)
 '''
         gen_path = folder / "gen_blob.py"

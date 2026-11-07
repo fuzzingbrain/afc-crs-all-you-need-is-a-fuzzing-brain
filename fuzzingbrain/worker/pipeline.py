@@ -3,7 +3,8 @@
 All-in-Agent Pipeline
 
 Parallel pipeline for VH verification and PoC generation.
-Uses asyncio + MongoDB for concurrent agent execution with claim-based task distribution.
+Uses asyncio + PostgreSQL claims (conditional status updates): two agents of
+one worker never take the same VH.
 
 Architecture:
     ┌─────────────────────────────────────────────────────────────────────┐
@@ -26,8 +27,7 @@ from typing import Any, Dict, Optional
 from loguru import logger
 
 from ..agents import VHVerifier, POCAgent
-from ..core.models import VHStatus
-from ..db import RepositoryManager
+from ..db.store import VH_POC_THRESHOLD, get_store, vh_dict
 from ..tools.analyzer import set_analyzer_context
 from ..fuzzer import FuzzerManager, get_fuzzer_manager
 from ..llms.routing import Role, model_for
@@ -42,7 +42,7 @@ class PipelineConfig:
     num_poc_agents: int = 1  # Number of PoC generation agents
 
     # Thresholds
-    poc_min_score: float = 0.5  # Minimum score to proceed to PoC generation
+    poc_min_score: float = VH_POC_THRESHOLD  # Minimum score to proceed to PoC generation
 
     # Timeouts
     poll_interval: float = 1.0  # Seconds between polling for new tasks
@@ -105,7 +105,6 @@ class AgentPipeline:
     def __init__(
         self,
         run_id: str,
-        repos: RepositoryManager,
         fuzzer: str = "",
         sanitizer: str = "address",
         scan_mode: str = "delta",  # "delta" or "full" - affects verify prompt
@@ -123,7 +122,6 @@ class AgentPipeline:
 
         Args:
             run_id: Run ID
-            repos: Database repository manager
             fuzzer: Fuzzer name (for agent context)
             sanitizer: Sanitizer type
             config: Pipeline configuration
@@ -135,7 +133,7 @@ class AgentPipeline:
             worker_id: Worker ID for FuzzerManager lookup
         """
         self.run_id = run_id
-        self.repos = repos
+        self.store = get_store()
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
         self.scan_mode = scan_mode
@@ -241,13 +239,7 @@ class AgentPipeline:
         idle_cycles = 0
 
         while not self._shutdown:
-            # Try to claim a task (filter by fuzzer/sanitizer for worker isolation)
-            vh = self.repos.vulnerability_hypotheses.claim_for_verify(
-                self.run_id,
-                agent_id,
-                harness_name=self.fuzzer,
-                sanitizer=self.sanitizer,
-            )
+            vh = self.store.claim_vh(self.worker_id, "pending_verify", "verifying")
 
             if vh is None:
                 # No work available.
@@ -285,122 +277,72 @@ class AgentPipeline:
             import time as time_module
 
             vh_start_time = time_module.time()
-            claimed_vh_id = vh.vulnerability_hypothesis_id
+            claimed_vh_id = vh.id
+            short = str(vh.id)[:8]
             try:
-                logger.info(
-                    f"[Pipeline:{agent_id}] Verifying VH {vh.vulnerability_hypothesis_id}"
-                )
-
-                # Run verification agent
-                # Extract index from agent_id (e.g., "verify_1" -> 1)
+                logger.info(f"[Pipeline:{agent_id}] Verifying VH {short}")
                 agent_index = int(agent_id.split("_")[1]) if "_" in agent_id else 0
                 verify_agent = VHVerifier(
-                    # Note: mode removed - VHVerifier is always for verification
                     fuzzer=self.fuzzer,
-                    sanitizer=self.sanitizer,
-                    scan_mode=self.scan_mode,  # Use pipeline's scan_mode
+                    sanitizer=vh.sanitizer or self.sanitizer,
+                    scan_mode=self.scan_mode,
                     model=model_for(Role.VERIFIER),
                     run_id=self.run_id,
-                    worker_id=self.worker_id,  # Use actual worker_id, not agent_id
+                    worker_id=self.worker_id,
                     log_dir=self.log_dir,
                     index=agent_index,
                     target_name=vh.function_name or "",
                     fuzzer_source=self.fuzzer_source,
                 )
-                verify_agent.set_context(vulnerability_hypothesis=vh.to_dict())
-
-                # Run async with fuzzer code for context
+                verify_agent.set_context(vulnerability_hypothesis=vh_dict(vh))
                 await verify_agent.run_async(
-                    vulnerability_hypothesis=vh.to_dict(),
+                    vulnerability_hypothesis=vh_dict(vh),
                     fuzzer_code=self.fuzzer_code,
                 )
 
-                # Get updated VH from database (agent should have updated it via tools)
-                updated_vh = self.repos.vulnerability_hypotheses.find_by_id(
-                    vh.vulnerability_hypothesis_id
+                after = self.store.get_vh(vh.id)
+                verdict = after is not None and (
+                    after.verifier_reproduced is not None
+                    or after.evidence is not None
+                    or after.score != after.finder_score
                 )
-
-                if updated_vh:
-                    # Check if agent actually updated the VH
-                    # If is_checked_by_verifier is still False, agent terminated abnormally
-                    # In that case, default to letting it pass (proceed=True)
-                    if not updated_vh.is_checked_by_verifier:
-                        logger.warning(
-                            f"[Pipeline:{agent_id}] Agent did not update VH {vh.vulnerability_hypothesis_id}, "
-                            f"defaulting to pass-through (proceed=True)"
-                        )
-                        # Recall-first: default to pass-through when the agent fails
-                        proceed = True
-                        priority = updated_vh.priority
-                        evidence = updated_vh.evidence
-                        is_crash_found = False
-                        score = updated_vh.score
-                        notes = "Agent terminated without verdict - defaulting to pass-through"
-                    else:
-                        proceed = updated_vh.proceed
-                        priority = updated_vh.priority
-                        evidence = updated_vh.evidence
-                        is_crash_found = updated_vh.is_crash_found
-                        score = updated_vh.score
-                        notes = updated_vh.verification_notes
-
-                    # Recall-first gate: proceed unless strongly disconfirmed.
-                    # (a crash always proceeds; the score threshold is gone)
-                    proceed_to_poc = bool(proceed) or bool(is_crash_found)
-
-                    # Complete verification
-                    self.repos.vulnerability_hypotheses.complete_verify(
-                        vh.vulnerability_hypothesis_id,
-                        is_crash_found=is_crash_found,
-                        score=score,
-                        notes=notes,
-                        proceed=proceed,
-                        priority=priority,
-                        evidence=evidence,
-                        proceed_to_poc=proceed_to_poc,
+                if after is None:
+                    passed = False
+                elif not verdict:
+                    # Recall-first: an agent that ended without a verdict lets
+                    # the VH through.
+                    logger.warning(
+                        f"[Pipeline:{agent_id}] No verdict on VH {short}; passing it on"
                     )
-                    claimed_vh_id = None  # Successfully processed
-
-                    # Update stats
-                    self.stats.vh_verified += 1
-                    if is_crash_found:
-                        self.stats.vh_verified_real += 1
-                    else:
-                        self.stats.vh_verified_fp += 1
-
-                    logger.info(
-                        f"[Pipeline:{agent_id}] Verified VH {vh.vulnerability_hypothesis_id}: "
-                        f"priority={priority:.2f}, real={is_crash_found}, "
-                        f"proceed={proceed}, proceed_to_poc={proceed_to_poc}"
-                    )
+                    passed = True
                 else:
-                    # VH not found, release claim
-                    self.repos.vulnerability_hypotheses.release_claim(
-                        vh.vulnerability_hypothesis_id,
-                        VHStatus.FAILED.value,
+                    passed = bool(after.verifier_reproduced) or (
+                        after.score >= self.config.poc_min_score
                     )
-                    claimed_vh_id = None  # Handled
+                to = "pending_poc" if passed else "rejected"
+                self.store.move_vh(vh.id, "verifying", to)
+                claimed_vh_id = None
 
-            except Exception as e:
-                logger.exception(
-                    f"[Pipeline:{agent_id}] Error verifying VH {vh.vulnerability_hypothesis_id}: {e}"
+                self.stats.vh_verified += 1
+                if passed:
+                    self.stats.vh_verified_real += 1
+                else:
+                    self.stats.vh_verified_fp += 1
+                logger.info(
+                    f"[Pipeline:{agent_id}] Verified VH {short}: "
+                    f"score={after.score if after else None}, -> {to}"
                 )
+            except Exception as e:
+                logger.exception(f"[Pipeline:{agent_id}] Error verifying VH {short}: {e}")
             finally:
-                # Release claim if not successfully completed
-                # Catches all exit paths including KeyboardInterrupt/CancelledError
                 if claimed_vh_id:
                     try:
-                        self.repos.vulnerability_hypotheses.release_claim(
-                            claimed_vh_id,
-                            VHStatus.PENDING_VERIFY.value,
-                        )
+                        self.store.move_vh(claimed_vh_id, "verifying", "pending_verify")
                     except Exception:
                         logger.warning(
-                            f"[Pipeline:{agent_id}] Failed to release claim for {claimed_vh_id}"
+                            f"[Pipeline:{agent_id}] Failed to release claim for {short}"
                         )
-                # Track verification time
-                vh_duration = time_module.time() - vh_start_time
-                self.stats.verify_time_total += vh_duration
+                self.stats.verify_time_total += time_module.time() - vh_start_time
 
         logger.info(f"[Pipeline:{agent_id}] Verification agent stopped")
 
@@ -428,13 +370,11 @@ class AgentPipeline:
         idle_cycles = 0
 
         while not self._shutdown:
-            # Try to claim a task (filter by fuzzer/sanitizer for worker isolation)
-            vh = self.repos.vulnerability_hypotheses.claim_for_poc(
-                self.run_id,
-                agent_id,
-                min_score=self.config.poc_min_score,
-                harness_name=self.fuzzer,
-                sanitizer=self.sanitizer,
+            vh = self.store.claim_vh(
+                self.worker_id,
+                "pending_poc",
+                "generating_poc",
+                min_score=None,
             )
 
             if vh is None:
@@ -468,128 +408,76 @@ class AgentPipeline:
 
             vh_start_time = time_module.time()
             vh_fuzzer_started = False
-            claimed_vh_id = vh.vulnerability_hypothesis_id
+            claimed_vh_id = vh.id
+            vh_id = str(vh.id)
+            short = vh_id[:8]
 
             try:
-                logger.info(
-                    f"[Pipeline:{agent_id}] Generating PoC for VH {vh.vulnerability_hypothesis_id}"
-                )
-
-                # Start VH Fuzzer for this VH (starts when PoC Agent begins processing VH)
+                logger.info(f"[Pipeline:{agent_id}] Generating PoC for VH {short}")
                 if self.fuzzer_manager:
                     try:
-                        vh_fuzzer_started = await self.fuzzer_manager.start_vh_fuzzer(
-                            vh.vulnerability_hypothesis_id
-                        )
-                        if vh_fuzzer_started:
-                            logger.debug(
-                                f"[Pipeline:{agent_id}] Started VH Fuzzer for {vh.vulnerability_hypothesis_id}"
-                            )
+                        vh_fuzzer_started = await self.fuzzer_manager.start_vh_fuzzer(vh_id)
                     except Exception as e:
-                        logger.warning(
-                            f"[Pipeline:{agent_id}] Failed to start VH Fuzzer: {e}"
-                        )
+                        logger.warning(f"[Pipeline:{agent_id}] Failed to start VH Fuzzer: {e}")
 
-                # Run PoC agent with fuzzer code
-                # Extract index from agent_id (e.g., "poc_1" -> 1)
                 agent_index = int(agent_id.split("_")[1]) if "_" in agent_id else 0
                 poc_agent = POCAgent(
                     fuzzer=self.fuzzer,
-                    sanitizer=self.sanitizer,
+                    sanitizer=vh.sanitizer or self.sanitizer,
                     model=model_for(Role.POC),
                     run_id=self.run_id,
-                    worker_id=self.worker_id,  # Use actual worker_id, not agent_id
+                    worker_id=self.worker_id,
                     output_dir=self.output_dir,
                     log_dir=self.log_dir,
-                    repos=self.repos,
                     max_iterations=self.config.max_iterations,
                     max_poc_attempts=self.config.max_poc_attempts,
                     fuzzer_path=self.config.fuzzer_path,
                     docker_image=self.config.docker_image,
                     workspace_path=self.workspace_path,
                     fuzzer_code=self.fuzzer_code,
-                    fuzzer_source=self.fuzzer_source,  # full multi-file harness (cached)
-                    fuzzer_manager=self.fuzzer_manager,  # For VH Fuzzer integration
+                    fuzzer_source=self.fuzzer_source,
+                    fuzzer_manager=self.fuzzer_manager,
                     index=agent_index,
                     target_name=vh.function_name or "",
                 )
+                result = await poc_agent.generate_poc_async(vh_dict(vh))
 
-                result = await poc_agent.generate_poc_async(vh.to_dict())
-
-                # Complete PoC generation
-                # On failure, pass harness_name/sanitizer so other contributors can retry
-                self.repos.vulnerability_hypotheses.complete_poc(
-                    vh.vulnerability_hypothesis_id,
-                    poc_id=result.poc_id if result.success else None,
-                    success=result.success,
-                    harness_name=self.fuzzer,
-                    sanitizer=self.sanitizer,
-                )
-                claimed_vh_id = None  # Successfully processed
-
-                # Update stats
+                to = "poc_generated" if result.success else "poc_failed"
+                self.store.move_vh(vh.id, "generating_poc", to)
+                claimed_vh_id = None
                 if result.success:
                     self.stats.poc_generated += 1
-                    logger.info(
-                        f"[Pipeline:{agent_id}] Generated PoC {result.poc_id} for VH {vh.vulnerability_hypothesis_id}"
-                    )
+                    logger.info(f"[Pipeline:{agent_id}] PoC found for VH {short}")
                 else:
                     self.stats.poc_failed += 1
-                    logger.warning(
-                        f"[Pipeline:{agent_id}] Failed to generate PoC for VH {vh.vulnerability_hypothesis_id}"
-                    )
-
+                    logger.warning(f"[Pipeline:{agent_id}] No PoC for VH {short}")
             except Exception as e:
-                logger.exception(
-                    f"[Pipeline:{agent_id}] Error generating PoC for VH {vh.vulnerability_hypothesis_id}: {e}"
-                )
+                logger.exception(f"[Pipeline:{agent_id}] Error generating PoC for VH {short}: {e}")
                 self.stats.poc_failed += 1
             finally:
-                # Release claim if not successfully completed
-                # Catches all exit paths including KeyboardInterrupt/CancelledError
-                # Pass harness_name/sanitizer to also clean poc_attempted_by
-                # so the same worker can retry after crash recovery
                 if claimed_vh_id:
                     try:
-                        self.repos.vulnerability_hypotheses.release_claim(
-                            claimed_vh_id,
-                            VHStatus.PENDING_POC.value,
-                            harness_name=self.fuzzer,
-                            sanitizer=self.sanitizer,
-                        )
+                        self.store.move_vh(claimed_vh_id, "generating_poc", "pending_poc")
                     except Exception:
-                        logger.warning(
-                            f"[Pipeline:{agent_id}] Failed to release claim for {claimed_vh_id}"
-                        )
-
-                # Stop VH Fuzzer (stops when PoC succeeds or fails)
+                        logger.warning(f"[Pipeline:{agent_id}] Failed to release claim for {short}")
                 if vh_fuzzer_started and self.fuzzer_manager:
                     try:
-                        await self.fuzzer_manager.stop_vh_fuzzer(vh.vulnerability_hypothesis_id)
-                        logger.debug(
-                            f"[Pipeline:{agent_id}] Stopped VH Fuzzer for {vh.vulnerability_hypothesis_id}"
-                        )
+                        await self.fuzzer_manager.stop_vh_fuzzer(vh_id)
                     except Exception as e:
-                        logger.warning(
-                            f"[Pipeline:{agent_id}] Failed to stop VH Fuzzer: {e}"
-                        )
-
-                # Track PoC generation time
-                vh_duration = time_module.time() - vh_start_time
-                self.stats.poc_time_total += vh_duration
+                        logger.warning(f"[Pipeline:{agent_id}] Failed to stop VH Fuzzer: {e}")
+                self.stats.poc_time_total += time_module.time() - vh_start_time
 
         logger.info(f"[Pipeline:{agent_id}] PoC generation agent stopped")
 
 
 async def run_pipeline(
     run_id: str,
-    repos: RepositoryManager,
     fuzzer: str = "",
     sanitizer: str = "address",
     scan_mode: str = "delta",  # "delta" or "full" - affects verify prompt
     num_verify_agents: int = 2,
     num_poc_agents: int = 1,
-    poc_min_score: float = 0.5,
+    poc_min_score: float = VH_POC_THRESHOLD,
     output_dir: Path = None,
     log_dir: Path = None,
     fuzzer_path: Path = None,
@@ -607,7 +495,6 @@ async def run_pipeline(
 
     Args:
         run_id: Run ID
-        repos: Database repository manager
         fuzzer: Fuzzer name
         sanitizer: Sanitizer type
         num_verify_agents: Number of verification agents
@@ -639,7 +526,6 @@ async def run_pipeline(
 
     pipeline = AgentPipeline(
         run_id=run_id,
-        repos=repos,
         fuzzer=fuzzer,
         sanitizer=sanitizer,
         scan_mode=scan_mode,

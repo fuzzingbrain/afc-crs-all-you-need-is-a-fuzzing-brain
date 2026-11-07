@@ -32,8 +32,8 @@ def test_delta_message_does_not_ask_for_reachability():
     assert "CHECK REACHABILITY" not in msg
     assert "mark as FALSE POSITIVE immediately" not in msg
     assert "Start by verifying reachability" not in msg
-    assert "assumed_reachable" in msg
     assert "NOT judged in delta mode" in msg
+    assert "Reachability is assumed here" in msg
 
 
 def test_delta_message_skips_pointer_hunt_for_unreachable_points():
@@ -43,7 +43,10 @@ def test_delta_message_skips_pointer_hunt_for_unreachable_points():
     assert "function pointer" not in msg.lower()
 
 
-def test_full_message_still_requires_reachability():
+def test_full_message_weighs_reachability_without_discarding():
+    # Full scan judges reachability, recall-first: an untraced path lowers the
+    # score, it does not make the hypothesis a false positive.
     msg = _message("full")
-    assert "CHECK REACHABILITY" in msg
-    assert "mark as FALSE POSITIVE immediately" in msg
+    assert "expected to be reachable" in msg
+    assert "NOT an automatic false positive" in msg
+    assert "mark as FALSE POSITIVE immediately" not in msg

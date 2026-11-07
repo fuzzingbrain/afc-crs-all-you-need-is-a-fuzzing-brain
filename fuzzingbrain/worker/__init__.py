@@ -1,42 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-FuzzingBrain Worker Package
+The worker: one per harness, run as a Celery task (tasks.py).
 
-Contains worker execution logic:
-- builder: Build fuzzer with specific sanitizer
-- executor: Run fuzzing strategies
-- cleanup: Clean up workspace after completion
-- context: Worker isolation with MongoDB ObjectId
+    executor.py   picks the strategy and owns the harness's fuzzers
+    pipeline.py   the VH verify and PoC agent pools
+    scope.py      which run / worker / harness this process works for
+    context.py    the worker row's lifecycle and the LLM buffer
 
-Hierarchy:
-    Run (ObjectId)
-    └── Worker (ObjectId) ← WorkerContext provides this
-        └── Agent (ObjectId) ← AgentContext provides this
+Nothing is imported here, so the tools can import worker.scope cheaply.
 """
-
-from .builder import WorkerBuilder
-from .executor import WorkerExecutor
-from .cleanup import cleanup_worker_workspace
-from .context import (
-    WorkerContext,
-    get_worker_context,
-    get_all_worker_contexts,
-    # Monitoring API
-    get_worker_status,
-    get_workers_by_run,
-    get_active_workers,
-)
-
-__all__ = [
-    "WorkerBuilder",
-    "WorkerExecutor",
-    "cleanup_worker_workspace",
-    # Context
-    "WorkerContext",
-    "get_worker_context",
-    "get_all_worker_contexts",
-    # Monitoring API
-    "get_worker_status",
-    "get_workers_by_run",
-    "get_active_workers",
-]

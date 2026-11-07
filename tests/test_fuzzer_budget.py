@@ -146,7 +146,7 @@ class TestTheCeilingIsConfigurable:
 
         assert "max_parallel_fuzzers" in inspect.getsource(tasks.run_worker)
         assert "max_parallel_fuzzers" in inspect.getsource(
-            dispatcher.WorkerDispatcher._dispatch_celery_task
+            dispatcher.WorkerDispatcher._send
         )
 
 
@@ -276,5 +276,5 @@ class TestThePerWorkerVHCeiling:
         from fuzzingbrain.core import dispatcher
 
         assert "vh_max_count" in inspect.getsource(
-            dispatcher.WorkerDispatcher._dispatch_celery_task
+            dispatcher.WorkerDispatcher._send
         )

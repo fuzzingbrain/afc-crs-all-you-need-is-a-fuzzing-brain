@@ -21,7 +21,7 @@ from .prompts import (
     GENERAL_SANITIZER_GUIDANCE,
 )
 from ..llms import LLMClient, ModelInfo
-from ..core.models.agent import AgentType
+from .types import AgentType
 
 
 class VHVerifier(BaseAgent):
@@ -272,6 +272,10 @@ class VHVerifier(BaseAgent):
         lines.extend(self._build_table_footer())
 
         return "\n".join(lines)
+
+    def _agent_row(self) -> Dict[str, Any]:
+        vh = self.vulnerability_hypothesis or {}
+        return {"vh_id": vh.get("id") or vh.get("vulnerability_hypothesis_id")}
 
     def _configure_context(self, ctx) -> None:
         """reach_probe / check_clamp inputs join the Global fuzzer corpus: the VH

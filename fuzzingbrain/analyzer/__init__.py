@@ -6,7 +6,7 @@ This module handles all build and static analysis tasks:
 - Build fuzzers with all sanitizers (address, memory, undefined)
 - Build coverage fuzzer (C/C++)
 - Run introspector for static analysis
-- Import results to MongoDB
+- Serve code queries over a Unix socket
 - Provide query API via Analysis Server
 
 Architecture:

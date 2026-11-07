@@ -11,9 +11,11 @@ from enum import Enum
 from typing import Optional
 import hashlib
 
-from bson import ObjectId
+import uuid
 
-from ..core.utils import generate_id
+
+def generate_id() -> str:
+    return str(uuid.uuid4())
 
 # Artifact filename prefixes libFuzzer writes under -artifact_prefix.
 #
@@ -99,68 +101,7 @@ class CrashRecord:
     sanitizer: str = "address"  # Sanitizer type
     seed_origin: Optional[str] = None  # Seed source (if trackable)
 
-    # Database fields
     created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for MongoDB storage."""
-        return {
-            "_id": ObjectId(self.crash_id) if self.crash_id else ObjectId(),
-            "crash_id": self.crash_id,
-            "run_id": ObjectId(self.run_id) if self.run_id else None,
-            "worker_id": ObjectId(self.worker_id) if self.worker_id else None,
-            "crash_path": self.crash_path,
-            "crash_hash": self.crash_hash,
-            "vuln_type": self.vuln_type,
-            "sanitizer_output": self.sanitizer_output,
-            "found_at": self.found_at,
-            "source": self.source,
-            "vh_id": self.vh_id,
-            "fuzzer_name": self.fuzzer_name,
-            "signature": self.signature,
-            "signature_desc": self.signature_desc,
-            "sanitizer": self.sanitizer,
-            "seed_origin": self.seed_origin,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "CrashRecord":
-        """Create CrashRecord from dictionary."""
-        # Handle ObjectId conversion
-        crash_id = data.get("crash_id") or data.get("_id")
-        if isinstance(crash_id, ObjectId):
-            crash_id = str(crash_id)
-
-        run_id = data.get("run_id", "")
-        if isinstance(run_id, ObjectId):
-            run_id = str(run_id)
-
-        worker_id = data.get("worker_id", "")
-        if isinstance(worker_id, ObjectId):
-            worker_id = str(worker_id)
-
-        return cls(
-            crash_id=crash_id or generate_id(),
-            run_id=run_id,
-            worker_id=worker_id,
-            crash_path=data.get("crash_path", ""),
-            crash_hash=data.get("crash_hash", ""),
-            vuln_type=data.get("vuln_type"),
-            sanitizer_output=data.get("sanitizer_output", ""),
-            found_at=data.get("found_at", datetime.now()),
-            source=data.get("source", ""),
-            vh_id=data.get("vh_id"),
-            fuzzer_name=data.get("fuzzer_name", ""),
-            signature=data.get("signature", ""),
-            signature_desc=data.get("signature_desc", ""),
-            sanitizer=data.get("sanitizer", "address"),
-            seed_origin=data.get("seed_origin"),
-            created_at=data.get("created_at", datetime.now()),
-            updated_at=data.get("updated_at", datetime.now()),
-        )
 
     @staticmethod
     def compute_hash(data: bytes) -> str:

@@ -6,6 +6,7 @@ Unified LLM client with multi-provider support and automatic fallback.
 """
 
 import asyncio
+import json
 import os
 import time
 from types import SimpleNamespace
@@ -35,8 +36,27 @@ from .models import (
     get_fallback_chain,
     get_model_by_id,
 )
-from ..core.models.llm_call import LLMCall
 from .buffer import get_worker_buffer
+
+
+def _jsonable(params: Dict[str, Any]) -> Dict[str, Any]:
+    """The call parameters worth keeping: everything but the messages and keys."""
+    out = {}
+    for k, v in params.items():
+        if k in ("messages", "api_key", "input", "instructions"):
+            continue
+        if k == "tools" and isinstance(v, list):
+            v = [
+                (t.get("function") or {}).get("name") or t.get("name")
+                for t in v
+                if isinstance(t, dict)
+            ]
+        try:
+            json.dumps(v)
+            out[k] = v
+        except (TypeError, ValueError):
+            out[k] = repr(v)
+    return out
 
 
 def _calculate_cost(
@@ -306,6 +326,7 @@ class LLMResponse:
     # Cache portions of input_tokens (input_tokens already includes these).
     cache_read_tokens: int = 0  # billed at a discount (Anthropic 0.1x, OpenAI 0.5x)
     cache_creation_tokens: int = 0  # Anthropic cache writes, billed at 1.25x
+    reasoning_tokens: Optional[int] = None  # part of output_tokens, when reported
 
     # Tool calls (if any)
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
@@ -316,6 +337,9 @@ class LLMResponse:
     # Fallback info
     fallback_used: bool = False
     original_model: Optional[str] = None
+
+    # The buffer's key for this call (tool calls refer to it).
+    record_key: Optional[int] = None
 
     @property
     def usage(self) -> Dict[str, int]:
@@ -357,6 +381,7 @@ class LLMClient:
         agent_id: str = "",
         worker_id: str = "",
         run_id: str = "",
+        role: str = "utility",
     ):
         self.config = config or get_default_config()
         self._tried_models: set = set()
@@ -366,10 +391,20 @@ class LLMClient:
         # of looping forever.
         self._fallback_rounds: int = 0
 
-        # Context for LLM call tracking
+        # Context for LLM call tracking. Inside a worker a call made without
+        # ids (quick_call, a report) still belongs to the worker's run.
+        if not run_id:
+            from ..worker.scope import get_scope
+
+            scope = get_scope()
+            if scope is not None:
+                run_id = scope.run_id
+                worker_id = worker_id or scope.worker_id
         self.agent_id = agent_id
         self.worker_id = worker_id
         self.run_id = run_id
+        # llm_calls.role: the agent sets its own (see agents/base.py).
+        self.role = role
 
     def reset_tried_models(self) -> None:
         """Reset the set of tried models (call between independent requests)"""
@@ -381,94 +416,59 @@ class LLMClient:
         response: "LLMResponse",
         success: bool = True,
         error_msg: Optional[str] = None,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        requested_model: Optional[str] = None,
     ) -> None:
-        """
-        Record an LLM call to the worker buffer.
+        """Queue the call in the process's buffer (llm_calls + llm_messages).
 
-        Thread-safe: buffer.record() is protected by internal lock.
-
-        Args:
-            response: LLMResponse from the call
-            success: Whether the call succeeded
-            error_msg: Error message if failed
+        Sets response.record_key, which the agent's tool calls refer to.
         """
         buffer = get_worker_buffer()
-        if buffer is None:
+        if buffer is None or not self.run_id:
             return
+        cost = None
+        if success:
+            _, _, cost = _calculate_cost(
+                response.model,
+                response.input_tokens,
+                response.output_tokens,
+                response.cache_read_tokens,
+                response.cache_creation_tokens,
+            )
+        output = None
+        if success:
+            output = {"role": "assistant", "content": response.content or ""}
+            if response.tool_calls:
+                output["tool_calls"] = response.tool_calls
+        row = {
+            "run_id": self.run_id,
+            "worker_id": self.worker_id or None,
+            "agent_id": self.agent_id or None,
+            "role": self.role,
+            "model": response.model,
+            "requested_model": requested_model
+            if requested_model and requested_model != response.model
+            else None,
+            "params": _jsonable(params or {}),
+            "provider": response.provider or "unknown",
+            "input_tokens": response.input_tokens if success else None,
+            "output_tokens": response.output_tokens if success else None,
+            "cache_read_tokens": response.cache_read_tokens if success else None,
+            "cache_creation_tokens": response.cache_creation_tokens if success else None,
+            "reasoning_tokens": response.reasoning_tokens if success else None,
+            "cost": cost,
+            "latency_ms": max(int(response.latency_ms), 0),
+            "success": bool(success),
+            "error_msg": None if success else (error_msg or "failed"),
+        }
+        try:
+            response.record_key = buffer.record(row, messages, output)
+        except Exception as e:
+            logger.warning(f"Could not record the LLM call: {e}")
 
-        # Calculate cost
-        _, _, cost = _calculate_cost(
-            response.model,
-            response.input_tokens,
-            response.output_tokens,
-            response.cache_read_tokens,
-            response.cache_creation_tokens,
-        )
-
-        call = LLMCall(
-            agent_id=self.agent_id,
-            worker_id=self.worker_id,
-            run_id=self.run_id,
-            model=response.model,
-            provider=response.provider,
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
-            cache_read_tokens=response.cache_read_tokens,
-            cache_creation_tokens=response.cache_creation_tokens,
-            cost=cost,
-            latency_ms=int(response.latency_ms),
-            success=success,
-            error_msg=error_msg,
-        )
-
-        buffer.record(call)
-
-    async def _arecord_llm_call(
-        self,
-        response: "LLMResponse",
-        success: bool = True,
-        error_msg: Optional[str] = None,
-    ) -> None:
-        """
-        Record an LLM call to the worker buffer (async version).
-
-        The buffer is sync (threading-based), so this just calls record() directly.
-
-        Args:
-            response: LLMResponse from the call
-            success: Whether the call succeeded
-            error_msg: Error message if failed
-        """
-        buffer = get_worker_buffer()
-        if buffer is None:
-            return
-
-        # Calculate cost
-        _, _, cost = _calculate_cost(
-            response.model,
-            response.input_tokens,
-            response.output_tokens,
-            response.cache_read_tokens,
-            response.cache_creation_tokens,
-        )
-
-        call = LLMCall(
-            agent_id=self.agent_id,
-            worker_id=self.worker_id,
-            run_id=self.run_id,
-            model=response.model,
-            provider=response.provider,
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
-            cache_read_tokens=response.cache_read_tokens,
-            cache_creation_tokens=response.cache_creation_tokens,
-            cost=cost,
-            latency_ms=int(response.latency_ms),
-            success=success,
-            error_msg=error_msg,
-        )
-
-        buffer.record(call)
+    async def _arecord_llm_call(self, response: "LLMResponse", **kwargs) -> None:
+        self._record_llm_call(response, **kwargs)
 
     @classmethod
     def close_all(cls) -> None:
@@ -877,6 +877,12 @@ class LLMClient:
         if details is not None:
             cache_read_tokens = getattr(details, "cached_tokens", 0) or 0
             cache_creation_tokens = getattr(details, "cache_creation_tokens", 0) or 0
+        if not cache_creation_tokens and usage is not None:
+            cache_creation_tokens = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        reasoning_tokens = None
+        out_details = getattr(usage, "completion_tokens_details", None) if usage else None
+        if out_details is not None:
+            reasoning_tokens = getattr(out_details, "reasoning_tokens", None)
 
         result = LLMResponse(
             content=content,
@@ -888,6 +894,7 @@ class LLMClient:
             total_tokens=usage.total_tokens if usage else 0,
             cache_read_tokens=cache_read_tokens,
             cache_creation_tokens=cache_creation_tokens,
+            reasoning_tokens=reasoning_tokens,
             tool_calls=tool_calls,
             latency_ms=latency_ms,
             fallback_used=original_model is not None,
@@ -972,6 +979,11 @@ class LLMClient:
         if max_tokens is None:
             max_tokens = self.config.max_tokens
         tools = kwargs.pop("tools", None)
+        basic = {
+            "model": model_id, "temperature": temperature,
+            "max_tokens": max_tokens, "tools": tools, **kwargs,
+        }
+        sent = None
 
         try:
             # Route to appropriate API
@@ -995,6 +1007,7 @@ class LLMClient:
                     tools=tools,
                     **kwargs,
                 )
+                sent = params
                 response = litellm.completion(**params)
 
             if not response.choices:
@@ -1008,7 +1021,11 @@ class LLMClient:
             )
 
             # Record successful LLM call
-            self._record_llm_call(result, success=True)
+            self._record_llm_call(
+                result, success=True, messages=messages,
+                params=sent if sent is not None else basic,
+                requested_model=original_model_for_report,
+            )
 
             if self.config.log_requests:
                 logger.debug(
@@ -1031,7 +1048,11 @@ class LLMClient:
                 success=False,
                 latency_ms=(time.time() - start_time) * 1000,
             )
-            self._record_llm_call(failed_response, success=False, error_msg=str(error))
+            self._record_llm_call(
+                failed_response, success=False, error_msg=str(error),
+                messages=messages, params=sent if sent is not None else basic,
+                requested_model=original_model_for_report,
+            )
 
             if self.config.fallback_enabled and self._should_fallback(error):
                 return self._try_fallback(
@@ -1207,6 +1228,11 @@ class LLMClient:
         if max_tokens is None:
             max_tokens = self.config.max_tokens
         tools = kwargs.pop("tools", None)
+        basic = {
+            "model": model_id, "temperature": temperature,
+            "max_tokens": max_tokens, "tools": tools, **kwargs,
+        }
+        sent = None
 
         try:
             # Route to appropriate API
@@ -1235,6 +1261,7 @@ class LLMClient:
                 if tools:
                     params["tools"] = tools
 
+                sent = params
                 response = await client.chat.completions.create(**params)
 
             elif _is_openai_new_api_model(model_id):
@@ -1261,6 +1288,7 @@ class LLMClient:
                 if tools:
                     params["tools"] = tools
 
+                sent = params
                 if _is_responses_api_model(model_id):
                     response = _from_responses(
                         await client.responses.create(**_to_responses_request(params))
@@ -1278,6 +1306,7 @@ class LLMClient:
                     tools=tools,
                     **kwargs,
                 )
+                sent = params
                 response = await litellm.acompletion(**params)
 
             if not response.choices:
@@ -1291,7 +1320,11 @@ class LLMClient:
             )
 
             # Record successful LLM call
-            await self._arecord_llm_call(result, success=True)
+            await self._arecord_llm_call(
+                result, success=True, messages=messages,
+                params=sent if sent is not None else basic,
+                requested_model=original_model_for_report,
+            )
 
             if self.config.log_requests:
                 logger.debug(
@@ -1328,7 +1361,9 @@ class LLMClient:
                 latency_ms=(time.time() - start_time) * 1000,
             )
             await self._arecord_llm_call(
-                failed_response, success=False, error_msg=str(error)
+                failed_response, success=False, error_msg=str(error),
+                messages=messages, params=sent if sent is not None else basic,
+                requested_model=original_model_for_report,
             )
 
             if self.config.fallback_enabled and self._should_fallback(error):

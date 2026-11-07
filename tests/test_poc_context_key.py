@@ -34,11 +34,10 @@ def agent():
         fuzzer="libpng_read_fuzzer",
         run_id="3aa25c01736d484da8d6374b",
         worker_id=STORE_KEY,
-        repos=object(),  # only stored, never called here
         fuzzer_code="int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n){return 0;}",
         verbose=False,
     )
-    a.vulnerability_hypothesis = {"_id": "6a8ffc66699de4c4", "function_name": "png_handle_iCCP"}
+    a.vulnerability_hypothesis = {"id": "6a8ffc66699de4c4", "vulnerability_hypothesis_id": "6a8ffc66699de4c4", "function_name": "png_handle_iCCP"}
     yield a
     with P._poc_contexts_lock:
         P._poc_contexts.clear()
@@ -62,10 +61,10 @@ def test_setup_cannot_run_before_the_context_exists(agent):
     assert agent.mcp_context_id != LOOKUP_KEY
 
 
-def test_vh_id_is_still_configured(agent):
-    ctx = _Ctx(LOOKUP_KEY)
-    agent._configure_context(ctx)
-    assert ctx.vh_id == "6a8ffc66699de4c4"
+def test_the_agent_row_names_its_vh(agent):
+    # The VH goes into the agents row when the context opens (vh_id is
+    # required for a POCAgent), not into the context afterwards.
+    assert agent._agent_row() == {"vh_id": "6a8ffc66699de4c4"}
 
 
 def test_no_vulnerability_hypothesis_registers_nothing(agent):

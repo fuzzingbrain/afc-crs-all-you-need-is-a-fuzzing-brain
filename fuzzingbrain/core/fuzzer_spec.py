@@ -153,3 +153,25 @@ def set_detect_leaks(on: bool) -> None:
 
 def asan_options() -> str:
     return f"ASAN_OPTIONS=detect_leaks={1 if _detect_leaks else 0}"
+
+
+# ------------------------------------------------------------ runner image
+
+OFFICIAL_IMAGE_PREFIX = "gcr.io/oss-fuzz"
+AIXCC_IMAGE_PREFIX = "aixcc-afc"
+
+
+def runner_image(fuzz_tooling: Path, project: str) -> str:
+    """The image the tooling builds a project into, which is where its binaries run.
+
+    Official OSS-Fuzz tags gcr.io/oss-fuzz/<project>; the AIxCC fork tags
+    aixcc-afc/<project> (its infra/helper.py). Only used when the task does
+    not name fuzzer.docker_image; prebuilt binaries must name it.
+    """
+    helper = Path(fuzz_tooling) / "infra" / "helper.py"
+    try:
+        if AIXCC_IMAGE_PREFIX in helper.read_text(errors="replace"):
+            return f"{AIXCC_IMAGE_PREFIX}/{project}"
+    except OSError:
+        pass
+    return f"{OFFICIAL_IMAGE_PREFIX}/{project}"

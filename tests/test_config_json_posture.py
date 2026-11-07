@@ -49,7 +49,7 @@ def test_an_unknown_key_is_refused(tmp_path):
 
 def test_the_run_id_is_generated_and_unique(tmp_path):
     a, b = _cfg(tmp_path), _cfg(tmp_path)
-    assert len(a.run_id) == 24 and a.run_id != b.run_id
+    assert len(a.run_id) == 36 and a.run_id != b.run_id  # a uuid
 
 
 def test_relative_paths_resolve_against_the_checkout(tmp_path):

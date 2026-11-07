@@ -1,989 +1,286 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Worker Dispatcher
+Worker dispatch: one worker per harness.
 
-Handles worker task dispatch:
-1. Generate {fuzzer, sanitizer} pairs
-2. Create worker workspaces
-3. Dispatch Celery tasks
-4. Monitor progress
-5. Run-level FuzzerMonitor management
+For each harness the run registered:
+  1. its workspace (worker_workspace/<harness>/)
+  2. its workers row (status queued), inserted here so the Celery task
+     carries the id and nothing has to look it up
+  3. the Celery task
+
+Then the run is watched until it ends, on the first of
+
+  poc_target   the run has proved config.poc_count distinct bugs
+  budget       the LLM spend reached config.budget_limit
+  timeout      config.timeout_minutes passed
+
+"All workers finished" does not end a run: their global fuzzers keep going
+until one of the three. On the way out every open worker is closed with the
+run's reason, every running agent is cancelled, and the run's containers are
+killed by label.
 """
 
 import shutil
+import time
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Callable, Dict, List, Optional
 
-from bson import ObjectId
-
-from .logging import logger
 from .config import Config
-from .docker_limits import docker_resource_args
-from .fuzzer_spec import asan_options
-from .models import Run, Fuzzer, FuzzerStatus, Worker, WorkerStatus
-from ..db import RepositoryManager
-from ..analyzer import AnalyzeResult
-from ..fuzzer.monitor import FuzzerMonitor
+from .logging import logger, get_log_dir
+
+
+@dataclass
+class HarnessUnit:
+    """A harness the run registered, with what its worker needs."""
+
+    harness_id: str
+    name: str
+    binaries: Dict[str, str]  # sanitizer -> binary path
+    sanitizers: List[str] = field(default_factory=list)
+
+    @property
+    def default_sanitizer(self) -> str:
+        return self.sanitizers[0]
+
+
+# What wait_for_completion returns -> runs.end_reason
+END_REASONS = {
+    "poc_target_reached": "poc_target",
+    "timeout": "timeout",
+    "budget_exceeded": "budget",
+}
 
 
 class WorkerDispatcher:
-    """
-    Dispatches worker tasks for fuzzing.
-
-    For each {fuzzer, sanitizer} pair:
-    1. Create isolated worker workspace
-    2. Dispatch Celery task (with pre-built fuzzer path)
-    3. Track worker status
-    """
+    COUNTER_PREFIX = "fuzzingbrain:counters"
+    SHUTDOWN_DEADLINE_SECONDS = 120.0
 
     def __init__(
         self,
-        run: Run,
+        run_id: str,
         config: Config,
-        repos: RepositoryManager,
-        analyze_result: AnalyzeResult = None,
-        celery_queue: str = None,
+        store,
+        harnesses: List[HarnessUnit],
+        analyze_result=None,
+        celery_queue: Optional[str] = None,
     ):
-        """
-        Initialize WorkerDispatcher.
-
-        Args:
-            run: Run object
-            config: Configuration
-            repos: Database repository manager
-            analyze_result: Result from Code Analyzer (contains pre-built fuzzer paths)
-            celery_queue: Run-scoped Celery queue name for worker isolation
-        """
-        self.run = run
+        self.run_id = str(run_id)
         self.config = config
-        self.repos = repos
-        self.project_name = config.ossfuzz_project_name or run.project_name
+        self.store = store
+        self.harnesses = harnesses
         self.analyze_result = analyze_result
         self.celery_queue = celery_queue
-        self.poc_count_target = config.poc_count  # Target PoC count (0 = unlimited)
-        self._run_oid = ObjectId(run.run_id)  # Cached ObjectId for MongoDB queries
-
-        # Redis client for real-time budget reads (millisecond latency vs MongoDB's 2-7s)
+        self.project_name = config.ossfuzz_project_name or config.project_name
+        self.workspace = Path(config.workspace)
+        self.poc_count_target = config.poc_count
         self._redis = self._connect_redis(config.redis_url)
+        # worker id -> celery task id
+        self.jobs: Dict[str, str] = {}
 
-        # Run-level FuzzerMonitor (auto-discovers crash directories)
-        docker_image = self.config.docker_image or f"gcr.io/oss-fuzz/{self.project_name}"
-
-        # Get log directory for FuzzerMonitor log file
-        from .logging import get_log_dir
-
-        log_dir = get_log_dir()
-
-        # NOTE: on_crash is deliberately NOT wired here. Each worker runs in its
-        # own Celery process with its own FuzzerManager monitor, which registers
-        # the exact prebuilt fuzzer_path/docker_image and wires on_crash to
-        # promote crashes to scored PoCs (see WorkerExecutor). Wiring on_crash on
-        # this run-level auto-discovery monitor too made BOTH monitors process
-        # every crash file (they have independent _processed_artifacts and live
-        # in different processes), producing duplicate PoC records for one bug
-        # and contradictory CRASH FOUND / NOT A CRASH logs. The worker monitor is
-        # the single promoter; this run-level monitor stays for get_stats() and
-        # run-wide crash logging only.
-        self.crash_monitor: Optional[FuzzerMonitor] = FuzzerMonitor(
-            run_id=run.run_id,
-            workspace_path=Path(run.workspace_path),
-            auto_discover=True,
-            docker_image=docker_image,
-            on_crash=None,
-            log_dir=log_dir,
-            repos=repos,
-        )
-
-    def _on_crash_found(self, crash_record) -> None:
-        """
-        Callback when FuzzerMonitor finds a new crash.
-
-        Creates PoC record, generates report, and activates PoC.
-        Note: This is called from FuzzerMonitor's background thread.
-
-        Args:
-            crash_record: CrashRecord from the monitor
-        """
-        import base64
-        from pathlib import Path
-        from .models import POC
-        from .poc_packager import POCPackager
-        from .utils import generate_id
-
-        logger.info(
-            f"[FuzzerMonitor] New crash detected: {crash_record.crash_hash[:8]} "
-            f"(worker={crash_record.worker_id[:20]}..., vuln={crash_record.vuln_type})"
-        )
-
-        try:
-            # 1. Read crash file bytes
-            crash_path = Path(crash_record.crash_path)
-            if not crash_path.exists():
-                logger.error(f"[FuzzerMonitor] Crash file not found: {crash_path}")
-                return
-
-            crash_blob = crash_path.read_bytes()
-            crash_blob_b64 = base64.b64encode(crash_blob).decode("utf-8")
-
-            # 2. Re-verify crash to get proper sanitizer output (FuzzerMonitor may have failed)
-            vuln_type = crash_record.vuln_type
-            sanitizer_output = crash_record.sanitizer_output or ""
-
-            if not sanitizer_output and self.analyze_result:
-                # Try to verify using correct fuzzer path from analyze_result
-                fuzzer_path = self.analyze_result.get_fuzzer_path(
-                    crash_record.fuzzer_name, crash_record.sanitizer
-                )
-                if fuzzer_path:
-                    verify_result = self._verify_crash_with_docker(
-                        crash_path,
-                        fuzzer_path,
-                        crash_record.sanitizer,
-                    )
-                    if verify_result:
-                        vuln_type = verify_result.get("vuln_type") or vuln_type
-                        sanitizer_output = verify_result.get("output", "")
-                        logger.info(
-                            f"[FuzzerMonitor] Re-verified crash: vuln_type={vuln_type}"
-                        )
-
-            # 3. Create PoC record
-            poc_id = generate_id()
-            run_workspace = Path(self.run.workspace_path)
-            results_dir = run_workspace / "results"
-            pocs_dir = results_dir / "pocs"
-            pocs_dir.mkdir(parents=True, exist_ok=True)
-
-            # Copy crash file to pocs directory
-            poc_blob_path = pocs_dir / f"crash_{crash_record.crash_hash[:16]}.bin"
-            poc_blob_path.write_bytes(crash_blob)
-
-            # Determine source type from crash_record
-            source = crash_record.source  # "global_fuzzer" | "vh_fuzzer"
-
-            # Look up the POCAgent that triggered this VH Fuzzer
-            agent_id = None
-            if source == "vh_fuzzer" and crash_record.vh_id:
-                try:
-                    from ..db import get_database
-
-                    db = get_database()
-                    if db is not None:
-                        agent_doc = db.agents.find_one(
-                            {
-                                "vh_id": crash_record.vh_id,
-                                "run_id": ObjectId(self.run.run_id),
-                                "agent_type": "POCAgent",
-                            }
-                        )
-                        if agent_doc:
-                            agent_id = str(agent_doc["_id"])
-                            logger.info(
-                                f"[FuzzerMonitor] Linked VH Fuzzer PoC to POCAgent {agent_id[:8]}"
-                            )
-                except Exception as e:
-                    logger.debug(
-                        f"[FuzzerMonitor] Failed to look up POCAgent for VH: {e}"
-                    )
-
-            poc = POC(
-                poc_id=poc_id,
-                run_id=self.run.run_id,
-                vulnerability_hypothesis_id=crash_record.vh_id or "",  # VH ID if from VH Fuzzer
-                generation_id=generate_id(),
-                source=source,  # Track PoC source
-                source_worker_id=crash_record.worker_id,  # Track which worker found it
-                agent_id=agent_id,  # POCAgent that initiated fuzzing (if VH Fuzzer)
-                iteration=0,
-                attempt=1,
-                variant=1,
-                blob=crash_blob_b64,
-                blob_path=str(poc_blob_path),
-                gen_blob=f"""# Fuzzer-discovered crash
-# Source: {source}
-# Hash: {crash_record.crash_hash}
-# Type: {vuln_type}
-# Worker: {crash_record.worker_id}
-
-import base64
-
-POC_BLOB_B64 = "{crash_blob_b64}"
-
-def generate(variant: int = 1) -> bytes:
-    return base64.b64decode(POC_BLOB_B64)
-""",
-                vuln_type=vuln_type,
-                harness_name=crash_record.fuzzer_name,
-                sanitizer=crash_record.sanitizer,
-                sanitizer_output=sanitizer_output[:10000] if sanitizer_output else "",
-                description=f"Fuzzer-discovered crash ({source})",
-                # The monitor has already deduplicated this crash and knows its
-                # identity; carrying it onto the PoC is what lets the PoC count
-                # be a count of bugs. Without it every fuzzer-found crash
-                # reached the database unsigned and was counted on its own.
-                signature=crash_record.signature,
-                is_successful=False,  # Will be set True after packaging
-                is_active=True,
-            )
-
-            # Save PoC to database
-            self.repos.pocs.save(poc)
-            logger.info(f"[FuzzerMonitor] PoC {poc_id[:8]} created (pending report)")
-
-            # 3. Package PoC with report
-            analyzer_socket = (
-                self.analyze_result.socket_path if self.analyze_result else None
-            )
-            packager = POCPackager(
-                str(results_dir),
-                run_id=self.run.run_id,
-                worker_id=crash_record.worker_id,
-                repos=self.repos,
-                analyzer_socket_path=analyzer_socket,
-            )
-
-            # Package synchronously (we're in a background thread)
-            poc_dict = poc.to_dict()
-            zip_path = packager.package_poc(poc_dict, None)  # No VH for fuzzer crashes
-
-            if zip_path:
-                logger.info(f"[FuzzerMonitor] ✅ PoC {poc_id[:8]} packaged: {zip_path}")
-                # Activate PoC
-                self.repos.pocs.update(poc_id, {"is_successful": True})
-                self.repos.runs.add_poc(self.run.run_id, poc_id)
-                logger.info(f"[FuzzerMonitor] ✅ PoC {poc_id[:8]} activated!")
-
-                # Update worker's poc_generated count
-                try:
-                    worker_obj = self.repos.workers.find_by_id(crash_record.worker_id)
-                    if not worker_obj:
-                        # worker_id may be a directory name fallback (race condition)
-                        # Try looking up by workspace_path
-                        doc = self.repos.workers.collection.find_one(
-                            {"workspace_path": {"$regex": crash_record.worker_id + "$"}}
-                        )
-                        if doc:
-                            worker_obj = Worker.from_dict(doc)
-                            crash_record.worker_id = worker_obj.worker_id
-                    if worker_obj:
-                        current_count = worker_obj.poc_generated or 0
-                        self.repos.workers.update(
-                            worker_obj.worker_id,
-                            {"poc_generated": current_count + 1},
-                        )
-                except Exception as e:
-                    logger.debug(
-                        f"[FuzzerMonitor] Failed to update worker PoC count: {e}"
-                    )
-            else:
-                logger.warning(f"[FuzzerMonitor] Failed to package PoC {poc_id[:8]}")
-
-        except Exception as e:
-            logger.error(f"[FuzzerMonitor] Error processing crash: {e}")
-            import traceback
-
-            logger.debug(traceback.format_exc())
-
-    def _verify_crash_with_docker(
-        self,
-        crash_path,
-        fuzzer_path: str,
-        sanitizer: str,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Verify a crash by running it against the fuzzer in Docker.
-
-        Mounts the crash file's directory directly — crash files are
-        already in the worker workspace, no copying needed.
-
-        Args:
-            crash_path: Path to crash file (in worker workspace)
-            fuzzer_path: Path to the fuzzer binary
-            sanitizer: Sanitizer type
-
-        Returns:
-            Dict with 'vuln_type' and 'output', or None if verification failed
-        """
-        import re
-        import subprocess
-        from pathlib import Path
-
-        FALLBACK_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
-
-        docker_image = self.config.docker_image or f"gcr.io/oss-fuzz/{self.project_name}"
-        fuzzer_path = Path(fuzzer_path)
-        crash_path = Path(crash_path)
-        fuzzer_dir = fuzzer_path.parent
-        fuzzer_binary = fuzzer_path.name
-        work_dir = crash_path.parent
-
-        def _run_with_image(image: str):
-            cmd = [
-                "docker",
-                "run",
-                "--rm",
-                *docker_resource_args(memory_mb=4096, cpus=1),
-                "--platform",
-                "linux/amd64",
-                "--entrypoint",
-                "",
-                "-e",
-                "FUZZING_ENGINE=libfuzzer",
-                "-e",
-                f"SANITIZER={sanitizer}",
-                "-e",
-                "ARCHITECTURE=x86_64",
-                "-e",
-                asan_options(),
-                "-v",
-                f"{fuzzer_dir}:/fuzzers:ro",
-                "-v",
-                f"{work_dir}:/work",
-                image,
-                f"/fuzzers/{fuzzer_binary}",
-                "-timeout=30",
-                f"/work/{crash_path.name}",
-            ]
-
-            logger.debug(f"[FuzzerMonitor] Verifying crash: {' '.join(cmd[:10])}...")
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-
-            return result.stderr + "\n" + result.stdout
-
-        try:
-            combined_output = _run_with_image(docker_image)
-
-            # Fallback to base-runner on GLIBC / shared library errors
-            if (
-                "error while loading shared libraries" in combined_output
-                or "GLIBC" in combined_output
-            ) and docker_image != FALLBACK_IMAGE:
-                logger.warning(
-                    f"[FuzzerMonitor] Library error with {docker_image}, "
-                    f"falling back to {FALLBACK_IMAGE}"
-                )
-                combined_output = _run_with_image(FALLBACK_IMAGE)
-
-            # Parse vulnerability type
-            vuln_type = None
-            vuln_patterns = [
-                (r"AddressSanitizer: ([\w-]+)", 1),
-                (r"MemorySanitizer: ([\w-]+)", 1),
-                (r"UndefinedBehaviorSanitizer: ([\w-]+)", 1),
-                (r"ThreadSanitizer: ([\w-]+)", 1),
-            ]
-            for pattern, group in vuln_patterns:
-                match = re.search(pattern, combined_output)
-                if match:
-                    vuln_type = match.group(group).strip()
-                    break
-
-            return {
-                "vuln_type": vuln_type,
-                "output": combined_output,
-            }
-
-        except subprocess.TimeoutExpired:
-            logger.warning("[FuzzerMonitor] Crash verification timed out")
-            return None
-        except Exception as e:
-            logger.warning(f"[FuzzerMonitor] Crash verification failed: {e}")
-            return None
+    # ------------------------------------------------------------- Redis
 
     def _connect_redis(self, redis_url: str):
-        """Connect sync Redis client for real-time cost reads."""
         try:
             import redis as sync_redis
 
             client = sync_redis.Redis.from_url(
-                redis_url,
-                decode_responses=True,
-                socket_connect_timeout=5,
+                redis_url, decode_responses=True, socket_connect_timeout=5
             )
             client.ping()
-            logger.info(f"Dispatcher Redis connected: {redis_url}")
             return client
         except Exception as e:
-            logger.warning(
-                f"Dispatcher Redis connection failed: {e}, falling back to MongoDB for budget checks"
-            )
+            logger.warning(f"Dispatcher Redis connection failed ({e}); budget reads the database")
             return None
 
-    def _get_realtime_cost(self) -> float:
-        """
-        Get real-time run cost from Redis + MongoDB cross-check.
-
-        Uses the higher of Redis and MongoDB values to guard against
-        either source being stale or incomplete.
-        """
-        COUNTER_PREFIX = "fuzzingbrain:counters"
-
-        redis_cost = 0.0
+    def current_cost(self) -> float:
+        """The run's LLM spend: the higher of Redis (live) and the database (flushed)."""
+        live = 0.0
         if self._redis:
             try:
-                cost_str = self._redis.get(
-                    f"{COUNTER_PREFIX}:run:{self.run.run_id}:cost"
-                )
-                if cost_str is not None:
-                    redis_cost = float(cost_str)
+                v = self._redis.get(f"{self.COUNTER_PREFIX}:run:{self.run_id}:cost")
+                live = float(v) if v is not None else 0.0
             except Exception as e:
                 logger.warning(f"Redis cost read failed: {e}")
-
-        # Always check MongoDB as well (sub-ms for _id lookup)
-        mongo_cost = 0.0
         try:
-            run_doc = self.repos.runs.collection.find_one(
-                {"_id": self._run_oid},
-                {"llm_cost": 1},
-            )
-            mongo_cost = (run_doc or {}).get("llm_cost", 0.0)
+            stored = self.store.run_cost(self.run_id)
         except Exception:
-            pass
-
-        # Use the higher value — guards against either source being stale
-        return max(redis_cost, mongo_cost)
+            stored = 0.0
+        return max(live, stored)
 
     def _close_redis(self) -> None:
-        """Delete the run's cost counters, then close the Redis connection.
+        if not self._redis:
+            return
+        prefix = f"{self.COUNTER_PREFIX}:run:{self.run_id}"
+        try:
+            self._redis.delete(f"{prefix}:cost", f"{prefix}:calls")
+        except Exception as e:
+            logger.warning(f"Failed to delete the run's Redis counters: {e}")
+        try:
+            self._redis.close()
+        except Exception:
+            pass
+        self._redis = None
 
-        Only here: every worker adds to these counters, so the run's are
-        deleted once the whole run is over, not when the first worker ends.
-        """
-        if self._redis:
-            prefix = f"fuzzingbrain:counters:run:{self.run.run_id}"
-            try:
-                self._redis.delete(f"{prefix}:cost", f"{prefix}:calls")
-            except Exception as e:
-                logger.warning(f"Failed to delete the run's Redis counters: {e}")
-            try:
-                self._redis.close()
-            except Exception:
-                pass
-            self._redis = None
+    # ----------------------------------------------------------- dispatch
 
-    def dispatch(self, fuzzers: List[Fuzzer]) -> List[Dict[str, Any]]:
-        """
-        Dispatch worker tasks for all {fuzzer, sanitizer} pairs.
-
-        Also starts the Run-level FuzzerMonitor.
-
-        Args:
-            fuzzers: List of successfully built fuzzers
-
-        Returns:
-            List of dispatched job info
-        """
-        # Start Run-level FuzzerMonitor
-        if self.crash_monitor:
-            self.crash_monitor.start_monitoring()
-            logger.info(
-                f"Started Run-level FuzzerMonitor (auto-discover={self.crash_monitor.auto_discover})"
-            )
-
-        # Filter to only successful fuzzers
-        successful_fuzzers = [f for f in fuzzers if f.status == FuzzerStatus.SUCCESS]
-
-        if not successful_fuzzers:
-            logger.warning("No successful fuzzers to dispatch")
-            return []
-
-        # Apply fuzzer filter if specified
-        if self.config.fuzzers:
-            filter_set = set(self.config.fuzzers)
-            before_count = len(successful_fuzzers)
-            successful_fuzzers = [
-                f for f in successful_fuzzers if f.fuzzer_name in filter_set
-            ]
-            logger.info(
-                f"Fuzzer filter applied: {before_count} -> {len(successful_fuzzers)} fuzzers (filter: {self.config.fuzzers})"
-            )
-
-            if not successful_fuzzers:
-                logger.warning(
-                    f"No fuzzers match the filter: {self.config.fuzzers}"
-                )
-                return []
-
-        # Get sanitizers from config (default: ["address"])
-        sanitizers = self.config.sanitizers or ["address"]
-
-        # Generate {fuzzer, sanitizer} pairs
-        pairs = self._generate_pairs(successful_fuzzers, sanitizers)
-        logger.info(f"Generated {len(pairs)} worker assignments")
-
-        # Create worker workspaces and dispatch Celery tasks
+    def dispatch(self) -> List[Dict[str, Any]]:
         jobs = []
-        for pair in pairs:
-            try:
-                # Create workspace
-                workspace_path = self._create_worker_workspace(pair)
-
-                # Dispatch Celery task
-                job_info = self._dispatch_celery_task(pair, workspace_path)
-                jobs.append(job_info)
-
-            except Exception as e:
-                logger.exception(f"Failed to dispatch {pair}: {e}")
-                # Continue with other pairs
-
-        logger.info(f"Dispatched {len(jobs)} worker tasks")
+        for unit in self.harnesses:
+            workspace = self._create_worker_workspace(unit.name)
+            worker_id = self.store.create_worker(self.run_id, unit.harness_id, workspace)
+            celery_id = self._send(unit, str(worker_id), workspace)
+            self.store.set_worker_job(worker_id, celery_id)
+            self.jobs[str(worker_id)] = celery_id
+            jobs.append(
+                {
+                    "worker_id": str(worker_id),
+                    "celery_id": celery_id,
+                    "fuzzer": unit.name,
+                    "sanitizers": unit.sanitizers,
+                    "workspace_path": workspace,
+                }
+            )
+            logger.info(f"Dispatched worker {str(worker_id)[:8]} for {unit.name} (celery {celery_id})")
         return jobs
 
-    def _generate_pairs(
-        self, fuzzers: List[Fuzzer], sanitizers: List[str]
-    ) -> List[Dict[str, str]]:
-        """
-        Generate {fuzzer, sanitizer} pairs.
+    def _create_worker_workspace(self, harness: str) -> str:
+        path = self.workspace / "worker_workspace" / harness
+        if path.exists():
+            shutil.rmtree(path)
+        (path / "results").mkdir(parents=True, exist_ok=True)
+        return str(path)
 
-        Args:
-            fuzzers: List of fuzzers
-            sanitizers: List of sanitizers
-
-        Returns:
-            List of pair dictionaries
-        """
-        pairs = []
-        for fuzzer in fuzzers:
-            for sanitizer in sanitizers:
-                pairs.append(
-                    {
-                        "fuzzer": fuzzer.fuzzer_name,
-                        "sanitizer": sanitizer,
-                    }
-                )
-        return pairs
-
-    def _create_worker_workspace(self, pair: Dict[str, str]) -> str:
-        """
-        Create isolated workspace for a worker.
-
-        Workers share the main run workspace's repo/, fuzz-tooling/, and diff/
-        directories (read-only). Only worker-specific output directories are created.
-
-        Args:
-            pair: {fuzzer, sanitizer} pair
-
-        Returns:
-            Path to worker workspace
-        """
-        fuzzer = pair["fuzzer"]
-        sanitizer = pair["sanitizer"]
-
-        # Worker workspace path
-        run_workspace = Path(self.run.workspace_path)
-        worker_workspace = (
-            run_workspace
-            / "worker_workspace"
-            / f"{self.project_name}_{fuzzer}_{sanitizer}"
-        )
-
-        # Remove if exists
-        if worker_workspace.exists():
-            shutil.rmtree(worker_workspace)
-
-        worker_workspace.mkdir(parents=True, exist_ok=True)
-
-        # Create results directory
-        (worker_workspace / "results").mkdir(exist_ok=True)
-
-        logger.info(f"Created worker workspace: {worker_workspace}")
-        return str(worker_workspace)
-
-    def _dispatch_celery_task(
-        self, pair: Dict[str, str], workspace_path: str
-    ) -> Dict[str, Any]:
-        """
-        Dispatch a Celery task for the worker.
-
-        Note: Worker record is NOT created here. WorkerContext creates
-        the Worker record when the Celery task starts executing.
-
-        Args:
-            pair: {fuzzer, sanitizer} pair
-            workspace_path: Path to worker workspace
-
-        Returns:
-            Job info dictionary
-        """
+    def _send(self, unit: HarnessUnit, worker_id: str, workspace: str) -> str:
         from ..worker.tasks import run_worker
 
-        fuzzer = pair["fuzzer"]
-        sanitizer = pair["sanitizer"]
-        display_name = Worker.generate_display_name(fuzzer, sanitizer)
-
-        # Get log directory from current logging config
-        from .logging import get_log_dir
-
+        ar = self.analyze_result
+        san = unit.default_sanitizer
         log_dir = get_log_dir()
-
-        # Get pre-built fuzzer path from analyze_result
-        fuzzer_binary_path = None
-        build_dir = None
-        if self.analyze_result:
-            fuzzer_binary_path = self.analyze_result.get_fuzzer_path(fuzzer, sanitizer)
-            build_dir = self.analyze_result.build_paths.get(sanitizer)
-
-        # Prepare assignment - WorkerContext will create Worker record
-        run_workspace = Path(self.run.workspace_path)
+        fw = self.config.fuzzer_worker
         assignment = {
-            "run_id": self.run.run_id,
-            "fuzzer": fuzzer,
-            "sanitizer": sanitizer,
-            "task_type": self.run.task_type.value,
-            "workspace_path": workspace_path,
-            "run_workspace_path": str(run_workspace),
+            "run_id": self.run_id,
+            "worker_id": worker_id,
+            "harness_id": unit.harness_id,
+            "fuzzer": unit.name,
+            "sanitizer": san,
+            "sanitizers": unit.sanitizers,
+            "binaries": unit.binaries,
+            "fuzzer_binary_path": unit.binaries[san],
+            "task_type": self.config.task_type,
+            "workspace_path": workspace,
+            "run_workspace_path": str(self.workspace),
             "project_name": self.project_name,
             "log_dir": str(log_dir) if log_dir else None,
-            # Image the fuzzer binary runs in (has its libs); PoC verify uses it.
             "docker_image": self.config.docker_image,
             "detect_leaks": self.config.detect_leaks,
-            # Model routing -- built into a ModelRouter at the worker boundary.
             "models": self.config.models,
             "force_model": self.config.force_model,
-            # allow_fallback=false: a failing model is not swapped for another.
             "strict_models": not self.config.allow_fallback,
-            # Pre-built fuzzer info from Analyzer
-            "fuzzer_binary_path": fuzzer_binary_path,
-            "build_dir": build_dir,
-            "coverage_fuzzer_path": self.analyze_result.coverage_fuzzer_path
-            if self.analyze_result
-            else None,
-            # Analysis Server socket for code queries
-            "analysis_socket_path": self.analyze_result.socket_path
-            if self.analyze_result
-            else None,
-            # The function index / call graph file, opened in-process.
-            "index_path": self.analyze_result.index_path
-            if self.analyze_result
-            else None,
-            # Scan mode and diff path for delta mode
-            "scan_mode": self.run.scan_mode.value,
-            "diff_path": str(run_workspace / "diff" / "ref.diff")
-            if self.run.scan_mode.value == "delta"
+            "build_dir": ar.build_paths.get(san) if ar else None,
+            "coverage_fuzzer_path": ar.coverage_fuzzer_path if ar else None,
+            "analysis_socket_path": ar.socket_path if ar else None,
+            "index_path": ar.index_path if ar else None,
+            "scan_mode": self.config.scan_mode,
+            "diff_path": str(self.workspace / "diff" / "ref.diff")
+            if self.config.scan_mode == "delta"
             else None,
             "budget_limit": self.config.budget_limit,
             "poc_count": self.config.poc_count,
-            # Run-wide, not per-worker: each worker enforces it against the
-            # same Redis ledger, so the sum across workers is what is capped.
             "max_parallel_fuzzers": self.config.max_parallel_fuzzers,
-            # Per-worker, unlike the ceiling above. Configured since the
-            # beginning and read by nothing until now.
-            "vh_max_count": self.config.fuzzer_worker.vh_max_count,
-            # A worker is its own process and reads none of the main process's
-            # configuration, so the agent counts have to travel with the
-            # assignment.
+            "fuzzer_worker": asdict(fw),
+            "vh_max_count": fw.vh_max_count,
             "concurrency": self.config.concurrency.to_dict(),
-            # {fuzzer: [abs source path, ...]} manually set in the task file.
-            # Travels here so the worker can read the harness source from disk
-            # into an in-memory cache instead of hitting the Analysis Server.
             "fuzzer_sources": self.config.fuzzer_sources,
         }
-
-        # Dispatch Celery task with dynamic time limit based on config
         timeout_seconds = self.config.timeout_minutes * 60
-        soft_timeout_seconds = int(timeout_seconds * 0.9)
-
-        dispatch_kwargs = {
+        kwargs = {
             "args": [assignment],
             "time_limit": timeout_seconds,
-            "soft_time_limit": soft_timeout_seconds,
+            "soft_time_limit": int(timeout_seconds * 0.9),
         }
         if self.celery_queue:
-            dispatch_kwargs["queue"] = self.celery_queue
+            kwargs["queue"] = self.celery_queue
+        return run_worker.apply_async(**kwargs).id
 
-        result = run_worker.apply_async(**dispatch_kwargs)
+    # ------------------------------------------------------------- status
 
-        # Note: Celery job ID is passed to WorkerContext via assignment
-        # We add it here for the worker to use
-        assignment["celery_job_id"] = result.id
-
-        logger.info(f"Dispatched worker: {display_name} (celery_id: {result.id})")
-
-        return {
-            "display_name": display_name,
-            "celery_id": result.id,
-            "fuzzer": fuzzer,
-            "sanitizer": sanitizer,
-            "workspace_path": workspace_path,
-        }
-
-    def get_status(self) -> Dict[str, Any]:
-        """
-        Get status of all workers for this run.
-
-        Also checks Celery task status to detect workers that failed
-        before updating the database.
-
-        Note: Workers are created by WorkerContext when Celery task starts,
-        so initially there may be fewer workers than dispatched jobs.
-
-        Returns:
-            Status summary dictionary
-        """
+    def get_status(self) -> Dict[str, int]:
+        """Worker counts by status. A worker whose task is over but whose row
+        is still open died without closing it: it is marked lost."""
         from celery.result import AsyncResult
+
         from ..celery_app import app
 
-        # Query workers by run_id (ObjectId)
-        workers = self.repos.workers.find_by_run(self.run.run_id)
-
-        status = {
-            "total": len(workers),
-            "pending": 0,
-            "building": 0,
-            "running": 0,
-            "completed": 0,
-            "failed": 0,
-        }
-
-        for worker in workers:
-            worker_status = worker.status.value
-
-            # If worker is still pending/building/running, check Celery task status
-            # to detect workers whose __exit__ DB save failed (zombie detection)
-            if (
-                worker_status in ["pending", "building", "running"]
-                and worker.celery_job_id
-            ):
+        status = {"total": 0, "queued": 0, "running": 0, "completed": 0,
+                  "cancelled": 0, "error": 0, "lost": 0}
+        for w in self.store.workers(self.run_id):
+            st = w.status
+            if st in ("queued", "running") and w.celery_job_id:
                 try:
-                    result = AsyncResult(worker.celery_job_id, app=app)
-                    if result.failed():
-                        # Celery task failed but DB not updated - mark as failed
-                        worker.status = WorkerStatus.FAILED
-                        worker.error_msg = (
-                            str(result.result) if result.result else "Task failed"
-                        )
-                        self.repos.workers.save(worker)
-                        worker_status = "failed"
-                        logger.warning(
-                            f"Worker {worker.display_name} failed (detected via Celery)"
-                        )
-                    elif result.successful():
-                        # Celery task succeeded but DB still shows running/pending.
-                        # This means __exit__'s DB save failed (zombie worker).
-                        # Compensate by force-updating DB to completed.
-                        stale_status = worker_status
-                        worker.status = WorkerStatus.COMPLETED
-                        worker.error_msg = (
-                            "Status recovered by dispatcher: "
-                            "__exit__ DB save failed but Celery task succeeded"
-                        )
-                        self.repos.workers.save(worker)
-                        worker_status = "completed"
-                        logger.warning(
-                            f"Worker {worker.display_name} completed "
-                            f"(recovered zombie: Celery SUCCESS but DB was '{stale_status}')"
-                        )
+                    if AsyncResult(w.celery_job_id, app=app).ready():
+                        if self.store.end_worker(w.id, "lost"):
+                            logger.warning(f"worker {str(w.id)[:8]}: task ended, row was open -> lost")
+                        st = "lost"
                 except Exception:
-                    pass  # Ignore Celery check errors
-
-            if worker_status in status:
-                status[worker_status] += 1
-
+                    pass
+            status["total"] += 1
+            status[st] = status.get(st, 0) + 1
         return status
 
     def is_complete(self) -> bool:
-        """Check if all workers have completed (success or failed)."""
-        status = self.get_status()
-        finished = status["completed"] + status["failed"]
-        return finished == status["total"] and status["total"] > 0
+        s = self.get_status()
+        return s["total"] > 0 and s["queued"] + s["running"] == 0
 
-    def get_verified_poc_count(self) -> int:
-        """How many distinct bugs have been proved, not how many inputs prove them.
-
-        One overflow reachable three ways is one finding. Counting rows made the
-        stopping rule fire on the third input to a bug already reported, and
-        made the summary claim three where the answer was one.
-
-        PoCs written before signatures existed, or whose signature could not be
-        computed, fall back to counting individually -- an unsigned row is not
-        evidence that it repeats another.
-        """
+    def crash_count(self) -> int:
+        """Distinct bugs the run has proved (one row per signature)."""
         try:
-            rows = list(self.repos.pocs.find_by_run(str(self.run.run_id)) or [])
+            return self.store.crash_count(self.run_id)
         except Exception as e:
-            logger.warning(f"Could not read PoCs to count distinct bugs: {e}")
-            rows = []
-
-        signatures = set()
-        unsigned = 0
-        for p in rows:
-            if not getattr(p, "is_successful", False):
-                continue
-            sig = getattr(p, "signature", "")
-            if sig:
-                signatures.add(sig)
-            else:
-                unsigned += 1
-        if signatures or unsigned:
-            return len(signatures) + unsigned
-
-        # Nothing came back row by row. That is usually the truth -- no PoC has
-        # been verified yet -- but it is also what a failed read looks like,
-        # and answering zero to the stopping rule means a run that has proved
-        # its bug keeps going until the clock runs out, then reports a timeout.
-        # The plain count is the safety net: it can overcount a bug found twice,
-        # never hide one that was found.
-        try:
-            return self.repos.pocs.count(
-                {"run_id": self._run_oid, "is_successful": True}
-            )
-        except Exception:
+            logger.warning(f"Could not count crashes: {e}")
             return 0
 
-    def graceful_shutdown(self) -> None:
-        """
-        Gracefully shutdown all running workers.
+    # ------------------------------------------------------------ stopping
 
-        4-step process:
-        1. Cancel in-memory agents (best-effort, lets LLM loop exit cleanly)
-        2. Brief grace period for agents to finish current iteration
-        3. Revoke Celery tasks (terminate=True for hard stop)
-        4. Force-cleanup any zombie agent records in MongoDB
-        """
-        import time as _time
-
+    def _revoke_workers(self, end_reason: str, status: str = "completed") -> None:
         from ..celery_app import app
-        from ..agents.context import cancel_agents_by_worker, force_cleanup_agents
-        from ..db import get_database
 
-        workers = self.repos.workers.find_by_run(self.run.run_id)
-
-        for worker in workers:
-            if worker.status.value in ["pending", "building", "running"]:
-                # Step 1: Cancel in-memory agents (best-effort)
+        for w in self.store.workers(self.run_id):
+            if w.status in ("queued", "running") and w.celery_job_id:
                 try:
-                    cancel_agents_by_worker(worker.worker_id)
+                    app.control.revoke(w.celery_job_id, terminate=True)
                 except Exception as e:
-                    logger.warning(
-                        f"Failed to cancel agents for {worker.display_name}: {e}"
-                    )
+                    logger.warning(f"Failed to revoke worker {str(w.id)[:8]}: {e}")
+        n = self.store.end_open_workers(self.run_id, status, end_reason)
+        if n:
+            logger.info(f"Closed {n} open worker(s): {end_reason}")
+        # Their processes are gone; their agents cannot close their own rows.
+        self.store.end_running_agents(run_id=self.run_id, status="cancelled")
 
-        # Step 2: Grace period for agents to finish current iteration
-        _time.sleep(2)
+    def _stop_containers(self) -> None:
+        from .docker_limits import kill_run_containers
 
-        for worker in workers:
-            if worker.status.value in ["pending", "building", "running"]:
-                # Step 3: Revoke Celery task (terminate=True for immediate stop)
-                if worker.celery_job_id:
-                    try:
-                        app.control.revoke(worker.celery_job_id, terminate=True)
-                        logger.info(f"Revoked worker: {worker.display_name}")
-                    except Exception as e:
-                        logger.warning(f"Failed to revoke {worker.display_name}: {e}")
-
-                # Mark as completed (graceful shutdown)
-                worker.status = WorkerStatus.COMPLETED
-                worker.error_msg = "Graceful shutdown"
-                self.repos.workers.save(worker)
-
-        # Step 4: Force-cleanup zombie agent records in MongoDB
         try:
-            db = get_database()
-        except Exception:
-            db = None
-        if db is not None:
-            force_cleanup_agents(self.run.run_id, db)
-
-    def shutdown_all_fuzzers(self) -> None:
-        """
-        Shutdown all Global Fuzzers and FuzzerMonitors.
-
-        Called when run truly ends (timeout/budget/poc_target/manual).
-        This performs final sweep to catch any remaining crashes.
-        """
-        import asyncio
-        from ..fuzzer import get_fuzzer_manager, unregister_fuzzer_manager
-
-        logger.info("Shutting down all Global Fuzzers...")
-
-        workers = self.repos.workers.find_by_run(self.run.run_id)
-        shutdown_count = 0
-
-        for worker in workers:
-            # FuzzerManager is registered with ObjectId-based worker_id
-            manager = get_fuzzer_manager(worker.worker_id)
-            if manager:
-                try:
-                    # Run full shutdown (includes final sweep)
-                    try:
-                        loop = asyncio.get_event_loop()
-                    except RuntimeError:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-
-                    if loop.is_running():
-                        # Schedule shutdown task
-                        asyncio.create_task(manager.shutdown())
-                    else:
-                        loop.run_until_complete(manager.shutdown())
-
-                    shutdown_count += 1
-                    logger.info(f"Shutdown FuzzerManager: {worker.display_name}")
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to shutdown FuzzerManager {worker.display_name}: {e}"
-                    )
-                finally:
-                    unregister_fuzzer_manager(worker.worker_id)
-
-        logger.info(f"Shutdown {shutdown_count} FuzzerManager(s)")
-
-        # The managers above live in the Celery worker process, not here, so
-        # that loop finds nothing once the worker has been revoked -- and the
-        # revoke's SIGTERM stops the Python side only, leaving the fuzzer
-        # containers running. Find them by the run label instead.
-        try:
-            from .docker_limits import kill_run_containers
-
-            kill_run_containers(str(self.run.run_id))
+            n = kill_run_containers(self.run_id)
+            if n:
+                logger.info(f"Killed {n} container(s) of this run")
         except Exception as e:
             logger.warning(f"Could not sweep the run's containers: {e}")
-
-        # The slot ledger outlives the processes that held slots in it, so
-        # whatever is still listed belongs to a worker that is already gone.
         try:
             from ..fuzzer.budget import FuzzerBudget
 
-            FuzzerBudget(
-                run_id=str(self.run.run_id),
-                limit=self.config.max_parallel_fuzzers,
-            ).clear()
+            FuzzerBudget(run_id=self.run_id, limit=self.config.max_parallel_fuzzers).clear()
         except Exception as e:
             logger.debug(f"Could not clear the fuzzer slot ledger: {e}")
 
-        # Stop Run-level FuzzerMonitor (includes final sweep)
-        if self.crash_monitor:
-            self.crash_monitor.stop_monitoring()
-            crash_stats = self.crash_monitor.get_stats()
-            logger.info(
-                f"Run-level FuzzerMonitor stopped: "
-                f"{crash_stats['total_crashes']} crashes found"
-            )
+    def stop_everything(
+        self, end_reason: Optional[str], deadline: Optional[float] = None, status: str = "completed"
+    ) -> bool:
+        """Revoke workers, kill containers, close Redis; give up after the deadline.
 
-    # How long the whole shutdown path gets. Every step in it talks to
-    # MongoDB, Redis or Docker, and each of those can stop answering exactly
-    # when a run is ending badly -- which is when this runs. A run once spent
-    # a hundred minutes here, on a machine deep in swap, because one
-    # find_by_run took eight minutes to time out and there were several of
-    # them. The run was already over; the only thing still happening was the
-    # shutdown refusing to end.
-    SHUTDOWN_DEADLINE_SECONDS = 120.0
-
-    def _stop_everything(self, deadline: Optional[float] = None) -> bool:
-        """Stop the workers, the fuzzers and Redis, or stop trying.
-
-        Runs on a daemon thread so that a call wedged inside a database driver
-        cannot hold the process open past the deadline: when the time is up
-        this returns, the thread is abandoned, and the caller reports the
-        result the run actually had.
-
-        Returns True if the shutdown finished, False if it was abandoned.
+        On a daemon thread, so a wedged docker or database call cannot hold the
+        process past it. Returns True if the shutdown finished.
         """
         import threading
 
@@ -992,326 +289,106 @@ def generate(variant: int = 1) -> bytes:
 
         def _run():
             for step in (
-                self.graceful_shutdown,
-                self.shutdown_all_fuzzers,
+                lambda: self._revoke_workers(end_reason, status),
+                self._stop_containers,
                 self._close_redis,
             ):
                 try:
                     step()
                 except Exception as e:
-                    name = getattr(step, "__name__", repr(step))
-                    logger.warning(f"Shutdown step {name} failed: {e}")
+                    logger.warning(f"Shutdown step failed: {e}")
             finished.set()
 
-        thread = threading.Thread(
-            target=_run, name="fuzzingbrain-shutdown", daemon=True
-        )
-        thread.start()
+        threading.Thread(target=_run, name="fuzzingbrain-shutdown", daemon=True).start()
         if finished.wait(timeout=seconds):
             return True
-
-        logger.error(
-            f"Shutdown did not finish within {seconds:.0f}s and is being "
-            f"abandoned; containers or database handles may outlive this "
-            f"process. Reporting the run's result now."
-        )
+        logger.error(f"Shutdown did not finish within {seconds:.0f}s; abandoning it")
         return False
+
+    # -------------------------------------------------------------- waiting
 
     def wait_for_completion(
         self,
-        timeout_minutes: int = 60,
+        timeout_minutes: int,
         poll_interval: int = 5,
-        on_progress: callable = None,
+        on_progress: Optional[Callable[[Dict[str, int]], None]] = None,
     ) -> Dict[str, Any]:
-        """
-        Wait for run to complete (CLI mode).
-
-        Run ends when one of:
-        - Timeout reached
-        - Budget exceeded
-        - PoC target reached
-        - User manual shutdown (Ctrl+C)
-
-        Note: "All workers completed" does NOT end the run!
-        Global Fuzzer continues running until one of the above conditions.
-
-        Args:
-            timeout_minutes: Maximum time to wait in minutes
-            poll_interval: Seconds between status checks
-            on_progress: Optional callback for progress updates
-
-        Returns:
-            Final status summary
-        """
-        import time
-        from datetime import datetime, timedelta
-
-        start_time = datetime.now()
-        timeout_delta = timedelta(minutes=timeout_minutes)
-        last_status = None
-        last_poc_count = 0
-        global_fuzzer_only_logged = False  # Only log once
-
-        # How many times this loop can possibly need to poll, from its own
-        # timeout and its own interval. The elapsed-time check below is the
-        # real stopping rule; this is the check that holds when the clock or
-        # the sleep cannot be trusted, and the two would have to fail together
-        # for the loop to run away.
-        #
-        # It is not a theoretical failure. Every pass allocates -- a status
-        # dict, a database read -- and a pass costs nothing without the sleep
-        # at the bottom, so a loop that stops sleeping stops being a poll loop
-        # and becomes an allocation loop. One did: sixty-two gigabytes in about
-        # four minutes, then a machine that had to be power-cycled. A poll loop
-        # should fail as a hung run, not as a dead host.
+        start = datetime.now()
+        limit = timedelta(minutes=timeout_minutes)
+        # A bound on the polls as well as the clock: a loop that stops sleeping
+        # must fail as a hung run, not as an allocation loop on a shared host.
         poll_seconds = max(int(poll_interval), 1)
-        max_polls = int(timeout_delta.total_seconds() // poll_seconds) + 10
+        max_polls = int(limit.total_seconds() // poll_seconds) + 10
         polls = 0
+        last_status = None
+        last_crashes = 0
+        idle_logged = False
+        logger.info(
+            f"Waiting for the run (timeout {timeout_minutes}min"
+            + (f", poc target {self.poc_count_target}" if self.poc_count_target else "")
+            + (f", budget ${self.config.budget_limit:.2f}" if self.config.budget_limit else "")
+            + ")"
+        )
 
-        if self.poc_count_target > 0:
-            logger.info(
-                f"Waiting for run to complete (timeout: {timeout_minutes}min, poc_target: {self.poc_count_target})"
-            )
-        else:
-            logger.info(f"Waiting for run to complete (timeout: {timeout_minutes}min)")
+        def done(status: str, **extra) -> Dict[str, Any]:
+            self.stop_everything(END_REASONS[status])
+            return {
+                "status": status,
+                "elapsed_minutes": (datetime.now() - start).total_seconds() / 60,
+                "poc_count": self.crash_count(),
+                **extra,
+                **self.get_status(),
+            }
 
         try:
             while True:
-                elapsed = datetime.now() - start_time
                 polls += 1
+                elapsed = datetime.now() - start
+                try:
+                    self.store.run_heartbeat(self.run_id)
+                except Exception:
+                    pass
 
-                # ================================================================
-                # Exit condition 1: Timeout, by the clock or by the count
-                # ================================================================
-                if elapsed > timeout_delta or polls > max_polls:
-                    if polls > max_polls:
-                        logger.error(
-                            f"Polled {polls} times in {elapsed.total_seconds():.0f}s, "
-                            f"past the {max_polls} this run's {timeout_minutes}min "
-                            f"timeout allows. The loop is not waiting between "
-                            f"passes; stopping it before it costs the machine."
-                        )
-                    else:
-                        logger.warning(
-                            f"Timeout reached after {timeout_minutes} minutes"
-                        )
-                    self._stop_everything()
-                    return {
-                        "status": "timeout",
-                        "elapsed_minutes": elapsed.total_seconds() / 60,
-                        # Carried on every exit path, not just the one that
-                        # stops on it: the summary otherwise falls back to the
-                        # generated count and reports more pocs than were ever
-                        # verified.
-                        "poc_count": self.get_verified_poc_count(),
-                        **self.get_status(),
-                    }
+                if elapsed > limit or polls > max_polls:
+                    logger.warning(f"Timeout after {timeout_minutes} minutes")
+                    return done("timeout")
 
-                # ================================================================
-                # Exit condition 2: Budget exceeded
-                # ================================================================
                 if self.config.budget_limit > 0:
-                    current_cost = self._get_realtime_cost()
-                    if current_cost >= self.config.budget_limit:
-                        logger.warning(
-                            f"Budget limit exceeded: ${current_cost:.2f} >= ${self.config.budget_limit:.2f}"
-                        )
-                        self._stop_everything()
-                        return {
-                            "status": "budget_exceeded",
-                            "poc_count": self.get_verified_poc_count(),
-                            "elapsed_minutes": elapsed.total_seconds() / 60,
-                            "error": f"Budget exceeded: ${current_cost:.2f} >= ${self.config.budget_limit:.2f}",
-                            **self.get_status(),
-                        }
+                    cost = self.current_cost()
+                    if cost >= self.config.budget_limit:
+                        msg = f"Budget reached: ${cost:.2f} >= ${self.config.budget_limit:.2f}"
+                        logger.warning(msg)
+                        return done("budget_exceeded", error=msg)
 
-                # ================================================================
-                # Exit condition 3: PoC target reached
-                # ================================================================
-                current_poc_count = self.get_verified_poc_count()
-                if current_poc_count != last_poc_count:
+                crashes = self.crash_count()
+                if crashes != last_crashes:
                     logger.info(
-                        f"Verified PoCs: {current_poc_count}"
-                        + (
-                            f"/{self.poc_count_target}"
-                            if self.poc_count_target > 0
-                            else ""
-                        )
+                        f"Distinct bugs proved: {crashes}"
+                        + (f"/{self.poc_count_target}" if self.poc_count_target else "")
                     )
-                    last_poc_count = current_poc_count
+                    last_crashes = crashes
+                if self.poc_count_target > 0 and crashes >= self.poc_count_target:
+                    logger.info(f"PoC target reached ({crashes}/{self.poc_count_target})")
+                    return done("poc_target_reached")
 
-                if (
-                    self.poc_count_target > 0
-                    and current_poc_count >= self.poc_count_target
-                ):
-                    logger.info(
-                        f"PoC target reached! ({current_poc_count}/{self.poc_count_target})"
-                    )
-                    logger.info("Initiating graceful shutdown...")
-                    self._stop_everything()
-                    return {
-                        "status": "poc_target_reached",
-                        "elapsed_minutes": elapsed.total_seconds() / 60,
-                        "poc_count": current_poc_count,
-                        **self.get_status(),
-                    }
-
-                # ================================================================
-                # Status check: Workers progress
-                # ================================================================
                 status = self.get_status()
-
-                # Log progress if changed
                 if status != last_status:
                     logger.info(
-                        f"Progress: {status['completed']}/{status['total']} completed, "
-                        f"{status['failed']} failed, {status['running']} running"
+                        f"Workers: {status['completed']}/{status['total']} completed, "
+                        f"{status['running']} running, {status['error'] + status['lost']} failed"
                     )
                     last_status = status
-
                     if on_progress:
                         on_progress(status)
-
-                # ================================================================
-                # All workers completed: Enter "Global Fuzzer Only" mode
-                # ================================================================
-                if self.is_complete() and not global_fuzzer_only_logged:
-                    logger.info("")
-                    logger.info("=" * 60)
+                if not idle_logged and status["total"] and status["queued"] + status["running"] == 0:
                     logger.info(
-                        f"All Workers Completed with {current_poc_count} PoC(s) found"
+                        "All workers finished; the global fuzzers keep running until "
+                        "timeout / budget / PoC target"
                     )
-                    logger.info("Global Fuzzer continues running...")
-                    logger.info("Waiting for: timeout / budget / PoC target / Ctrl+C")
-                    logger.info("=" * 60)
-                    logger.info("")
-                    global_fuzzer_only_logged = True
+                    idle_logged = True
 
-                # Wait before next poll
-                time.sleep(poll_interval)
-
+                time.sleep(poll_seconds)
         except KeyboardInterrupt:
-            logger.warning(
-                "KeyboardInterrupt received — shutting down fuzzers and cleaning up"
-            )
-            self._stop_everything()
+            logger.warning("Interrupted: stopping workers and fuzzers")
+            self.stop_everything(None, status="cancelled")
             raise
-
-    def get_results(self) -> List[Dict[str, Any]]:
-        """
-        Get results from all completed workers.
-
-        Returns:
-            List of worker results with duration info and VH count
-        """
-        workers = self.repos.workers.find_by_run(self.run.run_id)
-        results = []
-
-        for worker in workers:
-            # Count VHs for this worker (by sources array with $elemMatch)
-            vh_count = self.repos.vulnerability_hypotheses.count(
-                {
-                    "run_id": self._run_oid,
-                    "sources": {
-                        "$elemMatch": {
-                            "harness_name": worker.fuzzer,
-                            "sanitizer": worker.sanitizer,
-                        }
-                    },
-                }
-            )
-
-            # Count merged duplicates for this worker
-            # (VHs where this worker's description was merged into existing VH)
-            merged_count = self.repos.vulnerability_hypotheses.count(
-                {
-                    "run_id": self._run_oid,
-                    "merged_duplicates": {
-                        "$elemMatch": {
-                            "harness_name": worker.fuzzer,
-                            "sanitizer": worker.sanitizer,
-                        }
-                    },
-                }
-            )
-
-            # Query actual successful PoC count from DB (more reliable than worker's self-report)
-            # This handles cases where worker was killed but PoCs were already saved
-            #
-            # Count PoCs by vulnerability_hypothesis_id to include cross-fuzzer hits:
-            # - A PoC created for fuzzer "xml" might crash on "xpath" instead
-            # - The cross-fuzzer PoC has harness_name="xpath" but same vulnerability_hypothesis_id
-            # - We want to count it for the worker that created the original VH
-            #
-            # Get all VH IDs created by this worker
-            worker_vh_ids = [
-                vh.vulnerability_hypothesis_id
-                for vh in self.repos.vulnerability_hypotheses.find_all(
-                    {
-                        "run_id": self._run_oid,
-                        "sources": {
-                            "$elemMatch": {
-                                "harness_name": worker.fuzzer,
-                                "sanitizer": worker.sanitizer,
-                            }
-                        },
-                    }
-                )
-            ]
-
-            # Count all successful PoCs for those VHs (including cross-fuzzer hits)
-            if worker_vh_ids:
-                # Convert str IDs to ObjectId — PoC documents store vulnerability_hypothesis_id as ObjectId
-                worker_vh_oids = []
-                for vh_id in worker_vh_ids:
-                    try:
-                        worker_vh_oids.append(ObjectId(vh_id))
-                    except Exception:
-                        worker_vh_oids.append(vh_id)
-                actual_poc_count = self.repos.pocs.count(
-                    {
-                        "run_id": self._run_oid,
-                        "vulnerability_hypothesis_id": {"$in": worker_vh_oids},
-                        "is_successful": True,
-                    }
-                )
-            else:
-                actual_poc_count = 0
-
-            # Also count fuzzer-discovered PoCs (no VH association)
-            # These have vulnerability_hypothesis_id="" because they were found directly by the fuzzer
-            fuzzer_discovered_count = self.repos.pocs.count(
-                {
-                    "run_id": self._run_oid,
-                    "harness_name": worker.fuzzer,
-                    "sanitizer": worker.sanitizer,
-                    "vulnerability_hypothesis_id": {"$in": ["", None]},
-                    "is_successful": True,
-                }
-            )
-            actual_poc_count += fuzzer_discovered_count
-
-            # Determine effective status:
-            # - If worker failed but has results (VHs or PoCs), mark as "interrupted"
-            # - This handles timeout cases where work was done but Celery task was killed
-            effective_status = worker.status.value
-            if effective_status == "failed" and (vh_count > 0 or actual_poc_count > 0):
-                effective_status = "interrupted"
-
-            result = {
-                "worker_id": worker.display_name,  # Use display name for summaries
-                "worker_object_id": worker.worker_id,  # ObjectId for DB queries
-                "fuzzer": worker.fuzzer,
-                "sanitizer": worker.sanitizer,
-                "status": effective_status,
-                "vhs_found": vh_count,
-                "vhs_merged": merged_count,
-                "poc_generated": actual_poc_count,  # Use DB count instead of worker's self-report
-                "patch_generated": worker.patch_generated or 0,
-                "error_msg": worker.error_msg,
-                "duration_seconds": worker.get_duration_seconds(),
-                "duration_str": worker.get_duration_str(),
-            }
-            results.append(result)
-
-        return results

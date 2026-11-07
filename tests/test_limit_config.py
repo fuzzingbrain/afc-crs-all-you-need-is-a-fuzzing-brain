@@ -29,7 +29,7 @@ class TestBudgetPlumbing:
 
 
 class TestPrebuiltGraphPlumbing:
-    """The prebuilt graph directory must survive the analyzer process boundary."""
+    """The graph file and prebuilt binaries must survive the analyzer process boundary."""
 
     def test_request_roundtrip_preserves_graph_and_binaries(self):
         req = AnalyzeRequest(
@@ -37,11 +37,11 @@ class TestPrebuiltGraphPlumbing:
             workspace_path="p",
             project_name="x",
             sanitizers=["address"],
-            prebuild_dir="/g",
+            graph_path="/g/graph.sqlite",
             prebuilt_fuzzers={"address": {"fuzz": "/b/fuzz"}},
         )
         restored = AnalyzeRequest.from_dict(req.to_dict())
-        assert restored.prebuild_dir == "/g"
+        assert restored.graph_path == "/g/graph.sqlite"
         assert restored.prebuilt_fuzzers == {"address": {"fuzz": "/b/fuzz"}}
 
 

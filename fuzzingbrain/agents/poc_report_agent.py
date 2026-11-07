@@ -27,7 +27,7 @@ from loguru import logger
 from .base import BaseAgent
 from .prompts import REPORT_SYSTEM_PROMPT, REPORT_USER_TEMPLATE
 from ..llms import LLMClient
-from ..core.models.agent import AgentType
+from .types import AgentType
 
 
 @dataclass
@@ -69,8 +69,7 @@ class POCReportAgent(BaseAgent):
         run_id: str = "",
         worker_id: str = "",
         log_dir: Optional[Path] = None,
-        # Database access for updating PoC
-        repos: Any = None,
+        crash_id: str = "",
     ):
         """
         Initialize PoC Report Agent.
@@ -83,7 +82,7 @@ class POCReportAgent(BaseAgent):
             run_id: Run ID for context
             worker_id: Worker ID for context
             log_dir: Directory for logs
-            repos: Database repository manager (for updating PoC)
+            crash_id: The crash this report is about
         """
         super().__init__(
             llm_client=llm_client,
@@ -95,8 +94,7 @@ class POCReportAgent(BaseAgent):
             log_dir=log_dir,
         )
 
-        # Database access
-        self.repos = repos
+        self.crash_id = crash_id
 
         # Store POC/VH data for report generation
         self._poc: Optional[Dict[str, Any]] = None
@@ -107,6 +105,9 @@ class POCReportAgent(BaseAgent):
     @property
     def agent_name(self) -> str:
         return AgentType.POC_REPORT_AGENT.value
+
+    def _agent_row(self) -> Dict[str, Any]:
+        return {"crash_id": self.crash_id}
 
     @property
     def include_poc_tools(self) -> bool:
@@ -173,36 +174,22 @@ class POCReportAgent(BaseAgent):
         return await super()._execute_tool(client, tool_name, tool_args)
 
     def _handle_update_poc_info(self, args: Dict[str, Any]) -> str:
-        """Handle update_poc_info tool call - update vuln_type in database."""
-        if not self._poc_id:
-            return json.dumps({"success": False, "error": "No PoC ID available"})
-
-        if not self.repos:
-            return json.dumps({"success": False, "error": "Database not available"})
-
+        """update_poc_info: correct the crash's vulnerability type."""
         vuln_type = args.get("vuln_type")
         if not vuln_type:
             return json.dumps({"success": False, "error": "vuln_type is required"})
-
+        if not self.crash_id:
+            return json.dumps({"success": False, "error": "No crash to update"})
         try:
-            # Get current PoC from database
-            poc = self.repos.pocs.find_by_id(self._poc_id)
-            if not poc:
-                return json.dumps(
-                    {"success": False, "error": f"PoC {self._poc_id} not found"}
-                )
+            from ..db.store import get_store
 
-            old_type = poc.vuln_type
-            poc.vuln_type = vuln_type
-            self.repos.pocs.save(poc)
-
-            # Also update our local copy for report generation
-            self._poc["vuln_type"] = vuln_type
-
+            old_type = (self._poc or {}).get("vuln_type")
+            get_store().set_crash_vuln_type(self.crash_id, vuln_type)
+            if self._poc is not None:
+                self._poc["vuln_type"] = vuln_type
             logger.info(
-                f"[POCReportAgent] Updated PoC {self._poc_id[:8]} vuln_type: {old_type} -> {vuln_type}"
+                f"[POCReportAgent] crash {self.crash_id[:8]} vuln_type: {old_type} -> {vuln_type}"
             )
-
             return json.dumps(
                 {
                     "success": True,
@@ -211,9 +198,8 @@ class POCReportAgent(BaseAgent):
                     "message": f"Vulnerability type updated: {old_type} -> {vuln_type}",
                 }
             )
-
         except Exception as e:
-            logger.error(f"[POCReportAgent] Failed to update PoC: {e}")
+            logger.error(f"[POCReportAgent] Failed to update the crash: {e}")
             return json.dumps({"success": False, "error": str(e)})
 
     def get_initial_message(self, **kwargs) -> str:

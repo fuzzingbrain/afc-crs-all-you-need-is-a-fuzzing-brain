@@ -25,7 +25,7 @@ from .prompts import (
     GENERAL_SANITIZER_GUIDANCE,
 )
 from ..llms import LLMClient, ModelInfo
-from ..core.models.agent import AgentType
+from .types import AgentType
 
 
 class VHGeneratorBase(BaseAgent):
@@ -365,10 +365,13 @@ class FullVHGenerator(VHGeneratorBase):
             "Sanitizer": self.sanitizer,
         }
 
-    def _configure_context(self, ctx) -> None:
-        """Configure agent context with logic group ID."""
-        if self.lg_id:
-            ctx.lg_id = self.lg_id
+    def _agent_row(self) -> Dict[str, Any]:
+        """The function this finder analyses, in its logic group."""
+        start = (self.function_lines or (0, 0))[0] or 1
+        return {
+            "lg_id": self.lg_id or None,
+            "function": (self.function_file or "?", self.function_name, int(start)),
+        }
 
     def _get_summary_table(self) -> str:
         """Generate summary table."""

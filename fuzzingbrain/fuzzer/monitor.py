@@ -145,7 +145,6 @@ class FuzzerMonitor:
         auto_discover: bool = False,
         docker_image: Optional[str] = None,
         log_dir: Optional[Path] = None,
-        repos: Any = None,
     ):
         """
         Initialize FuzzerMonitor.
@@ -160,7 +159,6 @@ class FuzzerMonitor:
             auto_discover: If True, automatically discover crash directories
             docker_image: Docker image for crash verification
             log_dir: Directory for fuzzer_monitor.log (defaults to workspace_path)
-            repos: RepositoryManager for querying Worker info (optional)
         """
         self.run_id = run_id
         self.workspace_path = Path(workspace_path) if workspace_path else None
@@ -173,7 +171,6 @@ class FuzzerMonitor:
         self.on_crash = on_crash
         self.auto_discover = auto_discover
         self.docker_image = docker_image
-        self.repos = repos
 
         # Cache for worker info (workspace_path -> (worker_id, fuzzer, sanitizer))
         self._worker_cache: Dict[str, tuple] = {}
@@ -594,25 +591,6 @@ class FuzzerMonitor:
             Tuple of (worker_id, fuzzer_name, sanitizer, from_db)
             from_db is True if the result came from MongoDB, False if fallback.
         """
-        if self.repos:
-            try:
-                # Query worker by workspace_path
-                worker = self.repos.workers.collection.find_one(
-                    {"workspace_path": workspace_path}
-                )
-                if worker:
-                    # Worker model stores _id (ObjectId), not worker_id
-                    raw_id = worker.get("_id")
-                    worker_id = str(raw_id) if raw_id else workspace_path
-                    return (
-                        worker_id,
-                        worker.get("fuzzer", "unknown"),
-                        worker.get("sanitizer", "address"),
-                        True,
-                    )
-            except Exception as e:
-                logger.debug(f"[FuzzerMonitor] Failed to query worker: {e}")
-
         # Fallback: parse from directory name (best effort)
         # NOT cached by caller — Worker record may not exist yet (race condition)
         dir_name = Path(workspace_path).name
@@ -942,8 +920,6 @@ class FuzzerMonitor:
         Returns:
             Dict with vuln_type and output
         """
-        FALLBACK_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
-
         fuzzer_dir = fuzzer_path.parent
         fuzzer_binary = fuzzer_path.name
         work_dir = crash_path.parent
@@ -1000,17 +976,6 @@ class FuzzerMonitor:
 
         try:
             returncode, combined_output = _run_with_image(docker_image)
-
-            # Fallback to base-runner on GLIBC / shared library errors
-            if (
-                "error while loading shared libraries" in combined_output
-                or "GLIBC" in combined_output
-            ) and docker_image != FALLBACK_IMAGE:
-                logger.warning(
-                    f"[FuzzerMonitor:{self.run_id}] Library error with {docker_image}, "
-                    f"falling back to {FALLBACK_IMAGE}"
-                )
-                returncode, combined_output = _run_with_image(FALLBACK_IMAGE)
 
             crashed = self._check_crash(combined_output)
 

@@ -1,126 +1,90 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-LLM Call Buffer
+LLM call buffer: one per worker process.
 
-Per-worker buffer for LLM call records with real-time Redis cost tracking
-and periodic MongoDB persistence.
+    LLM call  -> Redis INCRBYFLOAT (the run's cost, read by the budget check)
+              -> memory (the call, its messages, its tool calls)
+              -> PostgreSQL every FLUSH_INTERVAL seconds, from a daemon thread
 
-Architecture:
-    LLM Call -> Redis INCRBYFLOAT (real-time cost, per-call)
-             -> Worker memory list (batch accumulation)
-             -> MongoDB (2-second periodic flush via daemon thread)
-
-Lifecycle:
-    WorkerContext.__enter__  -> WorkerLLMBuffer.start()
-    Agent LLM calls          -> buffer.record(call)
-    Every 2 seconds (thread) -> flush to MongoDB
-    WorkerContext.__exit__   -> buffer.stop() (final flush)
+A call's messages are stored once per run, keyed by their sha256
+(llm_messages); the call keeps the list of ids it sent (llm_calls). A tool
+call names the LLM call that asked for it by the key record() returned, which
+the flush turns into the llm_calls id.
 """
 
+import itertools
 import threading
-from collections import defaultdict
-from typing import Optional, List
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
-from bson import ObjectId
 from loguru import logger
 
-from ..core.models.llm_call import LLMCall
+from ..db.store import as_uuid, message_sha256
+
+
+def _message(m: Dict[str, Any]) -> Tuple[str, str, Dict[str, Any]]:
+    return message_sha256(m), str(m.get("role") or "user"), m
 
 
 class WorkerLLMBuffer:
-    """
-    Per-worker buffer for LLM call tracking.
+    """Thread-safe: record() and record_tool_call() may come from any thread."""
 
-    Uses a daemon thread for periodic MongoDB persistence (no asyncio dependency).
-    Uses sync Redis client for real-time cost counters (INCRBYFLOAT per call).
-
-    Thread-safe: record() can be called from any thread (async worker threads,
-    main thread, etc.) - all protected by _lock.
-    """
-
-    FLUSH_INTERVAL = 2.0  # Seconds between flushes
+    FLUSH_INTERVAL = 2.0
     COUNTER_PREFIX = "fuzzingbrain:counters"
 
-    def __init__(self, redis_url: str, mongo_db):
-        """
-        Initialize the worker LLM buffer.
-
-        Args:
-            redis_url: Redis connection URL
-            mongo_db: MongoDB database instance
-        """
+    def __init__(self, redis_url: Optional[str], store):
         self.redis_url = redis_url
-        self.mongo_db = mongo_db
-
-        # Sync Redis client for INCRBYFLOAT (microsecond per-call updates)
+        self.store = store
         self._redis = None
-
-        # In-memory record accumulation
-        self._records: List[dict] = []
-        # Tool calls ride the same thread and the same interval. They were
-        # counted per agent and nowhere else, so the question "which tools does
-        # a run actually spend its time in" had no answer, and the dashboard's
-        # tools panel was empty on every run.
-        self._tool_records: List[dict] = []
+        self._keys = itertools.count(1)
+        # (key, row, input messages, output message)
+        self._calls: List[Tuple[int, Dict[str, Any], list, Optional[tuple]]] = []
+        self._tools: List[Tuple[int, Dict[str, Any], Optional[tuple]]] = []
+        # key -> llm_calls id, for tool calls that arrive after their call flushed
+        self._call_ids: Dict[int, int] = {}
+        self._call_runs: Dict[int, str] = {}
+        # sha256 -> llm_messages id, per run: a known message is not sent again
+        self._message_ids: Dict[Tuple[str, str], int] = {}
         self._lock = threading.Lock()
-
-        # Flush thread
-        self._flush_thread: Optional[threading.Thread] = None
+        self._flush_lock = threading.Lock()
+        self._thread: Optional[threading.Thread] = None
         self._running = False
-        self._stop_event = threading.Event()
+        self._stop = threading.Event()
+
+    # ------------------------------------------------------------ lifecycle
 
     def start(self) -> None:
-        """Start the buffer and flush daemon thread."""
         if self._running:
             return
-
-        # Connect to Redis (sync client)
         self._connect_redis()
-
         self._running = True
-        self._stop_event.clear()
-        self._flush_thread = threading.Thread(
-            target=self._flush_loop,
-            name="llm-buffer-flush",
-            daemon=True,
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._loop, name="llm-buffer-flush", daemon=True
         )
-        self._flush_thread.start()
-        logger.info("WorkerLLMBuffer started (2s flush interval)")
+        self._thread.start()
 
     def stop(self) -> None:
-        """Stop the flush thread and do a final flush with retry."""
+        """Stop the thread and flush what is left (three tries)."""
         if not self._running:
             return
-
         self._running = False
-        self._stop_event.set()
-
-        # Wait for flush thread to finish
-        if self._flush_thread:
-            self._flush_thread.join(timeout=10)
-
-        # Final flush with retry — if _flush() fails, records are put back
-        # into _records but this buffer is about to be discarded. Retry to
-        # avoid silent data loss.
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=10)
         for attempt in range(3):
-            self._flush()
+            self.flush()
             with self._lock:
-                remaining = len(self._records)
-            if remaining == 0:
+                left = len(self._calls) + len(self._tools)
+            if not left:
                 break
-            if attempt < 2:
-                import time
-
-                time.sleep(0.5 * (attempt + 1))
-
+            time.sleep(0.5 * (attempt + 1))
         with self._lock:
-            if self._records:
+            if self._calls or self._tools:
                 logger.error(
-                    f"WorkerLLMBuffer: {len(self._records)} LLM call records "
-                    f"lost after 3 flush attempts"
+                    f"LLM buffer: {len(self._calls)} calls and {len(self._tools)} "
+                    f"tool calls could not be written"
                 )
-
-        # Close Redis
         if self._redis:
             try:
                 self._redis.close()
@@ -128,322 +92,178 @@ class WorkerLLMBuffer:
                 pass
             self._redis = None
 
-        logger.info("WorkerLLMBuffer stopped")
-
-    def record(self, call: LLMCall) -> None:
-        """
-        Record an LLM call.
-
-        - Updates Redis cost counters in real-time (INCRBYFLOAT)
-        - Appends full record to memory list for periodic MongoDB flush
-
-        Thread-safe: can be called from any thread.
-
-        Args:
-            call: LLMCall instance with all fields populated
-        """
-        # 1. Real-time Redis cost update (per-call, microseconds)
-        if self._redis and call.cost > 0:
-            try:
-                pipe = self._redis.pipeline(transaction=False)
-                cmd_names = []
-                if call.run_id:
-                    pipe.incrbyfloat(
-                        f"{self.COUNTER_PREFIX}:run:{call.run_id}:cost",
-                        call.cost,
-                    )
-                    cmd_names.append("run:cost")
-                    pipe.incr(f"{self.COUNTER_PREFIX}:run:{call.run_id}:calls")
-                    cmd_names.append("run:calls")
-                else:
-                    logger.warning(
-                        f"Redis: call has no run_id (worker={call.worker_id}, "
-                        f"agent={call.agent_id}, cost=${call.cost:.4f})"
-                    )
-                if call.worker_id:
-                    pipe.incrbyfloat(
-                        f"{self.COUNTER_PREFIX}:worker:{call.worker_id}:cost",
-                        call.cost,
-                    )
-                    cmd_names.append("worker:cost")
-                if call.agent_id:
-                    pipe.incrbyfloat(
-                        f"{self.COUNTER_PREFIX}:agent:{call.agent_id}:cost",
-                        call.cost,
-                    )
-                    cmd_names.append("agent:cost")
-                results = pipe.execute()
-                # Check for per-command errors in non-transactional pipeline
-                for i, res in enumerate(results):
-                    if isinstance(res, Exception):
-                        name = cmd_names[i] if i < len(cmd_names) else f"cmd[{i}]"
-                        logger.error(
-                            f"Redis pipeline cmd '{name}' failed: {res} "
-                            f"(run={call.run_id}, worker={call.worker_id})"
-                        )
-            except Exception as e:
-                logger.warning(f"Redis INCRBYFLOAT failed: {e}")
-
-        # 2. Append to memory list for batch MongoDB flush
-        with self._lock:
-            self._records.append(call.to_dict())
-
-    def record_tool_call(
-        self,
-        tool_name: str,
-        success: bool,
-        latency_ms: int,
-        run_id: str = "",
-        worker_id: str = "",
-        agent_id: str = "",
-        error: str = "",
-    ) -> None:
-        """Record one tool call. Thread-safe, same as `record`."""
-        from datetime import datetime
-
-        doc = {
-            "tool_name": tool_name,
-            "success": bool(success),
-            "latency_ms": int(latency_ms),
-            "created_at": datetime.now(),
-        }
-        for name, value in (
-            ("run_id", run_id),
-            ("worker_id", worker_id),
-            ("agent_id", agent_id),
-        ):
-            if value:
-                try:
-                    doc[name] = ObjectId(str(value))
-                except Exception:
-                    doc[name] = str(value)
-        if error:
-            doc["error"] = error[:500]
-        with self._lock:
-            self._tool_records.append(doc)
-
     def _connect_redis(self) -> None:
-        """Connect sync Redis client."""
+        if not self.redis_url:
+            return
         try:
             import redis as sync_redis
 
             self._redis = sync_redis.Redis.from_url(
-                self.redis_url,
-                decode_responses=True,
-                socket_connect_timeout=5,
+                self.redis_url, decode_responses=True, socket_connect_timeout=5
             )
             self._redis.ping()
-            logger.info(f"WorkerLLMBuffer Redis connected: {self.redis_url}")
-        except ImportError:
-            logger.warning("redis package not installed, skipping real-time counters")
-            self._redis = None
         except Exception as e:
-            logger.warning(f"Redis connection failed: {e}, skipping real-time counters")
+            logger.warning(f"LLM buffer: no Redis ({e}); the budget reads PostgreSQL only")
             self._redis = None
 
-    def _flush_loop(self) -> None:
-        """Daemon thread: flush records to MongoDB every FLUSH_INTERVAL seconds."""
-        while not self._stop_event.wait(timeout=self.FLUSH_INTERVAL):
+    def _loop(self) -> None:
+        while not self._stop.wait(timeout=self.FLUSH_INTERVAL):
             try:
-                count = self._flush()
-                if count > 0:
-                    logger.debug(f"WorkerLLMBuffer flushed {count} records to MongoDB")
+                self.flush()
             except Exception as e:
-                logger.error(f"WorkerLLMBuffer flush error: {e}")
+                logger.error(f"LLM buffer flush failed: {e}")
 
-    def _flush(self) -> int:
+    # -------------------------------------------------------------- record
+
+    def record(
+        self,
+        row: Dict[str, Any],
+        messages: Optional[List[Dict[str, Any]]] = None,
+        output: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Queue one llm_calls row; returns the key its tool calls refer to.
+
+        `row` holds the llm_calls columns except id, the message ids and
+        created_at; `messages` is what was sent, `output` the reply message.
         """
-        Flush accumulated records to MongoDB.
-
-        1. insert_many into llm_calls collection
-        2. $inc aggregates on runs/workers/agents collections
-
-        Returns:
-            Number of records flushed
-        """
-        # Grab current batch under lock
+        cost = float(row.get("cost") or 0)
+        run_id = row.get("run_id")
+        if self._redis and cost > 0 and run_id:
+            try:
+                pipe = self._redis.pipeline(transaction=False)
+                pipe.incrbyfloat(f"{self.COUNTER_PREFIX}:run:{run_id}:cost", cost)
+                pipe.incr(f"{self.COUNTER_PREFIX}:run:{run_id}:calls")
+                pipe.execute()
+            except Exception as e:
+                logger.warning(f"Redis cost update failed: {e}")
+        key = next(self._keys)
+        ins = [_message(m) for m in (messages or [])]
+        out = _message(output) if output else None
         with self._lock:
-            batch = self._records[:]
-            self._records.clear()
-            tool_batch = self._tool_records[:]
-            self._tool_records.clear()
+            self._calls.append((key, dict(row), ins, out))
+            self._call_runs[key] = str(run_id)
+        return key
 
-        if self.mongo_db is None or (not batch and not tool_batch):
+    def record_tool_call(
+        self,
+        call_key: int,
+        tool_name: str,
+        success: bool,
+        latency_ms: int,
+        result: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        """Queue one tool_calls row for the LLM call `call_key` asked for."""
+        row = {
+            "tool_name": tool_name,
+            "success": bool(success),
+            "error": (error or None) if not success else None,
+            "latency_ms": max(int(latency_ms), 0),
+        }
+        with self._lock:
+            self._tools.append((call_key, row, _message(result) if result else None))
+
+    # --------------------------------------------------------------- flush
+
+    def flush(self) -> int:
+        """Write what is queued; on a failure the batch goes back in the queue."""
+        if self.store is None:
             return 0
-
-        # Tool calls are their own collection and their own failure: losing
-        # them must not cost the LLM records, which are what the budget is
-        # computed from.
-        if tool_batch:
-            try:
-                self.mongo_db.tool_calls.insert_many(tool_batch)
-            except Exception as e:
-                logger.error(f"Failed to flush tool calls to MongoDB: {e}")
-
-        if not batch:
-            return len(tool_batch)
-
-        try:
-            # Bulk insert to llm_calls collection
-            self.mongo_db.llm_calls.insert_many(batch)
-
-            # Update aggregated fields
-            _update_aggregates(self.mongo_db, batch)
-
-            return len(batch) + len(tool_batch)
-        except Exception as e:
-            logger.error(f"Failed to flush LLM calls to MongoDB: {e}")
-            # Put records back so they're not lost
+        with self._flush_lock:
             with self._lock:
-                self._records = batch + self._records
-            return len(tool_batch)
+                calls, self._calls = self._calls, []
+                tools, self._tools = self._tools, []
+            if not calls and not tools:
+                return 0
+            try:
+                self._write(calls, tools)
+            except Exception as e:
+                logger.error(f"LLM buffer: write failed, will retry: {e}")
+                with self._lock:
+                    self._calls = calls + self._calls
+                    self._tools = tools + self._tools
+                return 0
+            return len(calls) + len(tools)
 
-    def cleanup_redis_keys(self, worker_id: str) -> None:
-        """Clean up this worker's Redis counter key.
-
-        The run's counters are not this worker's to delete: the other workers
-        are still adding to them and the dispatcher's budget check reads them.
-        The dispatcher deletes them when the whole run is over.
-        """
-        if not self._redis or not worker_id:
+    def _resolve(self, run_id, msgs: List[tuple]) -> None:
+        """Make sure every message in `msgs` has an id in _message_ids."""
+        rid = str(run_id)
+        new = [m for m in msgs if (rid, m[0]) not in self._message_ids]
+        if not new:
             return
-        try:
-            self._redis.delete(f"{self.COUNTER_PREFIX}:worker:{worker_id}:cost")
-        except Exception as e:
-            logger.warning(f"Failed to cleanup Redis keys: {e}")
+        got = self.store.message_ids(run_id, new)
+        for sha, mid in got.items():
+            self._message_ids[(rid, sha)] = mid
+
+    def _write(self, calls, tools) -> None:
+        by_run: Dict[str, List[tuple]] = {}
+        for key, row, ins, out in calls:
+            by_run.setdefault(str(row["run_id"]), []).extend(ins + ([out] if out else []))
+        for rid, msgs in by_run.items():
+            self._resolve(rid, msgs)
+        rows = []
+        for key, row, ins, out in calls:
+            rid = str(row["run_id"])
+            r = dict(row)
+            r["run_id"] = as_uuid(r["run_id"])
+            r["worker_id"] = as_uuid(r.get("worker_id"))
+            r["agent_id"] = as_uuid(r.get("agent_id"))
+            r["input_message_ids"] = [self._message_ids[(rid, m[0])] for m in ins]
+            r["output_message_id"] = self._message_ids[(rid, out[0])] if out else None
+            rows.append(r)
+        ids = self.store.insert_llm_calls(rows)
+        for (key, _, _, _), cid in zip(calls, ids):
+            self._call_ids[key] = cid
+
+        ready, waiting = [], []
+        for t in tools:
+            (ready if t[0] in self._call_ids else waiting).append(t)
+        if waiting:
+            # Their call is not written yet: it is still queued.
+            with self._lock:
+                self._tools = waiting + self._tools
+        if not ready:
+            return
+        results: Dict[str, List[tuple]] = {}
+        for key, _, res in ready:
+            if res is not None:
+                results.setdefault(self._call_runs[key], []).append(res)
+        for rid, msgs in results.items():
+            self._resolve(rid, msgs)
+        tool_rows = []
+        for key, row, res in ready:
+            r = dict(row)
+            r["llm_call_id"] = self._call_ids[key]
+            r["run_id"] = as_uuid(self._call_runs[key])
+            r["result_message_id"] = None
+            if res is not None:
+                r["result_message_id"] = self._message_ids.get((self._call_runs[key], res[0]))
+            tool_rows.append(r)
+        self.store.insert_tool_calls(tool_rows)
 
 
-def _update_aggregates(mongo_db, docs: list) -> None:
-    """
-    Update aggregated LLM usage fields in Run, Worker, Agent collections.
-
-    Groups docs by ID and uses $inc for atomic updates.
-
-    Args:
-        mongo_db: MongoDB database instance
-        docs: List of LLMCall dicts (from to_dict())
-    """
-    run_stats = defaultdict(lambda: {"calls": 0, "cost": 0.0, "input": 0, "output": 0})
-    worker_stats = defaultdict(
-        lambda: {"calls": 0, "cost": 0.0, "input": 0, "output": 0}
-    )
-    agent_stats = defaultdict(
-        lambda: {"calls": 0, "cost": 0.0, "input": 0, "output": 0}
-    )
-
-    for doc in docs:
-        run_id = doc.get("run_id")
-        worker_id = doc.get("worker_id")
-        agent_id = doc.get("agent_id")
-        cost = doc.get("cost", 0.0)
-        input_tokens = doc.get("input_tokens", 0)
-        output_tokens = doc.get("output_tokens", 0)
-
-        if run_id:
-            run_stats[run_id]["calls"] += 1
-            run_stats[run_id]["cost"] += cost
-            run_stats[run_id]["input"] += input_tokens
-            run_stats[run_id]["output"] += output_tokens
-
-        if worker_id:
-            worker_stats[worker_id]["calls"] += 1
-            worker_stats[worker_id]["cost"] += cost
-            worker_stats[worker_id]["input"] += input_tokens
-            worker_stats[worker_id]["output"] += output_tokens
-
-        if agent_id:
-            agent_stats[agent_id]["calls"] += 1
-            agent_stats[agent_id]["cost"] += cost
-            agent_stats[agent_id]["input"] += input_tokens
-            agent_stats[agent_id]["output"] += output_tokens
-
-    # Update Run collection
-    for run_id, stats in run_stats.items():
-        try:
-            mongo_db.runs.update_one(
-                {
-                    "_id": run_id
-                    if isinstance(run_id, ObjectId)
-                    else ObjectId(run_id)
-                },
-                {
-                    "$inc": {
-                        "llm_calls": stats["calls"],
-                        "llm_cost": stats["cost"],
-                        "llm_input_tokens": stats["input"],
-                        "llm_output_tokens": stats["output"],
-                    }
-                },
-            )
-        except Exception as e:
-            logger.warning(f"Failed to update run aggregates: {e}")
-
-    # Update Worker collection
-    for worker_id, stats in worker_stats.items():
-        try:
-            mongo_db.workers.update_one(
-                {
-                    "_id": worker_id
-                    if isinstance(worker_id, ObjectId)
-                    else ObjectId(worker_id)
-                },
-                {
-                    "$inc": {
-                        "llm_calls": stats["calls"],
-                        "llm_cost": stats["cost"],
-                        "llm_input_tokens": stats["input"],
-                        "llm_output_tokens": stats["output"],
-                    }
-                },
-            )
-        except Exception as e:
-            logger.warning(f"Failed to update worker aggregates: {e}")
-
-    # Update Agent collection
-    for agent_id, stats in agent_stats.items():
-        try:
-            mongo_db.agents.update_one(
-                {
-                    "_id": agent_id
-                    if isinstance(agent_id, ObjectId)
-                    else ObjectId(agent_id)
-                },
-                {
-                    "$inc": {
-                        "llm_calls": stats["calls"],
-                        "llm_cost": stats["cost"],
-                        "llm_input_tokens": stats["input"],
-                        "llm_output_tokens": stats["output"],
-                    }
-                },
-            )
-        except Exception as e:
-            logger.warning(f"Failed to update agent aggregates: {e}")
-
-
-# =============================================================================
-# Module-level current buffer (one per Celery worker process)
-# =============================================================================
+# ------------------------------------------------- the process's buffer
 
 _current_buffer: Optional[WorkerLLMBuffer] = None
 
 
 def get_worker_buffer() -> Optional[WorkerLLMBuffer]:
-    """Get the current worker's LLM buffer."""
     return _current_buffer
 
 
 def set_worker_buffer(buffer: Optional[WorkerLLMBuffer]) -> None:
-    """Set the current worker's LLM buffer."""
     global _current_buffer
     _current_buffer = buffer
 
 
-# =============================================================================
-# Backward compatibility aliases
-# =============================================================================
+def ensure_buffer(store=None, redis_url: Optional[str] = None) -> WorkerLLMBuffer:
+    """The process's buffer, started on first use (the controller's calls too)."""
+    global _current_buffer
+    if _current_buffer is None:
+        if store is None:
+            from ..db.store import get_store
 
-
-def get_llm_call_buffer() -> Optional[WorkerLLMBuffer]:
-    """Backward compatibility: returns the current worker buffer."""
+            store = get_store()
+        _current_buffer = WorkerLLMBuffer(redis_url, store)
+        _current_buffer.start()
     return _current_buffer

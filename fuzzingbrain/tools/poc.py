@@ -40,10 +40,9 @@ from ..core.fuzzer_spec import (
     run_lib_docker_args,
     NO_OOM_MEMORY_MB,
 )
-from ..core.models import POC
-from ..core.poc_packager import POCPackager
-from ..core.utils import generate_id
-from ..db import RepositoryManager
+from ..core.crashes import is_real_fault, package_crash, record_crash
+from ..db.store import get_store
+from ..worker.scope import get_scope
 
 
 # =============================================================================
@@ -66,7 +65,6 @@ def set_poc_context(
     run_id: str,
     worker_id: str,
     output_dir: Path,
-    repos: RepositoryManager,
     fuzzer: str = "",
     sanitizer: str = "address",
     vulnerability_hypothesis_id: str = "",
@@ -86,7 +84,6 @@ def set_poc_context(
         run_id: Current run ID
         worker_id: Current worker ID
         output_dir: Directory to save PoC blob files
-        repos: Database repository manager
         fuzzer: Fuzzer name
         sanitizer: Sanitizer type
         vulnerability_hypothesis_id: Current vulnerability hypothesis being processed
@@ -101,7 +98,6 @@ def set_poc_context(
         "run_id": run_id,
         "worker_id": worker_id,
         "output_dir": Path(output_dir).absolute() if output_dir else None,
-        "repos": repos,
         "fuzzer": fuzzer,
         "sanitizer": sanitizer,
         "vulnerability_hypothesis_id": vulnerability_hypothesis_id,
@@ -201,81 +197,6 @@ def _get_context_by_worker_id(worker_id: str) -> Optional[Dict[str, Any]]:
         return _poc_contexts.get(worker_id)
 
 
-def _get_all_fuzzers(ctx: Dict[str, Any]) -> List[Path]:
-    """
-    Get all available fuzzers from workspace.
-
-    Looks in workspace_path/fuzz-tooling/build/out/{project}_{sanitizer}/
-    for executable files.
-
-    Returns:
-        List of fuzzer paths
-    """
-    workspace_path = ctx.get("workspace_path")
-    sanitizer = ctx.get("sanitizer", "address")
-
-    if not workspace_path:
-        return []
-
-    # Find fuzzer output directory
-    out_base = workspace_path / "fuzz-tooling" / "build" / "out"
-    if not out_base.exists():
-        return []
-
-    # Find directories matching *_{sanitizer}
-    fuzzers = []
-    skip_files = {
-        "llvm-symbolizer",
-        "sancov",
-        "clang",
-        "clang++",
-        "llvm-cov",
-        "llvm-profdata",
-        "llvm-ar",
-    }
-    skip_extensions = {
-        ".bin",
-        ".log",
-        ".dict",
-        ".options",
-        ".bc",
-        ".json",
-        ".o",
-        ".a",
-        ".so",
-        ".h",
-        ".c",
-        ".cpp",
-        ".cc",
-        ".py",
-        ".sh",
-        ".txt",
-        ".md",
-        ".zip",
-        ".tar",
-        ".gz",
-    }
-
-    for out_dir in out_base.iterdir():
-        if not out_dir.is_dir():
-            continue
-        if not out_dir.name.endswith(f"_{sanitizer}"):
-            continue
-
-        # Find executables in this directory
-        for f in out_dir.iterdir():
-            if f.name in skip_files:
-                continue
-            if f.suffix.lower() in skip_extensions:
-                continue
-            if f.is_dir():
-                continue
-            if f.is_file() and os.access(f, os.X_OK):
-                fuzzers.append(f)
-
-    return fuzzers
-
-
 def _ensure_context(worker_id: str = None) -> Optional[Dict[str, Any]]:
     """
     Ensure PoC context is set. Returns error dict if not configured.
@@ -297,15 +218,6 @@ def _ensure_context(worker_id: str = None) -> Optional[Dict[str, Any]]:
                 "argument you pass will change it -- retrying wastes the "
                 "budget. Stop calling the PoC tools and report your analysis "
                 "of the vulnerability hypothesis instead."
-            ),
-        }
-    if ctx.get("repos") is None:
-        return {
-            "success": False,
-            "error": (
-                "The PoC tools have no database connection. This is a fault in "
-                "the run's setup, not in your arguments -- retrying will not "
-                "help. Report your analysis instead."
             ),
         }
     return None
@@ -342,51 +254,11 @@ def get_fuzzer_info_impl(worker_id: str = None) -> Dict[str, Any]:
 
 
 
-def _duplicate_signature(ctx, output: str, fuzzer: str):
-    """The already-reported crash this one repeats, or None if it is new.
-
-    The registry is the pocs collection, because the agents are separate
-    processes and the question spans all of them: two agents working two
-    vulnerability hypotheses can walk into one overflow, and whichever arrives second
-    should be told so rather than filing it again.
-
-    A failure to read the registry returns None -- a missed duplicate costs a
-    redundant report, while a false duplicate would throw away a real finding.
-    """
-    try:
-        from ..fuzzer.signature import compute_signature
-
-        sig = compute_signature(output, harness_names=[fuzzer] if fuzzer else [])
-        if not sig:
-            return None
-        repos = ctx.get("repos")
-        run_id = ctx.get("run_id", "")
-        if repos is None or not run_id:
-            return None
-        for prior in repos.pocs.find_by_run(run_id) or []:
-            if not getattr(prior, "is_successful", False):
-                continue
-            if getattr(prior, "duplicate_of", None):
-                continue  # already a repeat of something; point at the original
-            if getattr(prior, "signature", "") == sig.short:
-                return {
-                    "signature": sig.short,
-                    "key": sig.key,
-                    "describe": sig.describe(),
-                    "first_poc_id": str(getattr(prior, "poc_id", "")),
-                    "found_by": getattr(prior, "source", "") or "agent",
-                }
-        return None
-    except Exception as e:
-        logger.debug(f"[PoC] Could not check for duplicate signature: {e}")
-        return None
-
-
 # Who holds a crash already on record, in the words the agent is told.
 _FOUND_BY = {
     "global_fuzzer": "the fuzzer",
     "vh_fuzzer": "the fuzzer",
-    "agent": "a PoC agent (you or another one)",
+    "vh_agent": "a PoC agent (you or another one)",
 }
 
 # The first line of a sanitizer / libFuzzer report in a run's output.
@@ -873,24 +745,22 @@ def _create_poc_core(
     description: str,
     worker_id: str = None,
 ) -> Dict[str, Any]:
-    """
-    Core implementation of create_poc.
+    """Run the generator, store each variant as a poc_attempt, run each one.
 
-    Args:
-        worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
+    Each variant is one poc_attempts row (source vh_agent); a crashing one
+    gets its crash (core/crashes.py). Only this harness is tried: another
+    harness's worker owns its own binary.
     """
     ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
+    scope = get_scope()
+    if scope is None:
+        return {"success": False, "error": "PoC tools run only inside a worker"}
     run_id = ctx["run_id"]
     ctx_worker_id = ctx["worker_id"]
     output_dir = ctx["output_dir"]
-
-    repos = ctx["repos"]
-    fuzzer = ctx.get("fuzzer", "")
-    sanitizer = ctx.get("sanitizer", "address")
-    docker_image = ctx.get("docker_image")
+    sanitizer = ctx.get("sanitizer") or scope.default_sanitizer
     current_iteration = ctx.get("iteration", 0)
 
-    # Increment attempt counter (thread-safe)
     with _poc_contexts_lock:
         if ctx_worker_id in _poc_contexts:
             _poc_contexts[ctx_worker_id]["attempt"] += 1
@@ -898,66 +768,39 @@ def _create_poc_core(
         else:
             current_attempt = 1
 
-    # Use context VH if not provided
     if not vulnerability_hypothesis_id and ctx.get("vulnerability_hypothesis_id"):
         vulnerability_hypothesis_id = ctx["vulnerability_hypothesis_id"]
-
-    # Validate inputs
     if not vulnerability_hypothesis_id:
         return {"success": False, "error": "vulnerability_hypothesis_id is required"}
     if not generator_code or not generator_code.strip():
         return {"success": False, "error": "generator_code is required"}
-    if not description or not description.strip():
-        return {"success": False, "error": "description is required"}
+    agent_id = ctx.get("agent_id")
+    if not agent_id:
+        return {"success": False, "error": "no agent id in the PoC context"}
 
-    # Generate unique generation_id for this batch
-    generation_id = generate_id()
-
-    # Execute generator code
-    logger.info(f"[PoC] Executing generator code for VH {vulnerability_hypothesis_id[:8]}...")
-    logger.info(f"[PoC] Attempt #{current_attempt}, Iteration #{current_iteration}")
-
-    num_variants = 3
-    blobs, error = _execute_generator_code(generator_code, num_variants)
-
+    logger.info(
+        f"[PoC] VH {vulnerability_hypothesis_id[:8]}: attempt #{current_attempt}, "
+        f"iteration #{current_iteration}"
+    )
+    blobs, error = _execute_generator_code(generator_code, 3)
     if error:
         logger.error(f"[PoC] Generator code failed: {error}")
         return {"success": False, "error": error}
-
     if not blobs:
         return {"success": False, "error": "Generator code produced no blobs"}
 
-    # Create output directory: pocs/{run_id}/{ctx_worker_id}/attempt_{n}/
     attempt_dir = None
     if output_dir:
-        attempt_dir = (
-            output_dir / run_id / ctx_worker_id / f"attempt_{current_attempt:03d}"
-        )
+        attempt_dir = output_dir / ctx_worker_id / f"attempt_{current_attempt:03d}"
         attempt_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create PoC records for each blob
-    poc_ids = []
-    blob_paths = []
-
-    # Get FuzzerManager for VH Fuzzer integration
+    store = get_store()
     fuzzer_manager = ctx.get("fuzzer_manager")
-
+    poc_ids = []
     for variant_idx, blob in enumerate(blobs, start=1):
-        poc_id = generate_id()
-
-        # Save blob to file
-        blob_path = None
         if attempt_dir:
-            blob_filename = f"v{variant_idx}.bin"
-            blob_path = attempt_dir / blob_filename
-            blob_path.write_bytes(blob)
-            blob_paths.append(str(blob_path))
-            logger.debug(f"[PoC] Saved blob to {blob_path}")
-        else:
-            blob_paths.append(None)
-
-        # Add blob to VH Fuzzer corpus for mutation
-        if fuzzer_manager and vulnerability_hypothesis_id:
+            (attempt_dir / f"v{variant_idx}.bin").write_bytes(blob)
+        if fuzzer_manager:
             try:
                 fuzzer_manager.add_poc_blob(
                     blob=blob,
@@ -965,157 +808,49 @@ def _create_poc_core(
                     attempt=current_attempt,
                     variant=variant_idx,
                 )
-                logger.debug(
-                    f"[PoC] Added blob to VH Fuzzer corpus: vh={vulnerability_hypothesis_id[:8]}, v={variant_idx}"
-                )
             except Exception as e:
                 logger.warning(f"[PoC] Failed to add blob to VH Fuzzer: {e}")
-
-        # Create PoC record
-        poc = POC(
-            poc_id=poc_id,
-            run_id=run_id,
-            vulnerability_hypothesis_id=vulnerability_hypothesis_id,
-            generation_id=generation_id,
-            agent_id=ctx.get("agent_id"),  # Track which POCAgent created this
-            iteration=current_iteration,
+        aid = store.add_poc_attempt(
+            run_id,
+            "vh_agent",
+            scope.harness_id,
+            sanitizer,
+            blob,
+            vh_id=vulnerability_hypothesis_id,
+            worker_id=scope.worker_id,
+            agent_id=agent_id,
             attempt=current_attempt,
             variant=variant_idx,
-            blob=base64.b64encode(blob).decode("utf-8"),
-            blob_path=str(blob_path) if blob_path else None,
-            gen_blob=generator_code,
-            harness_name=fuzzer,
-            sanitizer=sanitizer,
-            description=description,
-            is_successful=False,
-            is_active=True,
+            generator_code=generator_code,
         )
+        poc_ids.append(str(aid))
 
-        # Save to database
-        if repos.pocs.save(poc):
-            poc_ids.append(poc_id)
-            logger.info(
-                f"[PoC] Created PoC {poc_id[:8]} (attempt={current_attempt}, variant={variant_idx})"
-            )
-        else:
-            logger.error(f"[PoC] Failed to save PoC {poc_id[:8]} to database")
-
-    if not poc_ids:
-        return {"success": False, "error": "Failed to save any PoC records to database"}
-
-    logger.info(
-        f"[PoC] Successfully created {len(poc_ids)} PoCs for VH {vulnerability_hypothesis_id[:8]}"
-    )
-
-    # Get all available fuzzers for cross-fuzzer verification
-    all_fuzzers = repos.fuzzers.find_by_run(run_id)
-    current_fuzzer_name = ctx.get("fuzzer", "")
-    other_fuzzers = [
-        f for f in all_fuzzers if f.fuzzer_name != current_fuzzer_name and f.binary_path
-    ]
-
-    logger.info(
-        f"[PoC] Auto-verifying {len(poc_ids)} PoCs on {1 + len(other_fuzzers)} fuzzers..."
-    )
-
-    # Auto-verify all generated PoCs
-    verify_results = []
-    successful_pocs = []
-    duplicate_pocs = []
-    cross_fuzzer_hits = 0
-
-    for poc_id in poc_ids:
-        # First verify on current fuzzer
-        result = _verify_poc_core(poc_id=poc_id, worker_id=ctx_worker_id)
-        verify_results.append(result)
-        if result.get("duplicate"):
-            # It crashed, but into a bug already on record: not a finding, so
-            # not a success -- and not copied to the other fuzzers below, where
-            # the copies would be saved as successful and counted as new bugs.
-            duplicate_pocs.append(poc_id)
-            logger.info(
-                f"[PoC] = PoC {poc_id[:8]} crashed into a known bug on {current_fuzzer_name}"
-            )
-            continue
-        if result.get("crashed"):
-            successful_pocs.append(poc_id)
-            logger.info(
-                f"[PoC] ✓ PoC {poc_id[:8]} triggered crash on {current_fuzzer_name}!"
-            )
-        else:
-            logger.info(f"[PoC] ✗ PoC {poc_id[:8]} no crash on {current_fuzzer_name}")
-
-        # Then try on all other fuzzers
-        poc = repos.pocs.find_by_id(poc_id)
-        if poc and poc.blob:
-            blob_bytes = base64.b64decode(poc.blob)
-            for other_fuzzer in other_fuzzers:
-                try:
-                    other_result = _verify_blob_on_fuzzer(
-                        blob=blob_bytes,
-                        fuzzer_path=Path(other_fuzzer.binary_path),
-                        docker_image=docker_image,
-                        sanitizer=sanitizer,
-                        no_oom=is_no_oom(other_fuzzer.fuzzer_name),
-                    )
-                    if other_result.get("crashed"):
-                        cross_fuzzer_hits += 1
-                        logger.info(
-                            f"[PoC] ✓ PoC {poc_id[:8]} also crashed on {other_fuzzer.fuzzer_name}!"
-                        )
-                        # Create new PoC record for this fuzzer
-                        cross_poc_id = generate_id()
-                        cross_poc = POC(
-                            poc_id=cross_poc_id,
-                            run_id=run_id,
-                            vulnerability_hypothesis_id=vulnerability_hypothesis_id,
-                            generation_id=generation_id,
-                            agent_id=ctx.get("agent_id"),  # Inherit from original PoC
-                            iteration=current_iteration,
-                            attempt=current_attempt,
-                            variant=poc.variant,
-                            blob=poc.blob,
-                            blob_path=poc.blob_path,
-                            gen_blob=generator_code,
-                            harness_name=other_fuzzer.fuzzer_name,
-                            sanitizer=sanitizer,
-                            description=f"Cross-fuzzer hit from {current_fuzzer_name}",
-                            is_successful=True,
-                            is_active=True,
-                            verified_at=datetime.now(),
-                            sanitizer_output=other_result.get("output", "")[:5000],
-                        )
-                        repos.pocs.save(cross_poc)
-                        successful_pocs.append(cross_poc_id)
-                except Exception as e:
-                    logger.debug(
-                        f"[PoC] Cross-fuzzer check failed on {other_fuzzer.fuzzer_name}: {e}"
-                    )
-
-    # Return results with verification info
-    # Extract key info from verify_results for Agent feedback
     verify_details = []
+    successful, duplicates = [], []
     duplicate_message = ""
-    for i, result in enumerate(verify_results):
-        detail = {
-            "variant": i + 1,
-            "crashed": result.get("crashed", False),
-        }
-        # A crash (new or duplicate) carries its signature and raw sanitizer
-        # report; a clean run only the summary.
+    for i, poc_id in enumerate(poc_ids, start=1):
+        result = _verify_poc_core(poc_id=poc_id, worker_id=ctx_worker_id)
+        detail = {"variant": i, "crashed": result.get("crashed", False)}
         if result.get("duplicate"):
-            detail["duplicate"] = True
-            detail["vuln_type"] = result.get("vuln_type")
-            detail["signature"] = result.get("signature", "")
-            detail["output_excerpt"] = result.get("output_excerpt", "")
+            duplicates.append(poc_id)
+            detail.update(
+                duplicate=True,
+                vuln_type=result.get("vuln_type"),
+                signature=result.get("signature", ""),
+                output_excerpt=result.get("output_excerpt", ""),
+            )
             duplicate_message = duplicate_message or result.get("message", "")
         elif result.get("crashed"):
-            detail["vuln_type"] = result.get("vuln_type")
-            detail["signature"] = result.get("signature", "")
-            detail["output_excerpt"] = result.get("output_excerpt", "")
+            successful.append(poc_id)
+            detail.update(
+                vuln_type=result.get("vuln_type"),
+                signature=result.get("signature", ""),
+                output_excerpt=result.get("output_excerpt", ""),
+            )
         else:
-            # Include LLM-generated summary for non-crash cases
-            detail["output_summary"] = result.get("output_summary", "No details")
+            detail["output_summary"] = result.get(
+                "output_summary", result.get("error", "No details")
+            )
         verify_details.append(detail)
 
     out = {
@@ -1123,12 +858,11 @@ def _create_poc_core(
         "poc_ids": poc_ids,
         "attempt": current_attempt,
         "count": len(poc_ids),
-        "verified": len(verify_results),
+        "verified": len(verify_details),
         # New findings only; a crash into a known bug is counted under duplicates.
-        "crashed": len(successful_pocs),
-        "duplicates": len(duplicate_pocs),
-        "cross_fuzzer_hits": cross_fuzzer_hits,
-        "successful_poc_ids": successful_pocs,
+        "crashed": len(successful),
+        "duplicates": len(duplicates),
+        "successful_poc_ids": successful,
         "verify_details": verify_details,
     }
     if duplicate_message:
@@ -1378,7 +1112,9 @@ def _verify_blob_on_fuzzer(
             temp_blob_path.unlink()
 
 
-FALLBACK_DOCKER_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
+# FuzzTest binaries (name contains '@') run only through base-runner's
+# `reproduce`; every other binary runs in the image it was built for.
+FUZZTEST_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
 
 
 def _run_fuzzer_docker(
@@ -1391,9 +1127,6 @@ def _run_fuzzer_docker(
 ) -> tuple:
     """
     Run fuzzer in Docker container with blob input.
-
-    Includes fallback mechanism: if the primary docker_image fails due to
-    missing shared libraries, automatically retry with base-runner.
 
     `no_oom` (a @NO_OOM target) disables libFuzzer's allocator guard and gives
     the container real memory headroom, so a memory-heavy decode reaches the
@@ -1475,27 +1208,10 @@ def _run_fuzzer_docker(
         return result, combined_output
 
     try:
-        # FuzzTest fuzzers MUST use base-runner image (only it has 'reproduce' command)
         if "@" in fuzzer_name:
-            logger.debug(
-                f"[PoC] FuzzTest fuzzer detected, using {FALLBACK_DOCKER_IMAGE}"
-            )
-            result, combined_output = run_with_image(FALLBACK_DOCKER_IMAGE)
+            result, combined_output = run_with_image(FUZZTEST_IMAGE)
         else:
-            # Try with primary image first
             result, combined_output = run_with_image(docker_image)
-
-            # Check for library loading errors - need to fallback
-            # This includes: "error while loading shared libraries" and "GLIBC" version errors
-            if (
-                "error while loading shared libraries" in combined_output
-                or "GLIBC" in combined_output
-            ):
-                if docker_image != FALLBACK_DOCKER_IMAGE:
-                    logger.warning(
-                        f"[PoC] Library error with {docker_image}, falling back to {FALLBACK_DOCKER_IMAGE}"
-                    )
-                    result, combined_output = run_with_image(FALLBACK_DOCKER_IMAGE)
 
         # Check for crash
         crashed = _check_crash(combined_output)
@@ -1597,63 +1313,41 @@ Key info (brief, 2-5 lines):"""
 
 
 def _verify_poc_core(poc_id: str, worker_id: str = None) -> Dict[str, Any]:
-    """
-    Core implementation of verify_poc.
-
-    Args:
-        worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
-    """
+    """Run one stored attempt on this worker's binary and record what happened."""
     ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
-    repos = ctx["repos"]
-    sanitizer = ctx.get("sanitizer", "address")
-
-    # Get PoC from database
-    poc = repos.pocs.find_by_id(poc_id)
-    if not poc:
+    store = get_store()
+    try:
+        attempt = store.get_poc_attempt(poc_id)
+    except ValueError:
+        attempt = None
+    if attempt is None:
         return {"success": False, "error": f"PoC {poc_id} not found"}
+    if attempt.status != "pending":
+        return {"success": False, "error": f"PoC {poc_id[:8]} already ran ({attempt.status})"}
 
-    # Get blob path
-    blob_path = poc.blob_path
-
-    if not blob_path or not Path(blob_path).exists():
-        # Try to reconstruct from base64 blob
-        if poc.blob:
-            # Create temp file from base64
-            temp_dir = ctx.get("output_dir")
-            if temp_dir:
-                temp_blob = Path(temp_dir) / f"verify_{poc_id[:8]}.bin"
-                temp_blob.write_bytes(base64.b64decode(poc.blob))
-                blob_path = str(temp_blob)
-            else:
-                return {
-                    "success": False,
-                    "error": "No blob path and no output_dir to reconstruct",
-                }
-        else:
-            return {"success": False, "error": "PoC has no blob data"}
-
-    blob_path = Path(blob_path)
-
-    # Get fuzzer path from context or PoC
-    fuzzer_path = ctx.get("fuzzer_path")
+    sanitizer = attempt.sanitizer
+    scope = get_scope()
+    fuzzer_path = (scope.binary(sanitizer) if scope else None) or ctx.get("fuzzer_path")
     docker_image = ctx.get("docker_image")
-    # Harness name -- used by the duplicate check and signature computation below.
-    # It was referenced there but never defined, so every crash raised
-    # NameError('fuzzer') and no PoC was ever registered as successful.
-    fuzzer = ctx.get("fuzzer", "") or (fuzzer_path.name if fuzzer_path else "")
-
+    fuzzer = ctx.get("fuzzer", "") or (scope.harness if scope else "")
     if not fuzzer_path:
-        return {"success": False, "error": "fuzzer_path not set in PoC context"}
+        store.attempt_ran(attempt.id, "error")
+        return {"success": False, "error": f"no {sanitizer} binary for this harness"}
     if not docker_image:
+        store.attempt_ran(attempt.id, "error")
         return {"success": False, "error": "docker_image not set in PoC context"}
-
     fuzzer_path = Path(fuzzer_path)
     if not fuzzer_path.exists():
+        store.attempt_ran(attempt.id, "error")
         return {"success": False, "error": f"Fuzzer not found: {fuzzer_path}"}
 
-    logger.info(f"[PoC] Verifying PoC {poc_id[:8]} with fuzzer {fuzzer_path.name}")
+    blob = bytes(attempt.blob)
+    work = Path(ctx.get("output_dir") or (Path.cwd() / ".poc_verify")) / "verify"
+    work.mkdir(parents=True, exist_ok=True)
+    blob_path = work / f"{poc_id[:8]}.bin"
+    blob_path.write_bytes(blob)
 
-    # Run fuzzer in Docker
+    logger.info(f"[PoC] Running PoC {poc_id[:8]} on {fuzzer_path.name} ({sanitizer})")
     success, crashed, output, error = _run_fuzzer_docker(
         fuzzer_path=fuzzer_path,
         blob_path=blob_path,
@@ -1661,17 +1355,9 @@ def _verify_poc_core(poc_id: str, worker_id: str = None) -> Dict[str, Any]:
         sanitizer=sanitizer,
         no_oom=is_no_oom(fuzzer),
     )
-
     if not success:
-        logger.warning(f"[PoC] Verification failed: {error}")
-        # Keep whatever the run produced (or the error) so the dashboard can
-        # show why a verify failed instead of a blank "No crash output".
-        try:
-            poc.sanitizer_output = (output or error or "")[:5000]
-            poc.verified_at = datetime.now()
-            repos.pocs.save(poc)
-        except Exception as e:
-            logger.debug(f"[PoC] Could not record failed-verify output: {e}")
+        logger.warning(f"[PoC] Run failed: {error}")
+        store.attempt_ran(attempt.id, "error")
         return {
             "success": False,
             "crashed": False,
@@ -1679,153 +1365,73 @@ def _verify_poc_core(poc_id: str, worker_id: str = None) -> Dict[str, Any]:
             "sanitizer_output": output or error or "",
             "error": error,
         }
-
-    # Parse vulnerability type if crashed
-    vuln_type = None
-    if crashed:
-        vuln_type = _parse_vuln_type(output)
-        logger.info(f"[PoC] CRASH DETECTED! vuln_type={vuln_type}")
-
-        # Is this a bug nobody has reported yet? Asked before the report is
-        # packaged, because a second PoC for a crash already filed is not a
-        # finding -- and telling the agent so is more useful than accepting it,
-        # since the agent is otherwise free to keep rediscovering the same
-        # overflow until its iterations run out.
-        dup = _duplicate_signature(ctx, output, fuzzer)
-        if dup:
-            logger.info(f"[PoC] Duplicate crash signature {dup['signature']}")
-            # Recorded, not discarded. The run produced this input and the
-            # dashboard should be able to say so; what it must not do is count
-            # it as a second bug.
-            try:
-                repos.pocs.update(
-                    str(poc.poc_id),
-                    {
-                        "signature": dup["signature"],
-                        "duplicate_of": dup.get("first_poc_id") or "",
-                        "vuln_type": vuln_type,
-                        "is_successful": False,
-                        # It crashed -- keep the sanitizer output even though it
-                        # repeats a known bug, so the dashboard can show it.
-                        "sanitizer_output": output[:10000],
-                    },
-                )
-            except Exception as e:
-                logger.debug(f"[PoC] Could not record duplicate: {e}")
-            who = _FOUND_BY.get(dup["found_by"], dup["found_by"])
-            return {
-                "success": False,
-                "crashed": True,
-                "duplicate": True,
-                # The readable key, not the stored hash: the agent has to see
-                # which class and which frames make this crash the known one.
-                "signature": dup["key"],
-                "found_by": dup["found_by"],
-                "vuln_type": vuln_type,
-                "message": (
-                    f"DUPLICATE. This crash has already been found by {who}: "
-                    f"{dup['describe']} (signature {dup['key']}). It is not a "
-                    "new finding.\n\n"
-                    "Do not submit this input again -- try something else. A "
-                    "new finding must crash with a DIFFERENT signature: a "
-                    "different sanitizer error, or a fault at a different "
-                    "location. Compare the sanitizer output below with the "
-                    "vulnerability you are targeting."
-                ),
-                "sanitizer_output": output[:3000],
-                "output_excerpt": _output_excerpt(output),
-            }
-
-        # Prepare PoC data for packaging (BEFORE saving is_successful=True)
-        # Recorded here so the next agent's duplicate check can see it.
-        from ..fuzzer.signature import compute_signature
-
-        _sig = compute_signature(output, harness_names=[fuzzer] if fuzzer else [])
-        poc.signature = _sig.short if _sig else ""
-        poc.vuln_type = vuln_type
-        poc.sanitizer_output = output[:10000]  # Truncate for DB
-        poc.verified_at = datetime.now()
-
-        # Package PoC with report BEFORE marking as successful
-        # This ensures report is generated before dispatcher can stop
-        try:
-            workspace_path = ctx.get("workspace_path")
-            run_id = ctx.get("run_id", "")
-            ctx_worker_id = ctx.get("worker_id", "")
-            if workspace_path:
-                # Get RUN workspace (not worker workspace)
-                # Worker workspace: {run_workspace}/worker_workspace/{harness_sanitizer}/
-                # Run workspace: {run_workspace}/
-                worker_ws = Path(workspace_path)
-                if "worker_workspace" in str(worker_ws):
-                    run_workspace = worker_ws.parent.parent
-                else:
-                    run_workspace = worker_ws
-                results_dir = run_workspace / "results"
-                # Capture analyzer context for restoration in packager's new event loop
-                from .analyzer import get_analyzer_context
-
-                analyzer_socket = get_analyzer_context()
-                packager = POCPackager(
-                    str(results_dir),
-                    run_id=run_id,
-                    worker_id=ctx_worker_id,
-                    repos=repos,
-                    analyzer_socket_path=analyzer_socket,
-                )
-
-                # Get VH record from database
-                vh = repos.vulnerability_hypotheses.find_by_id(poc.vulnerability_hypothesis_id)
-                if vh:
-                    vh_dict = vh.to_dict() if hasattr(vh, "to_dict") else vars(vh)
-                    poc_dict = poc.to_dict() if hasattr(poc, "to_dict") else vars(poc)
-
-                    # Package synchronously (non-blocking for DB save)
-                    zip_path = packager.package_poc(poc_dict, vh_dict)
-                    if zip_path:
-                        logger.info(f"[PoC] Packaged PoC to {zip_path}")
-                    else:
-                        logger.warning(f"[PoC] Failed to package PoC {poc_id[:8]}")
-                else:
-                    logger.warning(
-                        f"[PoC] VH not found for packaging: {poc.vulnerability_hypothesis_id}"
-                    )
-        except Exception as e:
-            # Don't let packaging errors block PoC success
-            logger.error(f"[PoC] Packaging failed (non-fatal): {e}")
-
-        # NOW mark as successful and save to DB
-        # Dispatcher can detect this and stop, but report is already generated
-        poc.is_successful = True
-        repos.pocs.save(poc)
-
-        logger.info(f"[PoC] PoC {poc_id[:8]} marked as successful")
-    else:
-        logger.info(f"[PoC] No crash detected for PoC {poc_id[:8]}")
-        # Don't delete, just don't mark as successful
-        poc.sanitizer_output = output[:5000]  # Store output for debugging
-        poc.verified_at = datetime.now()
-        repos.pocs.save(poc)
-
-    # A crash comes back with its raw report (excerpted), not only a verdict. A
-    # clean run does not: its output is noise, and the summary covers it.
-    if crashed:
-        return {
-            "success": True,
-            "crashed": True,
-            "vuln_type": vuln_type,
-            "signature": _sig.key if _sig else "",
-            "summary": f"CRASH DETECTED: {vuln_type}",
-            "output_excerpt": _output_excerpt(output),
-        }
-    else:
-        # For non-crash, extract meaningful info using fast LLM
-        output_summary = _extract_output_summary(output)
+    if crashed and not is_real_fault(output):
+        # A non-zero exit with no sanitizer class or fatal signal: an exit(),
+        # not a memory-safety finding.
+        crashed = False
+    if not crashed:
+        store.attempt_ran(attempt.id, "no_crash")
         return {
             "success": True,
             "crashed": False,
-            "output_summary": output_summary,
+            "output_summary": _extract_output_summary(output),
         }
+
+    vuln_type = _parse_vuln_type(output)
+    res = record_crash(attempt.id, output, fuzzer, blob, vuln_type)
+    if not res.is_new:
+        logger.info(f"[PoC] Duplicate crash {res.key}")
+        crash = store.get_crash(res.crash_id)
+        first = store.get_poc_attempt(crash.first_attempt_id) if crash else None
+        found_by = (first.source if first else "") or "vh_agent"
+        who = _FOUND_BY.get(found_by, found_by)
+        return {
+            "success": False,
+            "crashed": True,
+            "duplicate": True,
+            "signature": res.key,
+            "found_by": found_by,
+            "vuln_type": vuln_type,
+            "message": (
+                f"DUPLICATE. This crash has already been found by {who}: "
+                f"{res.describe} (signature {res.key}). It is not a "
+                "new finding.\n\n"
+                "Do not submit this input again -- try something else. A "
+                "new finding must crash with a DIFFERENT signature: a "
+                "different sanitizer error, or a fault at a different "
+                "location. Compare the sanitizer output below with the "
+                "vulnerability you are targeting."
+            ),
+            "sanitizer_output": output[:3000],
+            "output_excerpt": _output_excerpt(output),
+        }
+
+    logger.info(f"[PoC] NEW crash {res.crash_id[:8]}: {res.describe}")
+    _package_new_crash(ctx, res.crash_id)
+    return {
+        "success": True,
+        "crashed": True,
+        "vuln_type": vuln_type,
+        "signature": res.key,
+        "summary": f"CRASH DETECTED: {vuln_type}",
+        "output_excerpt": _output_excerpt(output),
+    }
+
+
+def _package_new_crash(ctx: Dict[str, Any], crash_id: str) -> None:
+    """Report and package a new crash; never fails the tool call."""
+    try:
+        from .analyzer import get_analyzer_context
+
+        workspace_path = ctx.get("workspace_path")
+        if not workspace_path:
+            return
+        ws = Path(workspace_path)
+        run_ws = ws.parent.parent if ws.parent.name == "worker_workspace" else ws
+        # The tool runs in a worker thread (async_tool), where asyncio.run works.
+        package_crash(crash_id, str(run_ws / "results"), get_analyzer_context())
+    except Exception as e:
+        logger.error(f"[PoC] Packaging failed (non-fatal): {e}")
 
 
 @tools_mcp.tool
@@ -1874,21 +1480,13 @@ def _trace_poc_core(
         worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
     """
     ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
-    repos = ctx["repos"]
-
-    # Get PoC from database
-    poc = repos.pocs.find_by_id(poc_id)
-    if not poc:
+    try:
+        poc = get_store().get_poc_attempt(poc_id)
+    except ValueError:
+        poc = None
+    if poc is None:
         return {"success": False, "error": f"PoC {poc_id} not found"}
-
-    # Get blob data
-    blob_data = None
-    if poc.blob:
-        blob_data = base64.b64decode(poc.blob)
-    elif poc.blob_path and Path(poc.blob_path).exists():
-        blob_data = Path(poc.blob_path).read_bytes()
-    else:
-        return {"success": False, "error": "PoC has no blob data"}
+    blob_data = bytes(poc.blob)
 
     # Check coverage context is set
     coverage_fuzzer_dir, project_name, src_dir = get_coverage_context()
@@ -1899,7 +1497,7 @@ def _trace_poc_core(
         }
 
     # Get fuzzer name from PoC or context
-    fuzzer_name = poc.harness_name or ctx.get("fuzzer", "")
+    fuzzer_name = ctx.get("fuzzer", "")
     if not fuzzer_name:
         return {"success": False, "error": "No fuzzer name in PoC or context"}
 

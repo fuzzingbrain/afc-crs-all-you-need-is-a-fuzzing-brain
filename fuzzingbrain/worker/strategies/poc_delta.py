@@ -23,7 +23,6 @@ from ...analysis.diff_parser import (
     DiffReachabilityResult,
     FunctionChange,
 )
-from ...core.models import VulnerabilityHypothesis
 from ...agents import DeltaVHGenerator
 from ...llms.routing import Role, model_for
 
@@ -36,15 +35,14 @@ class POCDeltaStrategy(POCBaseStrategy):
     from the fuzzer entry point.
     """
 
-    def __init__(self, executor, use_pipeline: bool = True):
+    def __init__(self, executor):
         """
         Initialize PoC Delta Strategy.
 
         Args:
             executor: WorkerExecutor instance
-            use_pipeline: Whether to use parallel pipeline (default: True)
         """
-        super().__init__(executor, use_pipeline)
+        super().__init__(executor)
 
         # Diff path for delta mode
         self.diff_path = executor.diff_path
@@ -181,7 +179,7 @@ class POCDeltaStrategy(POCBaseStrategy):
 
         return {"skip": False}
 
-    def _find_vulnerability_hypotheses(self) -> List[VulnerabilityHypothesis]:
+    def _find_vulnerability_hypotheses(self) -> List[Dict[str, Any]]:
         """
         Find vulnerability hypotheses in ALL changed functions (not just reachable).
 
@@ -190,7 +188,7 @@ class POCDeltaStrategy(POCBaseStrategy):
         judged in the verify phase.
 
         Returns:
-            List of VulnerabilityHypothesis objects
+            This worker's VHs, as dicts
         """
         self.log_info(
             "Finding vulnerability hypotheses in ALL changes (ignoring reachability filter)..."
@@ -245,7 +243,7 @@ class POCDeltaStrategy(POCBaseStrategy):
             return []
 
         # Query database for vulnerability hypotheses created by agent
-        return self._get_vulnerability_hypotheses_from_db()
+        return self._worker_vhs()
 
     # =========================================================================
     # Diff Reachability
@@ -389,7 +387,7 @@ class POCDeltaStrategy(POCBaseStrategy):
     # Delta Seeds Generation
     # =========================================================================
 
-    def _generate_delta_seeds(self, vulnerability_hypotheses: List[VulnerabilityHypothesis]) -> int:
+    def _generate_delta_seeds(self, vulnerability_hypotheses: List[Dict[str, Any]]) -> int:
         """
         Generate initial seeds for delta-scan mode.
 
@@ -450,8 +448,8 @@ class POCDeltaStrategy(POCBaseStrategy):
         # Prepare vulnerability hypotheses context
         vh_context = [
             {
-                "function": vh.function_name,
-                "description": vh.description,
+                "function": vh["function_name"],
+                "description": vh["description"],
             }
             for vh in vulnerability_hypotheses
         ]
@@ -463,11 +461,10 @@ class POCDeltaStrategy(POCBaseStrategy):
         seed_agent = SeedAgent(
             model=model_for(Role.SEED),
             run_id=self.run_id,
-            worker_id=self.worker_id,  # ObjectId for MongoDB linking
+            worker_id=self.worker_id,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             fuzzer_manager=fuzzer_manager,
-            repos=self.repos,
             fuzzer_source=self.executor.harness_source(),  # full harness
             workspace_path=self.executor.run_workspace_path,
             log_dir=agent_log_dir,

@@ -56,6 +56,9 @@ def check_vh_duplicate(
     new_description: str,
     existing_vhs: List[Dict[str, Any]],
     model: str = None,
+    run_id: str = "",
+    worker_id: str = "",
+    agent_id: str = "",
 ) -> Optional[str]:
     """
     Check if a new VH description duplicates any existing VH in the same function.
@@ -90,7 +93,7 @@ def check_vh_duplicate(
     try:
         from ..llms import LLMClient
 
-        client = LLMClient()
+        client = LLMClient(run_id=run_id or "", worker_id=worker_id or "", agent_id=agent_id or "", role="utility")
 
         # Build the comparison prompt
         prompt = _build_vh_dedup_prompt(new_description, compare_vhs)
@@ -256,6 +259,9 @@ async def check_vh_duplicate_async(
     new_description: str,
     existing_vhs: List[Dict[str, Any]],
     model: str = None,
+    run_id: str = "",
+    worker_id: str = "",
+    agent_id: str = "",
 ) -> Optional[str]:
     """
     Async version of check_vh_duplicate.
@@ -282,7 +288,7 @@ async def check_vh_duplicate_async(
     try:
         from ..llms import LLMClient
 
-        client = LLMClient()
+        client = LLMClient(run_id=run_id or "", worker_id=worker_id or "", agent_id=agent_id or "", role="utility")
 
         prompt = _build_vh_dedup_prompt(new_description, compare_vhs)
 

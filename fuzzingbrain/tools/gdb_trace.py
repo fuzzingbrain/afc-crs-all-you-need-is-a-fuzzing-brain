@@ -35,12 +35,14 @@ def _sh(args, timeout=120, **kw):
 def stage_project_libs(project: str, elf_host_path: str, image: str = None) -> Path:
     """Copy the binary's non-core shared libs from the project image into a host
     cache dir (once per project). Returns the dir to mount as /projlibs.
-    `image` overrides the default aixcc-afc/<project>:latest (the run's docker image)."""
+    `image` is the run's docker image (config.docker_image); there is no default."""
+    if not image:
+        raise ValueError("stage_project_libs needs the run's docker image")
     out = _LIB_CACHE / project
     if out.is_dir() and any(out.iterdir()):
         return out
     out.mkdir(parents=True, exist_ok=True)
-    img = image or f"aixcc-afc/{project}:latest"
+    img = image
     # ldd inside the project image, on the real binary (mounted)
     r = _sh(["docker", "run", "--rm", "-v", f"{elf_host_path}:/x:ro", img,
              "bash", "-c", "ldd /x"], timeout=120)
@@ -419,7 +421,7 @@ def reach_probe(generator_code: str,
     if not project:
         project = cov_project
     if not image:
-        image = get_docker_image()  # aixcc-afc/<project> in AFC runs; None -> default
+        image = get_docker_image()  # the run's docker image
     if elf is None:
         adir = get_asan_fuzzer_dir()
         if adir is None and cov_dir is not None:

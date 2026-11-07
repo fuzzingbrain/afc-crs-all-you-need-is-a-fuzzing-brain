@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Celery Task Definitions
+Celery task: one worker, one harness.
 
-Defines the tasks that can be executed by Celery workers.
-
-Worker record creation and persistence is handled by WorkerContext
-(via WorkerExecutor.run()), NOT by this file.
+The dispatcher has already inserted the worker row; the assignment carries
+its id, the harness id and the harness's binaries. The row's lifecycle is
+WorkerContext's (via WorkerExecutor.run()).
 """
 
 import sys
@@ -20,9 +19,9 @@ from ..core.config import DEFAULT_MAX_PARALLEL_FUZZERS
 from ..core.logging import (
     set_log_dir,
     setup_worker_logging,
-    create_worker_summary,
 )
-from ..db import connect_repositories
+from ..db.store import get_store
+from .scope import WorkerScope, set_scope
 
 
 # Capture any uncaught exceptions at module level
@@ -41,16 +40,14 @@ sys.excepthook = _log_uncaught_exception
 @app.task(bind=True, name="fuzzingbrain.worker.tasks.run_worker")
 def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Execute a worker task for a {fuzzer, sanitizer} pair.
-
-    Note: Worker record creation and persistence is handled by WorkerContext
-    (via WorkerExecutor.run()), NOT by this function.
+    Run one worker (one harness).
 
     Args:
         assignment: Dictionary containing:
-            - run_id: str
-            - fuzzer: str
-            - sanitizer: str
+            - run_id, worker_id, harness_id: str
+            - fuzzer: str (the harness)
+            - sanitizers: [str], binaries: {sanitizer: path}
+            - sanitizer: str (the default, sanitizers[0])
             - task_type: str (poc | patch | poc-patch | harness)
             - workspace_path: str
             - project_name: str
@@ -60,8 +57,12 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         Result dictionary with status and findings
     """
     run_id = assignment["run_id"]
+    worker_id = assignment["worker_id"]
+    harness_id = assignment["harness_id"]
     fuzzer = assignment["fuzzer"]
     sanitizer = assignment["sanitizer"]
+    sanitizers = list(assignment.get("sanitizers") or [sanitizer])
+    binaries = dict(assignment.get("binaries") or {})
     workspace_path = assignment["workspace_path"]
     run_workspace_path = assignment.get("run_workspace_path")
     task_type = assignment["task_type"]
@@ -70,7 +71,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     # Image the fuzzer binary runs in for PoC verify. From the task JSON when set
     # (a prebuilt/imported binary must run in the image it was built in), else the
     # OSS-Fuzz convention.
-    poc_docker_image = assignment.get("docker_image") or f"gcr.io/oss-fuzz/{project_name}"
+    poc_docker_image = assignment["docker_image"]
 
     # Pre-built fuzzer info from Analyzer (new architecture)
     fuzzer_binary_path = assignment.get("fuzzer_binary_path")
@@ -89,6 +90,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     )
     vh_max_count = assignment.get("vh_max_count")
     fuzzer_sources = assignment.get("fuzzer_sources")
+    fuzzer_worker = assignment.get("fuzzer_worker") or {}
 
     # Install this run's concurrency before anything reads it.
     from ..core.concurrency import set_concurrency
@@ -96,13 +98,13 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
     set_concurrency(ConcurrencyConfig.from_value(assignment["concurrency"]))
 
-    # Display name for logging (not ObjectId)
-    display_name = f"{fuzzer}_{sanitizer}"
+    display_name = f"{fuzzer}/{worker_id[:8]}"
 
     # Build worker metadata for logging
     worker_metadata = {
         "Display Name": display_name,
         "Run ID": run_id,
+        "Worker ID": worker_id,
         "Project": project_name,
         "Fuzzer": fuzzer,
         "Sanitizer": sanitizer,
@@ -146,25 +148,23 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
     set_detect_leaks(assignment["detect_leaks"])
 
-    # Initialize database connection for this worker process
+    # This process works for this run / worker / harness: the tools read it.
+    set_scope(
+        WorkerScope(
+            run_id=run_id,
+            worker_id=worker_id,
+            harness_id=harness_id,
+            harness=fuzzer,
+            sanitizers=sanitizers,
+            binaries=binaries,
+        )
+    )
+    executor = None
     try:
-        repos = connect_repositories()
-        # Persist the resolved role -> model map so the run is reproducible and
-        # the report can show exactly which model ran each role (design §8).
-        try:
-            repos.runs.update(
-                run_id,
-                {"model_routing": _router.resolved_map()},
-            )
-        except Exception as e:  # non-fatal: the loguru summary already logged it
-            logger.debug(f"could not persist model routing: {e}")
+        get_store()
     except Exception as e:
-        logger.exception(f"Failed to initialize worker: {e}")
-        return {
-            "display_name": display_name,
-            "status": "failed",
-            "error": f"Initialization failed: {e}",
-        }
+        logger.exception(f"Failed to reach the database: {e}")
+        return {"display_name": display_name, "status": "failed", "error": str(e)}
 
     try:
         # Setup coverage fuzzer path if provided
@@ -186,8 +186,9 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             fuzzer=fuzzer,
             sanitizer=sanitizer,
             task_type=task_type,
-            repos=repos,
             run_id=run_id,
+            worker_id=worker_id,
+            harness_id=harness_id,
             scan_mode=scan_mode,
             fuzzer_binary_path=fuzzer_binary_path,
             analysis_socket_path=analysis_socket_path,
@@ -198,8 +199,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             max_parallel_fuzzers=max_parallel_fuzzers,
             vh_max_count=vh_max_count,
             fuzzer_sources=fuzzer_sources,
-            # Pass celery_job_id for WorkerContext
-            celery_job_id=self.request.id,
+            fuzzer_worker=fuzzer_worker,
         )
         result = executor.run()
 
@@ -209,18 +209,10 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         # Calculate elapsed time
         elapsed_seconds = (datetime.now() - start_time).total_seconds()
 
-        # Log worker completion summary
-        summary = create_worker_summary(
-            worker_id=display_name,
-            status="completed",
-            fuzzer=fuzzer,
-            sanitizer=sanitizer,
-            poc_generated=result.get("poc_generated", 0),
-            patch_generated=result.get("patch_generated", 0),
-            elapsed_seconds=elapsed_seconds,
+        logger.info(
+            f"Worker completed in {elapsed_seconds:.0f}s: "
+            f"{result.get('poc_generated', 0)} PoC generated"
         )
-        for line in summary.split("\n"):
-            logger.info(line)
 
         # Cleanup workspace (keep results)
         from .cleanup import cleanup_worker_workspace
@@ -229,7 +221,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
         return {
             "display_name": display_name,
-            "worker_id": result.get("worker_id"),  # ObjectId from WorkerContext
+            "worker_id": worker_id,
             "status": "completed",
             "fuzzer": fuzzer,
             "sanitizer": sanitizer,
@@ -242,7 +234,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
         # Clean up FuzzerManager on error
         try:
-            if "executor" in dir() and executor is not None:
+            if executor is not None:
                 executor.close()
         except Exception as cleanup_err:
             logger.warning(f"Error during cleanup: {cleanup_err}")
@@ -250,17 +242,13 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         # Calculate elapsed time
         elapsed_seconds = (datetime.now() - start_time).total_seconds()
 
-        # Log worker failure summary
-        summary = create_worker_summary(
-            worker_id=display_name,
-            status="failed",
-            fuzzer=fuzzer,
-            sanitizer=sanitizer,
-            elapsed_seconds=elapsed_seconds,
-            error_msg=str(e),
-        )
-        for line in summary.split("\n"):
-            logger.info(line)
+        logger.error(f"Worker failed after {elapsed_seconds:.0f}s: {e}")
+        # WorkerContext closes the row on a failure inside it; this covers one
+        # before it opened (end_worker leaves an already-closed row alone).
+        try:
+            get_store().end_worker(worker_id, "error", error=traceback.format_exc())
+        except Exception:
+            pass
 
         return {
             "display_name": display_name,

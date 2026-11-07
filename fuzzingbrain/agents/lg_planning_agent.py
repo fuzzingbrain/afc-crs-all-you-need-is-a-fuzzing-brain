@@ -27,7 +27,7 @@ from .prompts import (
     GENERAL_SANITIZER_GUIDANCE,
 )
 from ..llms import LLMClient, ModelInfo
-from ..core.models.agent import AgentType
+from .types import AgentType
 
 
 class LGPlanningAgent(BaseAgent):

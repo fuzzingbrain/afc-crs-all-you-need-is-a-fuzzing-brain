@@ -13,21 +13,17 @@ from enum import Enum
 import json
 import uuid
 
-from bson import ObjectId
 
-
-class MongoJSONEncoder(json.JSONEncoder):
+class _Encoder(json.JSONEncoder):
     """
-    Custom JSON encoder that handles MongoDB types.
-
-    This encoder automatically converts:
-    - ObjectId -> str
+    JSON encoder for the values a reply carries:
+    - UUID -> str
     - datetime -> ISO format string
     - bytes -> base64 string
     """
 
     def default(self, obj):
-        if isinstance(obj, ObjectId):
+        if isinstance(obj, uuid.UUID):
             return str(obj)
         if isinstance(obj, datetime):
             return obj.isoformat()
@@ -68,19 +64,6 @@ class Method(str, Enum):
     GET_FUZZER_SOURCE = "get_fuzzer_source"
     GET_BUILD_PATHS = "get_build_paths"
 
-    # Vulnerability hypothesis operations
-    CREATE_VULNERABILITY_HYPOTHESIS = "create_vulnerability_hypothesis"
-    UPDATE_VULNERABILITY_HYPOTHESIS = "update_vulnerability_hypothesis"
-    LIST_VULNERABILITY_HYPOTHESES = "list_vulnerability_hypotheses"
-    GET_VULNERABILITY_HYPOTHESIS = "get_vulnerability_hypothesis"
-
-    # Logic group operations (Full-scan)
-    CREATE_LOGIC_GROUP = "create_logic_group"
-    LIST_LOGIC_GROUPS = "list_logic_groups"
-    GET_LOGIC_GROUP = "get_logic_group"
-    CLAIM_LOGIC_GROUP = "claim_logic_group"
-    COMPLETE_LOGIC_GROUP = "complete_logic_group"
-
 
 @dataclass
 class Request:
@@ -104,7 +87,7 @@ class Request:
                 "source": self.source,
                 "harness": self.harness,
             },
-            cls=MongoJSONEncoder,
+            cls=_Encoder,
         )
 
     @classmethod
@@ -136,7 +119,7 @@ class Response:
                 "error": self.error,
                 "request_id": self.request_id,
             },
-            cls=MongoJSONEncoder,
+            cls=_Encoder,
         )
 
     @classmethod

@@ -31,10 +31,10 @@ from .analyzer import *
 from .vulnerability_hypotheses import (
     set_vh_context,
     get_vh_context,
-    create_vulnerability_hypothesis,
-    update_vulnerability_hypothesis,
-    list_vulnerability_hypotheses,
-    get_vulnerability_hypothesis,
+    create_vulnerability_hypothesis_impl,
+    update_vulnerability_hypothesis_impl,
+    list_vulnerability_hypotheses_impl,
+    get_vulnerability_hypothesis_impl,
 )
 from .code_viewer import (
     set_code_viewer_context,
@@ -60,12 +60,10 @@ from .poc import (
     trace_poc,
 )
 from .logic_groups import (
-    set_logic_group_context,
     set_logic_group_agent_id,
-    get_logic_group_context,
-    create_logic_group,
-    list_logic_groups,
-    get_logic_group,
+    create_logic_group_impl,
+    list_logic_groups_impl,
+    get_logic_group_impl,
 )
 
 __all__ = [
@@ -73,10 +71,10 @@ __all__ = [
     # Vulnerability hypothesis context and tools (MCP)
     "set_vh_context",
     "get_vh_context",
-    "create_vulnerability_hypothesis",
-    "update_vulnerability_hypothesis",
-    "list_vulnerability_hypotheses",
-    "get_vulnerability_hypothesis",
+    "create_vulnerability_hypothesis_impl",
+    "update_vulnerability_hypothesis_impl",
+    "list_vulnerability_hypotheses_impl",
+    "get_vulnerability_hypothesis_impl",
     # Code viewer tools
     "set_code_viewer_context",
     "get_code_viewer_context",
@@ -99,10 +97,8 @@ __all__ = [
     "verify_poc",
     "trace_poc",
     # Logic group tools (Full-scan)
-    "set_logic_group_context",
     "set_logic_group_agent_id",
-    "get_logic_group_context",
-    "create_logic_group",
-    "list_logic_groups",
-    "get_logic_group",
+    "create_logic_group_impl",
+    "list_logic_groups_impl",
+    "get_logic_group_impl",
 ]

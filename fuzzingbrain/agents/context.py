@@ -1,606 +1,244 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Agent Context
+Agent context: one per agent run, and its row in the agents table.
 
-Provides isolated runtime context for each Agent instance.
-Uses MongoDB ObjectId as unique identifier for both runtime isolation and persistence.
+The row is inserted when the context opens (status running), with what the
+agent works on -- its VH, logic group, crash or function, depending on the
+type (the table's CHECKs say which) -- and closed when it exits:
 
-Hierarchy:
-    Run (ObjectId)
-    └── Worker (ObjectId)
-        └── Agent (ObjectId)
+    completed + end_reason   the agent stopped normally
+    cancelled                the run stopped it
+    error + traceback        it raised
 
-Persistence Strategy:
-    - Initial save on __enter__ (status: running)
-    - Periodic save every N iterations or on significant events
-    - Final save on __exit__ (status: completed/failed)
-    - Incremental updates using $set for efficiency
+Tools find the context of the agent calling them with get_agent_context().
 """
 
 import threading
-import time
+import traceback
+import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
-from bson import ObjectId
 from loguru import logger
 
-from ..core.utils import safe_object_id
-
-
-# Global registry of active agent contexts
 _agent_contexts: Dict[str, "AgentContext"] = {}
 _agent_contexts_lock = threading.Lock()
 
+# What an agent's stop_reason becomes in agents.end_reason.
+_END_REASONS = {
+    None: "work_done",
+    "": "work_done",
+    "completed": "work_done",
+    "work_done": "work_done",
+    "max_iterations": "max_iterations",
+    "poc_target": "poc_target",
+    "timeout": "timeout",
+    "budget": "budget",
+}
+
 
 def get_agent_context(agent_id: str) -> Optional["AgentContext"]:
-    """Get agent context by ID."""
     with _agent_contexts_lock:
-        return _agent_contexts.get(agent_id)
+        return _agent_contexts.get(str(agent_id))
 
 
 def get_all_agent_contexts() -> Dict[str, "AgentContext"]:
-    """Get all active agent contexts (copy)."""
     with _agent_contexts_lock:
         return dict(_agent_contexts)
 
 
+def _store():
+    from ..db.store import get_store
+
+    return get_store()
+
+
 class AgentContext:
-    """
-    Encapsulates all runtime resources for a single Agent instance.
+    """Runtime state of one agent, and its agents row."""
 
-    Features:
-    - Unique ObjectId for isolation and persistence
-    - Context manager for automatic lifecycle management
-    - Centralized state management for tools
-    - Periodic persistence to MongoDB
-    - Real-time status updates
-
-    Usage:
-        with AgentContext(run_id, worker_id, "POCAgent") as ctx:
-            # ctx.agent_id is unique
-            # Tools can look up ctx by agent_id
-            ctx.increment_iteration()  # Auto-persists periodically
-            ...
-        # Automatically cleaned up and persisted
-
-    Persistence:
-        - Saves on enter (status: running)
-        - Saves every 5 iterations
-        - Saves on significant events (VH created, PoC generated)
-        - Saves on exit (status: completed/failed)
-    """
-
-    # Save every N iterations
-    SAVE_INTERVAL_ITERATIONS = 5
-    # Minimum interval between saves (seconds)
-    SAVE_INTERVAL_SECONDS = 10.0
+    PROGRESS_EVERY = 5  # iterations between progress writes
 
     def __init__(
         self,
         run_id: str,
-        worker_id: str,
+        worker_id: Optional[str],
         agent_type: str,
         target: str = "",
         fuzzer: str = "",
         sanitizer: str = "",
+        vh_id: Optional[str] = None,
+        lg_id: Optional[str] = None,
+        crash_id: Optional[str] = None,
+        function: Optional[Tuple[str, str, int]] = None,
     ):
-        """
-        Initialize agent context.
-
-        Args:
-            run_id: Run ID (MongoDB ObjectId string)
-            worker_id: Worker ID (MongoDB ObjectId string)
-            agent_type: Agent class name (e.g., "POCAgent", "FullVHGenerator")
-            target: Target being analyzed (function_name or vh_id)
-            fuzzer: Fuzzer name
-            sanitizer: Sanitizer type
-        """
-        # Unique identifier - MongoDB ObjectId
-        self.agent_id = str(ObjectId())
-
-        # Identity
+        self.agent_id = str(uuid.uuid4())
         self.run_id = run_id
-        self.worker_id = worker_id
+        self.worker_id = worker_id or None
         self.agent_type = agent_type
         self.target = target
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
+        self.vh_id = vh_id
+        self.lg_id = lg_id
+        self.crash_id = crash_id
+        self.function = function
 
-        # Lifecycle state
         self.started_at: Optional[datetime] = None
         self.ended_at: Optional[datetime] = None
-        self.status: str = "pending"  # pending | running | completed | failed
-        self.iterations: int = 0
-        self.tool_calls: int = 0
+        self.status = "pending"
+        self.stop_reason: Optional[str] = None
+        self.iterations = 0
+        self.tool_calls = 0
         self.error: Optional[str] = None
-
-        # Result summary (populated by agent)
+        self.log_path: Optional[str] = None
         self.result_summary: Dict[str, Any] = {}
 
-        # Log storage path (set after saving)
-        self.log_path: Optional[str] = None
-
-        # === Tool-specific state ===
-
-        # PoC Agent state
-        self.poc_iteration: int = 0
-        self.poc_attempt: int = 0
+        # Tool state
+        self.poc_iteration = 0
+        self.poc_attempt = 0
         self.fuzzer_path: Optional[str] = None
-        self.vh_id: Optional[str] = None
-
-        # Seed Agent state
-        self.lg_id: Optional[str] = None
         self.delta_id: Optional[str] = None
-        self.seeds_generated: int = 0
-        self.fuzzer_manager: Any = None  # FuzzerManager instance
-
-        # VH Generator state
-        self.vh_created: bool = False
+        self.seeds_generated = 0
+        self.fuzzer_manager: Any = None
+        self.vh_created = False
         self.vh_details: Optional[Dict[str, Any]] = None
-
-        # VH Verifier state
         self.verify_result: Optional[Dict[str, Any]] = None
 
-        # LLM usage aggregates (updated by flush)
-        self.llm_calls: int = 0
-        self.llm_cost: float = 0.0
-        self.llm_input_tokens: int = 0
-        self.llm_output_tokens: int = 0
+        self.agent = None  # the BaseAgent, for cancel()
+        self._row = False
+        self._last_progress = 0
 
-        # Back-reference to BaseAgent (set by run_async for cancellation)
-        self.agent = None
-
-        # Persistence tracking
-        self._dirty = False
-        self._last_save_time: float = 0
-        self._last_save_iteration: int = 0
-        self._save_lock = threading.Lock()
+    # ------------------------------------------------------------ lifecycle
 
     def __enter__(self) -> "AgentContext":
-        """Enter context - register and start tracking."""
         if self.status == "running":
             return self
-
         self.started_at = datetime.now()
         self.status = "running"
-
         with _agent_contexts_lock:
             _agent_contexts[self.agent_id] = self
-
-        # Persist initial record to MongoDB
-        self._save_to_db(force=True)
-        self._last_save_time = time.time()
-
+        try:
+            _store().start_agent(
+                self.agent_id,
+                self.run_id,
+                self.worker_id,
+                self.agent_type,
+                vh_id=self.vh_id if self.agent_type in ("VHVerifier", "POCAgent") else None,
+                lg_id=self.lg_id,
+                crash_id=self.crash_id,
+                function=self.function,
+                log_path=self.log_path,
+            )
+            self._row = True
+        except Exception as e:
+            # Every LLM call of this agent names it: without the row they
+            # cannot be written either, so this is worth saying loudly.
+            logger.error(f"agent {self.agent_type} {self.agent_id[:8]}: no agents row: {e}")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit context - cleanup and persist."""
         self.ended_at = datetime.now()
-
-        if exc_type:
-            self.status = "failed"
-            self.error = str(exc_val) if exc_val else str(exc_type)
-        elif self.status != "cancelled":
-            self.status = "completed"
-
-        # Persist final state to MongoDB with retry.
-        # Layer 1: Retry with backoff for transient DB failures.
-        # Layer 2: If all retries fail, keep in memory registry so
-        #          query APIs return correct status via in-memory merge.
-        saved = False
-        for attempt in range(3):
-            saved = self._save_to_db(force=True)
-            if saved:
-                break
-            if attempt < 2:
-                time.sleep(0.5 * (attempt + 1))
-
-        if saved:
-            with _agent_contexts_lock:
-                _agent_contexts.pop(self.agent_id, None)
+        if exc_type is not None:
+            self.status = "error"
+            self.error = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
+        elif self.status == "cancelled" or self.stop_reason == "cancelled":
+            self.status = "cancelled"
+        elif self.stop_reason == "error":
+            self.status = "error"
+            self.error = self.error or "the agent stopped on an error"
         else:
-            logger.warning(
-                f"Agent {self.agent_id[:8]}: final save failed after 3 attempts, "
-                f"keeping in memory registry with status={self.status}"
-            )
+            self.status = "completed"
+        if self._row:
+            try:
+                _store().end_agent(
+                    self.agent_id,
+                    self.status,
+                    end_reason=_END_REASONS.get(self.stop_reason, "work_done")
+                    if self.status == "completed"
+                    else None,
+                    error=self.error if self.status == "error" else None,
+                    iterations=self.iterations,
+                    seeds_generated=self.seeds_generated
+                    if self.agent_type == "SeedAgent"
+                    else None,
+                )
+            except Exception as e:
+                logger.warning(f"agent {self.agent_id[:8]}: could not close its row: {e}")
+        with _agent_contexts_lock:
+            _agent_contexts.pop(self.agent_id, None)
 
     def cancel(self) -> None:
-        """Cancel this agent context and its underlying agent."""
         self.status = "cancelled"
         if self.agent is not None:
             self.agent.cancel()
 
-    def _save_to_db(self, force: bool = False) -> bool:
-        """
-        Save agent record to MongoDB.
+    # ------------------------------------------------------------- progress
 
-        Args:
-            force: If True, save immediately regardless of dirty state or timing
-
-        Returns:
-            True if saved, False if skipped
-        """
-        with self._save_lock:
-            # Skip if not dirty and not forced
-            if not force and not self._dirty:
-                return False
-
-            # Skip if saved recently (unless forced)
-            time_since_save = time.time() - self._last_save_time
-            iter_since_save = self.iterations - self._last_save_iteration
-
-            if not force:
-                if time_since_save < self.SAVE_INTERVAL_SECONDS:
-                    if iter_since_save < self.SAVE_INTERVAL_ITERATIONS:
-                        return False
-
-            try:
-                from ..db import get_database
-
-                db = get_database()
-                if db is None:
-                    return False
-
-                doc = {
-                    "_id": safe_object_id(
-                        self.agent_id
-                    ),  # May be ObjectId or custom string
-                    "run_id": safe_object_id(self.run_id),
-                    # Store worker_id as ObjectId reference for proper foreign key linking
-                    "worker_id": safe_object_id(self.worker_id),
-                    "agent_type": self.agent_type,
-                    "target": self.target,
-                    "fuzzer": self.fuzzer,
-                    "sanitizer": self.sanitizer,
-                    "status": self.status,
-                    "started_at": self.started_at,
-                    "ended_at": self.ended_at,
-                    "iterations": self.iterations,
-                    "tool_calls": self.tool_calls,
-                    "error": self.error,
-                    "result_summary": self.result_summary,
-                    "log_path": self.log_path,
-                    # Tool-specific state (for recovery/debugging)
-                    "vh_id": self.vh_id,  # VH being processed (PoC Agent)
-                    "lg_id": self.lg_id,  # Logic group being processed (Seed Agent)
-                    "delta_id": self.delta_id,  # Delta scan ID
-                    "vh_created": self.vh_created,
-                    "seeds_generated": self.seeds_generated,
-                    "poc_iteration": self.poc_iteration,
-                    "poc_attempt": self.poc_attempt,
-                    # NOTE: llm_calls/llm_cost/llm_input_tokens/llm_output_tokens
-                    # are managed exclusively by WorkerLLMBuffer via $inc.
-                    # Do NOT $set them here — it would overwrite the buffer's increments.
-                    "updated_at": datetime.now(),
-                }
-
-                # Upsert - insert or update
-                db.agents.update_one(
-                    {"_id": safe_object_id(self.agent_id)},
-                    {"$set": doc},
-                    upsert=True,
-                )
-
-                self._dirty = False
-                self._last_save_time = time.time()
-                self._last_save_iteration = self.iterations
-                return True
-
-            except Exception as e:
-                # Log but don't fail agent execution
-                logger.warning(f"Failed to save agent context: {e}")
-                return False
-
-    def _mark_dirty_and_maybe_save(self) -> None:
-        """Mark as dirty and save if enough time/iterations have passed."""
-        self._dirty = True
-        self._save_to_db(force=False)
-
-    # =========================================================================
-    # Increment methods - auto-persist periodically
-    # =========================================================================
+    def _progress(self, force: bool = False) -> None:
+        if not self._row:
+            return
+        if not force and self.iterations - self._last_progress < self.PROGRESS_EVERY:
+            return
+        self._last_progress = self.iterations
+        try:
+            _store().agent_progress(
+                self.agent_id,
+                iterations=self.iterations,
+                seeds_generated=self.seeds_generated
+                if self.agent_type == "SeedAgent"
+                else None,
+                log_path=self.log_path,
+            )
+        except Exception as e:
+            logger.debug(f"agent {self.agent_id[:8]}: progress write failed: {e}")
 
     def increment_iteration(self) -> None:
-        """Increment iteration counter and maybe persist."""
         self.iterations += 1
-        self._mark_dirty_and_maybe_save()
+        self._progress()
 
     def increment_tool_calls(self) -> None:
-        """Increment tool call counter."""
         self.tool_calls += 1
-        self._dirty = True
-        # Don't save on every tool call, let iteration handle it
 
     def set_vh_created(self, vh_details: Dict[str, Any]) -> None:
-        """Mark VH as created and persist immediately."""
         self.vh_created = True
         self.vh_details = vh_details
-        self.result_summary["vh_created"] = True
-        self.result_summary["vh_details"] = vh_details
-        self._dirty = True
-        self._save_to_db(force=True)
 
     def set_seeds_generated(self, count: int) -> None:
-        """Update seeds generated count and persist."""
         self.seeds_generated = count
-        self._mark_dirty_and_maybe_save()
+        self._progress(force=True)
 
     def set_log_path(self, log_path: str) -> None:
-        """Record where this agent's log (and its .conversation.json) lives.
-
-        Persisted at once, while the agent is still running: the dashboard finds
-        the transcript through this field, so setting it only when the run ended
-        hid every long-running, failed or killed agent's transcript.
-        """
+        """Written at once: the transcript is found through it while running."""
         self.log_path = log_path
-        self._save_to_db(force=True)
+        self._progress(force=True)
 
     def set_poc_progress(self, iteration: int, attempt: int) -> None:
-        """Update PoC progress and persist."""
         self.poc_iteration = iteration
         self.poc_attempt = attempt
-        self._mark_dirty_and_maybe_save()
 
     def set_verify_result(self, result: Dict[str, Any]) -> None:
-        """Set verification result and persist immediately."""
         self.verify_result = result
-        self.result_summary["verify_result"] = result
-        self._dirty = True
-        self._save_to_db(force=True)
 
     def update_result_summary(self, **kwargs) -> None:
-        """Update result summary with key-value pairs."""
         self.result_summary.update(kwargs)
-        self._mark_dirty_and_maybe_save()
-
-    # =========================================================================
-    # Properties
-    # =========================================================================
 
     @property
     def duration_seconds(self) -> float:
-        """Get duration in seconds."""
         if self.started_at and self.ended_at:
             return (self.ended_at - self.started_at).total_seconds()
-        elif self.started_at:
+        if self.started_at:
             return (datetime.now() - self.started_at).total_seconds()
         return 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            "agent_id": self.agent_id,
-            "run_id": self.run_id,
-            "worker_id": self.worker_id,
-            "agent_type": self.agent_type,
-            "target": self.target,
-            "fuzzer": self.fuzzer,
-            "sanitizer": self.sanitizer,
-            "status": self.status,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "ended_at": self.ended_at.isoformat() if self.ended_at else None,
-            "duration_seconds": self.duration_seconds,
-            "iterations": self.iterations,
-            "tool_calls": self.tool_calls,
-            "error": self.error,
-            "result_summary": self.result_summary,
-            "log_path": self.log_path,
-            # Tool-specific state
-            "vh_id": self.vh_id,
-            "lg_id": self.lg_id,
-            "delta_id": self.delta_id,
-            "vh_created": self.vh_created,
-            "seeds_generated": self.seeds_generated,
-            "poc_iteration": self.poc_iteration,
-            "poc_attempt": self.poc_attempt,
-            # LLM usage
-            "llm_calls": self.llm_calls,
-            "llm_cost": self.llm_cost,
-            "llm_input_tokens": self.llm_input_tokens,
-            "llm_output_tokens": self.llm_output_tokens,
-        }
-
     def __repr__(self) -> str:
-        return (
-            f"AgentContext(id={self.agent_id[:8]}..., "
-            f"type={self.agent_type}, status={self.status})"
-        )
-
-
-# =============================================================================
-# Monitoring API
-# =============================================================================
-
-
-def get_agent_status(agent_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Get agent status from memory or database.
-
-    First checks in-memory registry (for running agents),
-    then falls back to database (for completed agents).
-
-    Args:
-        agent_id: Agent ID (ObjectId string)
-
-    Returns:
-        Agent status dict or None if not found
-    """
-    # Check in-memory first (running agents)
-    ctx = get_agent_context(agent_id)
-    if ctx:
-        return ctx.to_dict()
-
-    # Fall back to database (completed agents)
-    try:
-        from ..db import get_database
-
-        db = get_database()
-        if db is None:
-            return None
-
-        doc = db.agents.find_one({"_id": ObjectId(agent_id)})
-        if doc:
-            # Convert ObjectId to string
-            doc["agent_id"] = str(doc.pop("_id"))
-            doc["run_id"] = str(doc["run_id"]) if doc.get("run_id") else None
-            doc["worker_id"] = str(doc["worker_id"]) if doc.get("worker_id") else None
-            return doc
-
-    except Exception:
-        pass
-
-    return None
-
-
-def get_agents_by_worker(worker_id: str) -> list:
-    """
-    Get all agents for a worker.
-
-    Args:
-        worker_id: Worker ID (ObjectId string)
-
-    Returns:
-        List of agent status dicts
-    """
-    agents = []
-
-    try:
-        from ..db import get_database
-
-        db = get_database()
-        if db is None:
-            return agents
-
-        cursor = db.agents.find({"worker_id": ObjectId(worker_id)})
-        for doc in cursor:
-            doc["agent_id"] = str(doc.pop("_id"))
-            doc["run_id"] = str(doc["run_id"]) if doc.get("run_id") else None
-            doc["worker_id"] = str(doc["worker_id"]) if doc.get("worker_id") else None
-            agents.append(doc)
-
-    except Exception:
-        pass
-
-    # Merge with in-memory data (for running agents with fresher stats)
-    in_memory = get_all_agent_contexts()
-    for ctx in in_memory.values():
-        if ctx.worker_id == worker_id:
-            # Replace or add in-memory version
-            found = False
-            for i, a in enumerate(agents):
-                if a["agent_id"] == ctx.agent_id:
-                    agents[i] = ctx.to_dict()
-                    found = True
-                    break
-            if not found:
-                agents.append(ctx.to_dict())
-
-    return agents
-
-
-def get_agents_by_run(run_id: str) -> list:
-    """
-    Get all agents for a run.
-
-    Args:
-        run_id: Run ID (ObjectId string)
-
-    Returns:
-        List of agent status dicts
-    """
-    agents = []
-
-    try:
-        from ..db import get_database
-
-        db = get_database()
-        if db is None:
-            return agents
-
-        cursor = db.agents.find({"run_id": ObjectId(run_id)})
-        for doc in cursor:
-            doc["agent_id"] = str(doc.pop("_id"))
-            doc["run_id"] = str(doc["run_id"]) if doc.get("run_id") else None
-            doc["worker_id"] = str(doc["worker_id"]) if doc.get("worker_id") else None
-            agents.append(doc)
-
-    except Exception:
-        pass
-
-    # Merge with in-memory data
-    in_memory = get_all_agent_contexts()
-    for ctx in in_memory.values():
-        if ctx.run_id == run_id:
-            found = False
-            for i, a in enumerate(agents):
-                if a["agent_id"] == ctx.agent_id:
-                    agents[i] = ctx.to_dict()
-                    found = True
-                    break
-            if not found:
-                agents.append(ctx.to_dict())
-
-    return agents
-
-
-def get_active_agents() -> list:
-    """
-    Get all currently running agents.
-
-    Returns:
-        List of active agent status dicts
-    """
-    return [ctx.to_dict() for ctx in get_all_agent_contexts().values()]
+        return f"AgentContext(id={self.agent_id[:8]}, type={self.agent_type}, status={self.status})"
 
 
 def cancel_agents_by_worker(worker_id: str) -> int:
-    """
-    Cancel all running agents for a given worker.
-
-    Best-effort: logs errors but does not raise.
-
-    Args:
-        worker_id: Worker ID (ObjectId string)
-
-    Returns:
-        Number of agents cancelled
-    """
-    cancelled = 0
+    """Cancel this process's running agents of one worker."""
+    n = 0
     for ctx in get_all_agent_contexts().values():
-        if ctx.worker_id == worker_id and ctx.status == "running":
-            try:
-                ctx.cancel()
-                cancelled += 1
-                logger.info(f"Cancelled agent {ctx.agent_id[:8]} ({ctx.agent_type})")
-            except Exception as e:
-                logger.warning(f"Failed to cancel agent {ctx.agent_id[:8]}: {e}")
-    return cancelled
-
-
-def force_cleanup_agents(run_id: str, db) -> int:
-    """
-    Force-update any still-running agent records in MongoDB for a run.
-
-    Catches agents whose in-memory cancel did not persist
-    (e.g. process was killed before __exit__).
-
-    Args:
-        run_id: Run ID (ObjectId string)
-        db: MongoDB database handle
-
-    Returns:
-        Number of agent records updated
-    """
-    try:
-        result = db.agents.update_many(
-            {"run_id": ObjectId(run_id), "status": "running"},
-            {"$set": {"status": "cancelled", "ended_at": datetime.now()}},
-        )
-        count = result.modified_count
-        if count:
-            logger.info(f"Force-cleaned {count} zombie agent(s) for run {run_id[:8]}")
-        return count
-    except Exception as e:
-        logger.warning(f"force_cleanup_agents failed: {e}")
-        return 0
+        if str(ctx.worker_id) == str(worker_id) and ctx.status == "running":
+            ctx.cancel()
+            n += 1
+    return n

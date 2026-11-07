@@ -466,8 +466,11 @@ def _register_vh_create_tools(mcp: FastMCP) -> None:
     def create_vulnerability_hypothesis(
         function_name: str,
         description: str,
+        sink_code: str,
         score: float = 0.5,
         important_controlflow: str = None,
+        file_path: str = None,
+        sanitizer: str = None,
     ) -> Dict[str, Any]:
         """
         Create a new vulnerability hypothesis for a potential vulnerability.
@@ -479,11 +482,23 @@ def _register_vh_create_tools(mcp: FastMCP) -> None:
             score: Confidence score (0.0-1.0)
             important_controlflow: Free-text note naming the key functions/variables
                 in the flow to the bug and why they matter (one short paragraph).
+            file_path: The file defining the function. Needed only when the
+                function is not in the index (the tool then says so).
+            sink_code: Required. The one source line where the bug happens,
+                copied exactly from the code you read (e.g. "memcpy(buf, src, len);").
+            sanitizer: The sanitizer that would catch it, when it is not the
+                run's first one (address / memory / undefined).
         """
         from .vulnerability_hypotheses import create_vulnerability_hypothesis_impl
 
         return create_vulnerability_hypothesis_impl(
-            function_name, description, score, important_controlflow
+            function_name,
+            description,
+            score,
+            important_controlflow,
+            file_path=file_path,
+            sink_code=sink_code,
+            sanitizer=sanitizer,
         )
 
 

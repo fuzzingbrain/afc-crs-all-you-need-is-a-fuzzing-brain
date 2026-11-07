@@ -12,12 +12,12 @@ is the annotated copy.
 
 import argparse
 import json
+import uuid
 import os
-from dataclasses import MISSING, dataclass, field
+from dataclasses import MISSING, asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from bson import ObjectId
 
 # How many fuzzer containers one run may have at once. Lives here, with the
 # other defaults, so the fuzzer package can read it without the configuration
@@ -208,6 +208,7 @@ class Field:
 
 FIELDS: Tuple[Field, ...] = (
     Field(("project_name",), "project_name", "str", "Project name (required)"),
+    Field(("label",), "label", "str", "Experiment group, e.g. rq1-delta-o3 (optional)"),
     Field(
         ("output",),
         "output",
@@ -384,10 +385,12 @@ class Config:
     """One run of FuzzingBrain. Built from a task file and/or the command line."""
 
     # Generated per run, never read from a task file.
-    run_id: str = field(default_factory=lambda: str(ObjectId()))
+    run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     project_name: Optional[str] = None
     output: Optional[str] = None
+    # Experiment group the run belongs to (e.g. "rq1-delta-o3"), for filtering.
+    label: Optional[str] = None
 
     # 1. Target
     repo_url: Optional[str] = None
@@ -455,8 +458,8 @@ class Config:
     # The run's directory, resolved from `output` by resolve_output().
     workspace: Optional[str] = None
 
-    # Attributes the task file or command line set explicitly.
-    given: set = field(default_factory=set, repr=False)
+    # Attributes the task file or command line set explicitly -> "file" | "cli".
+    given: Dict[str, str] = field(default_factory=dict, repr=False)
 
     # ------------------------------------------------------------------ load
 
@@ -495,7 +498,7 @@ class Config:
                         walk(value, path)
                 elif path in by_path:
                     try:
-                        self._set(by_path[path], value)
+                        self._set(by_path[path], value, "file")
                     except (TypeError, ValueError) as e:
                         errors.append(f'"{".".join(path)}": {e}')
                 elif ".".join(path) in _OLD_KEYS:
@@ -506,7 +509,7 @@ class Config:
         walk(data, ())
         return errors
 
-    def _set(self, spec: Field, value: Any) -> None:
+    def _set(self, spec: Field, value: Any, source: str = "file") -> None:
         """Type-check one value and store it. `value` may come from JSON or a flag."""
         if value is None:
             return
@@ -549,7 +552,7 @@ class Config:
         if spec.is_path:
             value = self._resolve_paths(spec, value)
         setattr(self, spec.attr, value)
-        self.given.add(spec.attr)
+        self.given[spec.attr] = source
 
     @staticmethod
     def _parse_json_field(spec: Field, value: Any) -> Any:
@@ -651,7 +654,7 @@ class Config:
                     raw = json.loads(raw)
                 elif spec.kind == "concurrency":
                     raw = int(raw) if raw.strip().isdigit() else json.loads(raw)
-                self._set(spec, raw)
+                self._set(spec, raw, "cli")
             except (TypeError, ValueError) as e:
                 errors.append(f"{spec.flag}: {e}")
         if errors:
@@ -661,7 +664,7 @@ class Config:
         f = self.__dataclass_fields__[attr]
         default = f.default_factory() if f.default_factory is not MISSING else f.default
         setattr(self, attr, default)
-        self.given.discard(attr)
+        self.given.pop(attr, None)
 
     # ------------------------------------------------------------------ derived
 
@@ -683,6 +686,21 @@ class Config:
         if self.force_model:
             return [self.force_model]
         return sorted(set(self.models.values()))
+
+    def record(self) -> Dict[str, Any]:
+        """The resolved task in the task file's own layout: runs.config."""
+        out: Dict[str, Any] = {}
+        for spec in FIELDS:
+            value = getattr(self, spec.attr)
+            if hasattr(value, "__dataclass_fields__"):
+                value = asdict(value)
+            node = out
+            for key in spec.path[:-1]:
+                node = node.setdefault(key, {})
+            node[spec.path[-1]] = value
+        out["run_id"] = self.run_id
+        out["workspace"] = self.workspace
+        return json.loads(json.dumps(out, default=str))
 
     # ----------------------------------------------------------------- validate
 

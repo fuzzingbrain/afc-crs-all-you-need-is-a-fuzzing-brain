@@ -87,14 +87,15 @@ def set_coverage_context(
         coverage_fuzzer_dir: Directory containing coverage-instrumented fuzzers
         project_name: OSS-Fuzz project name (for Docker image)
         src_dir: Source code directory for context display
-        docker_image: Docker image to use (default: gcr.io/oss-fuzz/{project_name})
-                     Can also use "aixcc-afc/{project_name}" for AFC projects
+        docker_image: the run's runner image (config.docker_image)
         work_dir: Permanent work directory for coverage output (avoids /tmp Docker Snap issues)
     """
     _coverage_fuzzer_dir.set(coverage_fuzzer_dir)
     _project_name.set(project_name)
     _src_dir.set(src_dir)
-    _docker_image.set(docker_image or f"gcr.io/oss-fuzz/{project_name}")
+    if not docker_image:
+        raise ValueError("set_coverage_context needs the run's docker_image")
+    _docker_image.set(docker_image)
     _work_dir.set(work_dir)
 
 
@@ -186,9 +187,6 @@ def parse_lcov(
 # Coverage Execution
 # =============================================================================
 
-FALLBACK_DOCKER_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
-
-
 def run_coverage_fuzzer(
     fuzzer_name: str,
     input_data: bytes,
@@ -197,8 +195,8 @@ def run_coverage_fuzzer(
     """
     Execute coverage-instrumented fuzzer and generate LCOV.
 
-    Includes fallback mechanism: if the primary docker_image fails due to
-    missing shared libraries, automatically retry with base-runner.
+    Runs in the run's docker_image only: a binary that cannot load its
+    libraries there is reported, not retried in another image.
 
     Args:
         fuzzer_name: Name of the fuzzer binary
@@ -316,14 +314,9 @@ def run_coverage_fuzzer(
         # Step 1: Run coverage fuzzer in Docker
         result = run_fuzzer_with_image(docker_image)
 
-        # Check for library loading errors - need to fallback
         profraw_path = out_dir / "coverage.profraw"
         if "error while loading shared libraries" in result.stderr:
-            if docker_image != FALLBACK_DOCKER_IMAGE:
-                logger.warning(
-                    f"[Coverage] Library error with {docker_image}, falling back to {FALLBACK_DOCKER_IMAGE}"
-                )
-                result = run_fuzzer_with_image(FALLBACK_DOCKER_IMAGE)
+            return False, "", f"coverage binary cannot load in {docker_image}: {result.stderr[:500]}"
 
         # Check profraw was created
         if not profraw_path.exists() or profraw_path.stat().st_size == 0:
@@ -369,15 +362,6 @@ def run_coverage_fuzzer(
             )
 
         result2 = run_llvm_cov_with_image(docker_image)
-
-        # Fallback: if version mismatch, try aixcc-afc image
-        if result2.returncode != 0 and "raw profile version mismatch" in result2.stderr:
-            aixcc_image = f"aixcc-afc/{project_name}"
-            if docker_image != aixcc_image:
-                logger.warning(
-                    f"[Coverage] LLVM version mismatch with {docker_image}, falling back to {aixcc_image}"
-                )
-                result2 = run_llvm_cov_with_image(aixcc_image)
 
         if result2.returncode != 0:
             return False, "", f"llvm-cov failed: {result2.stderr[:500]}"

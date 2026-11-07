@@ -1,50 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-FuzzingBrain Database Layer
-
-MongoDB connection and repository pattern for all models.
+The run database: PostgreSQL (pg/models.py, migrated by Alembic), read and
+written through store.Store. docs/db-design.md describes the tables.
 """
 
-from .connection import MongoDB, get_database
-from .repository import (
-    BaseRepository,
-    RunRepository,
-    POCRepository,
-    PatchRepository,
-    WorkerRepository,
-    FuzzerRepository,
-    RepositoryManager,
-    get_repos,
-    init_repos,
-)
+from .store import Store, get_store, reset_store, ping
 
-
-def connect_repositories() -> RepositoryManager:
-    """Where every process gets its repositories.
-
-    They still talk to MongoDB, which is no longer configured or started; until
-    they move to PostgreSQL (refactor-2 step B) nothing can run, and this says
-    so instead of failing somewhere deeper.
-    """
-    raise RuntimeError(
-        "FuzzingBrain cannot run yet: the repositories are moving from MongoDB "
-        "to PostgreSQL (refactor-2 step B)"
-    )
-
-
-__all__ = [
-    "connect_repositories",
-    # Connection
-    "MongoDB",
-    "get_database",
-    # Repositories
-    "BaseRepository",
-    "RunRepository",
-    "POCRepository",
-    "PatchRepository",
-    "WorkerRepository",
-    "FuzzerRepository",
-    "RepositoryManager",
-    "get_repos",
-    "init_repos",
-]
+__all__ = ["Store", "get_store", "reset_store", "ping"]

@@ -40,7 +40,7 @@ class BaseStrategy(ABC):
         self.sanitizer = executor.sanitizer
         self.run_id = executor.run_id
         self.worker_id = executor.worker_id
-        self.repos = executor.repos
+        self.harness_id = executor.harness_id
         # scan_mode is defined as property in POCBaseStrategy
         self.log_dir = executor.log_dir
 

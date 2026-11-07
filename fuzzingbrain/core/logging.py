@@ -902,365 +902,90 @@ def get_run_logger(name: str):
     return logger.bind(run_log=name)
 
 
-def create_worker_summary(
-    worker_id: str,
-    status: str,
-    fuzzer: str,
-    sanitizer: str,
-    poc_generated: int = 0,
-    patch_generated: int = 0,
-    elapsed_seconds: float = 0,
-    error_msg: Optional[str] = None,
-) -> str:
-    """
-    Create a formatted worker completion summary box.
-
-    Args:
-        worker_id: Worker ID
-        status: completed/failed
-        fuzzer: Fuzzer name
-        sanitizer: Sanitizer type
-        poc_generated: Number of PoCs generated
-        patch_generated: Number of patches generated
-        elapsed_seconds: Time elapsed
-        error_msg: Error message if failed
-
-    Returns:
-        Formatted summary string
-    """
-    status_icon = "✓" if status == "completed" else "✗"
-    elapsed_str = f"{elapsed_seconds:.1f}s" if elapsed_seconds else "N/A"
-
-    lines = []
-    width = 70
-
-    lines.append("")
-    lines.append("┌" + "─" * width + "┐")
-    lines.append("│" + f" {status_icon} WORKER COMPLETE ".center(width) + "│")
-    lines.append("├" + "─" * width + "┤")
-    lines.append("│" + f"  Worker ID:    {worker_id}".ljust(width) + "│")
-    lines.append("│" + f"  Fuzzer:       {fuzzer}".ljust(width) + "│")
-    lines.append("│" + f"  Sanitizer:    {sanitizer}".ljust(width) + "│")
-    lines.append("│" + f"  Status:       {status.upper()}".ljust(width) + "│")
-    lines.append("│" + f"  Elapsed:      {elapsed_str}".ljust(width) + "│")
-
-    if status == "completed":
-        lines.append("│" + f"  PoCs:         {poc_generated}".ljust(width) + "│")
-        lines.append("│" + f"  Patches:      {patch_generated}".ljust(width) + "│")
-    elif error_msg:
-        # Truncate error message if too long
-        err_display = error_msg[:50] + "..." if len(error_msg) > 50 else error_msg
-        lines.append("│" + f"  Error:        {err_display}".ljust(width) + "│")
-
-    lines.append("└" + "─" * width + "┘")
-    lines.append("")
-
-    return "\n".join(lines)
-
-
-def create_final_summary(
-    project_name: str,
+def final_summary(
+    store,
     run_id: str,
-    workers: list,
-    total_elapsed_minutes: float = 0,
-    use_color: bool = False,
-    dedup_count: int = 0,
-    total_cost: float = 0.0,
+    project_name: str,
+    exit_reason: str,
+    elapsed_minutes: float = 0.0,
     budget_limit: float = 0.0,
-    exit_reason: str = "completed",
-    verified_pocs: Optional[int] = None,
+    use_color: bool = False,
 ) -> str:
-    """
-    Create final run summary with all workers results.
+    """The end-of-run table, from the database: one row per worker (harness)."""
+    data = store.run_summary(run_id)
+    workers = data["workers"]
+    reasons = {
+        "budget": "BUDGET LIMIT REACHED",
+        "timeout": "Timeout reached",
+        "poc_target": "PoC target reached",
+        "cancelled": "CANCELLED BY USER",
+        "error": "ERROR",
+    }
+    cols = [("#", 4), ("Harness", 28), ("Status", 22), ("Time", 9), ("VHs", 9),
+            ("Bugs", 6), ("Cost", 9)]
+    width = sum(w for _, w in cols) + len(cols) - 1
 
-    Args:
-        project_name: Project name
-        run_id: Run ID
-        workers: List of worker result dicts
-        total_elapsed_minutes: Total elapsed time in minutes
-        use_color: Whether to use ANSI colors for console output
-        dedup_count: Number of VHs merged as duplicates
-        total_cost: Total API cost in dollars
-        budget_limit: Budget limit in dollars (0 = unlimited)
-        exit_reason: Why the run ended (completed, budget_exceeded, timeout, etc.)
+    def row(cells, color=""):
+        reset = WorkerColors.RESET if color else ""
+        out = []
+        for (_, w), c in zip(cols, cells):
+            c = str(c)
+            c = c if len(c) <= w - 2 else c[: w - 4] + ".."
+            out.append(color + (" " + c).ljust(w) + reset)
+        return "│" + "│".join(out) + "│"
 
-    Returns:
-        Formatted summary string
-    """
-    # Count statistics
-    total = len(workers)
-    completed = sum(1 for w in workers if w.get("status") == "completed")
-    interrupted = sum(1 for w in workers if w.get("status") == "interrupted")
-    failed = sum(1 for w in workers if w.get("status") == "failed")
-    total_vhs = sum(w.get("vhs_found", 0) for w in workers)
-    # What the workers generated, which is not what survived verification: the
-    # run stops on pocs where is_successful is true, so a summary counting
-    # generated ones reports a number the stopping rule never saw. Prefer the
-    # verified count when the caller has it.
-    generated_pocs = sum(w.get("poc_generated", 0) for w in workers)
-    total_pocs = generated_pocs if verified_pocs is None else verified_pocs
-    total_patches = sum(w.get("patch_generated", 0) for w in workers)
-
-    # Column widths for worker table
-    col_num = 4
-    col_fuzzer = 24
-    col_sanitizer = 10
-    col_status = 12
-    col_duration = 10
-    col_vhs = 8  # Wider to accommodate "1(1)" format
-    col_pocs = 6
-    col_patches = 8
-
-    # Total width = sum of columns + 7 internal separators (┼)
-    table_width = (
-        col_num
-        + col_fuzzer
-        + col_sanitizer
-        + col_status
-        + col_duration
-        + col_vhs
-        + col_pocs
-        + col_patches
-        + 7
-    )
-
-    lines = []
-    lines.append("")
-    lines.append("")
-    lines.append("=" * (table_width + 2))
-    lines.append(" Thank you for using FuzzingBrain! ".center(table_width + 2, "="))
-    lines.append("=" * (table_width + 2))
-    lines.append("")
-    lines.append("┌" + "─" * table_width + "┐")
-    lines.append("│" + " EXECUTION SUMMARY ".center(table_width) + "│")
-    lines.append("├" + "─" * table_width + "┤")
-
-    # Run info
-    lines.append("│" + f"  Project:       {project_name}".ljust(table_width) + "│")
-    lines.append("│" + f"  Run ID:        {run_id[:16]}...".ljust(table_width) + "│")
-    lines.append(
-        "│"
-        + f"  Total Time:    {total_elapsed_minutes:.1f} minutes".ljust(table_width)
-        + "│"
-    )
-    # Build workers summary string
-    workers_parts = [f"{completed}/{total} completed"]
-    if interrupted > 0:
-        workers_parts.append(f"{interrupted} interrupted")
-    if failed > 0:
-        workers_parts.append(f"{failed} failed")
-    workers_str = ", ".join(workers_parts)
-    lines.append("│" + f"  Workers:       {workers_str}".ljust(table_width) + "│")
-    lines.append("│" + f"  VHs Found:     {total_vhs}".ljust(table_width) + "│")
-    if dedup_count > 0:
-        lines.append(
-            "│"
-            + f"  VHs Merged:    {dedup_count} (duplicates)".ljust(table_width)
-            + "│"
-        )
-    poc_line = f"  PoCs Found:    {total_pocs}"
-    if verified_pocs is not None and generated_pocs != verified_pocs:
-        poc_line += f" verified ({generated_pocs} generated)"
-    lines.append("│" + poc_line.ljust(table_width) + "│")
-    lines.append("│" + f"  Patches:       {total_patches}".ljust(table_width) + "│")
-
-    # Cost and budget info
-    if budget_limit > 0:
-        lines.append(
-            "│"
-            + f"  API Cost:      ${total_cost:.2f} / ${budget_limit:.2f} budget".ljust(
-                table_width
-            )
-            + "│"
-        )
-    else:
-        lines.append(
-            "│"
-            + f"  API Cost:      ${total_cost:.2f} (no budget limit)".ljust(table_width)
-            + "│"
-        )
-
-    # Exit reason
-    if exit_reason == "budget_exceeded":
-        lines.append(
-            "│" + "  Exit Reason:   BUDGET LIMIT EXCEEDED".ljust(table_width) + "│"
-        )
-    elif exit_reason == "timeout":
-        lines.append("│" + "  Exit Reason:   Timeout reached".ljust(table_width) + "│")
-    elif exit_reason == "poc_target_reached":
-        lines.append(
-            "│" + "  Exit Reason:   PoC target reached".ljust(table_width) + "│"
-        )
-    elif exit_reason == "cancelled":
-        lines.append(
-            "│" + "  Exit Reason:   CANCELLED BY USER (Ctrl+C)".ljust(table_width) + "│"
-        )
-
-    lines.append("├" + "─" * table_width + "┤")
-
-    # Worker table header
-    header = (
-        "│"
-        + " # ".center(col_num)
-        + "│"
-        + " Fuzzer".ljust(col_fuzzer)
-        + "│"
-        + " Sanitizer".ljust(col_sanitizer)
-        + "│"
-        + " Status".ljust(col_status)
-        + "│"
-        + " Duration".center(col_duration)
-        + "│"
-        + " VHs".center(col_vhs)
-        + "│"
-        + " PoCs".center(col_pocs)
-        + "│"
-        + " Patches".center(col_patches)
-        + "│"
-    )
-    lines.append(header)
-    lines.append(
-        "├"
-        + "─" * col_num
-        + "┼"
-        + "─" * col_fuzzer
-        + "┼"
-        + "─" * col_sanitizer
-        + "┼"
-        + "─" * col_status
-        + "┼"
-        + "─" * col_duration
-        + "┼"
-        + "─" * col_vhs
-        + "┼"
-        + "─" * col_pocs
-        + "┼"
-        + "─" * col_patches
-        + "┤"
-    )
-
-    # Worker rows
+    done = sum(1 for w in workers if w["status"] == "completed")
+    merged = sum(w["vhs_merged"] for w in workers)
+    lines = ["", "=" * (width + 2),
+             " Thank you for using FuzzingBrain! ".center(width + 2, "="),
+             "=" * (width + 2), "",
+             "┌" + "─" * width + "┐",
+             "│" + " EXECUTION SUMMARY ".center(width) + "│",
+             "├" + "─" * width + "┤"]
+    budget = f" / ${budget_limit:.2f} budget" if budget_limit > 0 else " (no budget limit)"
+    for text in (
+        f"  Project:       {project_name}",
+        f"  Run ID:        {run_id}",
+        f"  Total Time:    {elapsed_minutes:.1f} minutes",
+        f"  Workers:       {done}/{len(workers)} completed",
+        f"  VHs:           {sum(w['vhs_found'] for w in workers)}"
+        + (f" ({merged} duplicate reports merged)" if merged else ""),
+        f"  Bugs found:    {data['crashes']} distinct crash signature(s)",
+        f"  API Cost:      ${data['cost']:.2f}{budget}",
+        f"  Exit Reason:   {reasons.get(exit_reason, exit_reason)}",
+    ):
+        lines.append("│" + text.ljust(width) + "│")
+    lines.append("├" + "┬".join("─" * w for _, w in cols) + "┤")
+    lines.append(row([name for name, _ in cols]))
+    lines.append("├" + "┼".join("─" * w for _, w in cols) + "┤")
     for i, w in enumerate(workers, 1):
-        fuzzer = w.get("fuzzer", "N/A")
-        if len(fuzzer) > col_fuzzer - 2:
-            fuzzer = fuzzer[: col_fuzzer - 4] + ".."
+        status = w["status"] + (f" ({w['end_reason']})" if w["end_reason"] else "")
+        secs = 0.0
+        if w["started_at"]:
+            from datetime import datetime, timezone
 
-        status = w.get("status", "unknown")
-        if status == "completed":
-            status_display = "✓ " + status
-        elif status == "interrupted":
-            status_display = "⚡ " + status  # Lightning bolt for interrupted
-        else:
-            status_display = "✗ " + status
-
-        # Get duration string
-        duration_str = w.get("duration_str", "N/A")
-
-        # Build row content
-        num_cell = f" {i} ".center(col_num)
-        fuzzer_cell = " " + fuzzer.ljust(col_fuzzer - 1)
-        sanitizer_cell = " " + w.get("sanitizer", "N/A").ljust(col_sanitizer - 1)
-        status_cell = " " + status_display.ljust(col_status - 1)
-        duration_cell = duration_str.center(col_duration)
-
-        # VHs cell: show "N(M)" format where N=found, M=merged
-        vhs_found = w.get("vhs_found", 0)
-        vhs_merged = w.get("vhs_merged", 0)
-        if vhs_merged > 0:
-            vhs_display = f"{vhs_found}({vhs_merged})"
-        else:
-            vhs_display = str(vhs_found)
-        vhs_cell = vhs_display.center(col_vhs)
-
-        pocs_cell = str(w.get("poc_generated", 0)).center(col_pocs)
-        patches_cell = str(w.get("patch_generated", 0)).center(col_patches)
-
-        # Apply color to worker content (not borders)
-        if use_color:
-            color = WorkerColors.get(i - 1)
-            reset = WorkerColors.RESET
-            row = (
-                "│"
-                + color
-                + num_cell
-                + reset
-                + "│"
-                + color
-                + fuzzer_cell
-                + reset
-                + "│"
-                + color
-                + sanitizer_cell
-                + reset
-                + "│"
-                + color
-                + status_cell
-                + reset
-                + "│"
-                + color
-                + duration_cell
-                + reset
-                + "│"
-                + color
-                + vhs_cell
-                + reset
-                + "│"
-                + color
-                + pocs_cell
-                + reset
-                + "│"
-                + color
-                + patches_cell
-                + reset
-                + "│"
-            )
-        else:
-            row = (
-                "│"
-                + num_cell
-                + "│"
-                + fuzzer_cell
-                + "│"
-                + sanitizer_cell
-                + "│"
-                + status_cell
-                + "│"
-                + duration_cell
-                + "│"
-                + vhs_cell
-                + "│"
-                + pocs_cell
-                + "│"
-                + patches_cell
-                + "│"
-            )
-        lines.append(row)
-
-    lines.append(
-        "└"
-        + "─" * col_num
-        + "┴"
-        + "─" * col_fuzzer
-        + "┴"
-        + "─" * col_sanitizer
-        + "┴"
-        + "─" * col_status
-        + "┴"
-        + "─" * col_duration
-        + "┴"
-        + "─" * col_vhs
-        + "┴"
-        + "─" * col_pocs
-        + "┴"
-        + "─" * col_patches
-        + "┘"
-    )
-    lines.append("")
-
+            end = w["ended_at"] or datetime.now(timezone.utc)
+            secs = (end - w["started_at"]).total_seconds()
+        color = WorkerColors.get(i - 1) if use_color else ""
+        lines.append(row([i, w["fuzzer"], status, f"{secs / 60:.1f}m",
+                          w["vhs_found"], w["crashes"], f"${w['cost']:.2f}"], color))
+    lines.append("└" + "┴".join("─" * w for _, w in cols) + "┘")
     return "\n".join(lines)
 
 
-# Re-export logger for convenience
+def print_run_summary(store, run_id: str, exit_reason: str) -> None:
+    """Print the summary for a run that is ending now (e.g. on Ctrl+C)."""
+    from datetime import datetime, timezone
+
+    run = store.get_run(run_id)
+    if run is None:
+        return
+    elapsed = (datetime.now(timezone.utc) - run.created_at).total_seconds() / 60
+    budget = float((run.config or {}).get("budget_limit") or 0)
+    print(final_summary(store, run_id, run.project_name, exit_reason, elapsed, budget,
+                        use_color=sys.stdout.isatty()))
+
+
 __all__ = [
     "logger",
     "setup_logging",
@@ -1283,8 +1008,8 @@ __all__ = [
     "get_analyzer_logger",
     "get_celery_logger",
     "get_fuzzer_instance_logger",
-    "create_worker_summary",
-    "create_final_summary",
+    "final_summary",
+    "print_run_summary",
     "create_log_directories",
     "truncate_name",
     "WorkerColors",

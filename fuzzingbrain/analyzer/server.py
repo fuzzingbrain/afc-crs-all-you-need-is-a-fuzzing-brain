@@ -19,8 +19,6 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
 from loguru import logger
 
-from bson import ObjectId
-
 from .protocol import (
     Request,
     Response,
@@ -32,8 +30,7 @@ from .protocol import (
 from .builder import AnalyzerBuilder
 from .models import AnalyzeResult, FuzzerInfo
 from ..analysis import extract_functions_from_file
-from ..graph import CallGraph, ConvertedGraph, GraphError, SourceFunctions
-from ..db import connect_repositories
+from ..graph import CallGraph, ConvertedGraph, GraphError, SourceFunctions, file_sha256
 from ..core.logging import get_analyzer_banner_and_header
 
 
@@ -98,37 +95,6 @@ def select_by_path_suffix(functions: List[dict], file_path: str) -> List[dict]:
 T = TypeVar("T")
 
 
-def _serialize_doc(doc: dict) -> dict:
-    """
-    Serialize MongoDB document for JSON response.
-
-    Converts ObjectId and datetime objects to strings for JSON serialization.
-    """
-    if not doc:
-        return doc
-
-    result = {}
-    for key, value in doc.items():
-        if isinstance(value, ObjectId):
-            result[key] = str(value)
-        elif isinstance(value, datetime):
-            result[key] = value.isoformat()
-        elif isinstance(value, dict):
-            result[key] = _serialize_doc(value)
-        elif isinstance(value, list):
-            result[key] = [
-                _serialize_doc(v)
-                if isinstance(v, dict)
-                else str(v)
-                if isinstance(v, ObjectId)
-                else v
-                for v in value
-            ]
-        else:
-            result[key] = value
-    return result
-
-
 # OSS-Fuzz function name prefix
 OSS_FUZZ_PREFIX = "OSS_FUZZ_"
 
@@ -179,9 +145,7 @@ class AnalysisServer:
         build_coverage: bool = True,
         prebuilt_fuzzers: Optional[Dict[str, Dict[str, str]]] = None,
     ):
-        # Store run_id as ObjectId for consistent MongoDB queries
-        # String representation is used for socket paths and logging
-        self.run_id = ObjectId(run_id) if isinstance(run_id, str) else run_id
+        self.run_id = str(run_id)
         self.workspace_path = Path(workspace_path)
         self.project_name = project_name
         self.sanitizers = sanitizers
@@ -217,7 +181,6 @@ class AnalysisServer:
         self.query_count: int = 0
 
         # Database connection (initialized on start)
-        self.repos = None
 
         # Query log for experiment tracking
         self.query_log: List[Dict[str, Any]] = []
@@ -225,7 +188,7 @@ class AnalysisServer:
         # Path cache for find_all_paths (run-level cache)
         self._path_cache: Dict[tuple, dict] = {}
 
-        # Thread pool for running blocking MongoDB operations
+        # Thread pool for running blocking graph queries
         # Use a larger pool since we may have many concurrent agents
         self._executor = ThreadPoolExecutor(max_workers=32, thread_name_prefix="mongo_")
 
@@ -236,7 +199,7 @@ class AnalysisServer:
         """
         Run a blocking function in the thread pool.
 
-        This prevents MongoDB queries from blocking the asyncio event loop,
+        This prevents graph queries from blocking the asyncio event loop,
         allowing multiple concurrent agents to make queries in parallel.
         """
         loop = asyncio.get_event_loop()
@@ -277,9 +240,6 @@ class AnalysisServer:
         """
         self.start_time = datetime.now()
         self._log(f"Starting Analysis Server for run {self.run_id}")
-
-        # Initialize database
-        self.repos = connect_repositories()
 
         # Setup logging
         if self.log_dir:
@@ -323,6 +283,7 @@ class AnalysisServer:
             reachable_functions_count=self._get_function_count(),
             callgraph_nodes_count=self._get_callgraph_count(),
             index_path=str(self.index_path),
+            graph=self._graph_record(),
             build_duration_seconds=self.build_duration,
             analysis_duration_seconds=self.analysis_duration,
         )
@@ -432,6 +393,21 @@ class AnalysisServer:
             f"Function index ready: {st['functions']} functions, {st['edges']} edges, "
             f"{len(st['harnesses'])} harnesses ({self.analysis_duration:.1f}s)"
         )
+
+    def _graph_record(self) -> dict:
+        """What the controller registers in the graphs table."""
+        st = self.graph.stats()
+        return {
+            "commit": self.graph.meta.get("commit", ""),
+            "path": str(self.index_path),
+            "content_sha256": file_sha256(Path(self.index_path)),
+            "n_functions": st["functions"],
+            "n_edges": st["edges"],
+            "n_indirect_edges": st["indirect_edges"],
+            "harnesses": {
+                h: [v["reachable"], v["max_depth"]] for h, v in st["harnesses"].items()
+            },
+        }
 
     async def _start_server(self):
         """Start Unix socket server."""
@@ -637,47 +613,6 @@ class AnalysisServer:
 
             elif method == Method.GET_BUILD_PATHS:
                 return Response.ok(self.build_paths, req_id)
-
-            # Vulnerability hypothesis operations
-            elif method == Method.CREATE_VULNERABILITY_HYPOTHESIS:
-                result = await self._create_vulnerability_hypothesis(params)
-                return Response.ok(result, req_id)
-
-            elif method == Method.UPDATE_VULNERABILITY_HYPOTHESIS:
-                result = await self._update_vulnerability_hypothesis(params)
-                return Response.ok(result, req_id)
-
-            elif method == Method.LIST_VULNERABILITY_HYPOTHESES:
-                result = await self._list_vulnerability_hypotheses(params)
-                return Response.ok(result, req_id)
-
-            elif method == Method.GET_VULNERABILITY_HYPOTHESIS:
-                result = await self._get_vulnerability_hypothesis(params.get("id"))
-                return Response.ok(result, req_id)
-
-            # Logic group operations (Full-scan)
-            elif method == Method.CREATE_LOGIC_GROUP:
-                result = await self._create_logic_group(params)
-                return Response.ok(result, req_id)
-
-            elif method == Method.LIST_LOGIC_GROUPS:
-                result = await self._list_logic_groups(params)
-                return Response.ok(result, req_id)
-
-            elif method == Method.GET_LOGIC_GROUP:
-                result = await self._get_logic_group(params.get("id"))
-                return Response.ok(result, req_id)
-
-            elif method == Method.CLAIM_LOGIC_GROUP:
-                result = await self._claim_logic_group(
-                    params.get("fuzzer"),
-                    params.get("processor_id"),
-                )
-                return Response.ok(result, req_id)
-
-            elif method == Method.COMPLETE_LOGIC_GROUP:
-                result = await self._complete_logic_group(params)
-                return Response.ok(result, req_id)
 
             else:
                 return Response.err(f"Unknown method: {method}", req_id)
@@ -1337,397 +1272,6 @@ class AnalysisServer:
         return await self._run_sync(
             self.graph.unreached_names, self._harness_or_all(fuzzer)
         )
-
-    # =========================================================================
-    # Vulnerability Hypothesis Operations
-    # =========================================================================
-
-    def _find_existing_vhs_sync(self, function_name: str) -> List[dict]:
-        """Sync: Find existing VHs for a function."""
-        existing_vhs = self.repos.vulnerability_hypotheses.find_by_function(
-            self.run_id, function_name
-        )
-        return [vh.to_dict() for vh in existing_vhs] if existing_vhs else []
-
-    def _merge_vh_source_sync(
-        self,
-        duplicate_id: str,
-        harness_name: str,
-        sanitizer: str,
-        description: str,
-        score: float,
-    ) -> bool:
-        """Sync: Merge source into existing VH."""
-        source_added = self.repos.vulnerability_hypotheses.add_source(
-            duplicate_id, harness_name, sanitizer
-        )
-        self.repos.vulnerability_hypotheses.add_merged_duplicate(
-            vh_id=duplicate_id,
-            description=description,
-            harness_name=harness_name,
-            sanitizer=sanitizer,
-            score=score,
-        )
-        return source_added
-
-    def _save_new_vh_sync(
-        self,
-        function_name: str,
-        harness_name: str,
-        sanitizer: str,
-        description: str,
-        score: float,
-        important_controlflow: str,
-        lg_id: str = "",
-        agent_id: str = "",
-    ) -> str:
-        """Sync: Create and save a new VH."""
-        from ..core.models import VulnerabilityHypothesis
-
-        vh = VulnerabilityHypothesis(
-            run_id=self.run_id,
-            function_name=function_name,
-            lg_id=lg_id,
-            created_by_agent_id=agent_id if agent_id else None,
-            sources=[{"harness_name": harness_name, "sanitizer": sanitizer}],
-            description=description,
-            score=score,
-            important_controlflow=important_controlflow,
-        )
-        self.repos.vulnerability_hypotheses.save(vh)
-        return vh.vulnerability_hypothesis_id
-
-    async def _create_vulnerability_hypothesis(self, params: dict) -> dict:
-        """
-        Create a new vulnerability hypothesis or merge with existing duplicate.
-
-        Uses LLM to check for duplicates in the same function. If a duplicate
-        is found, merges the source instead of creating a new VH.
-        """
-        from ..core.vh_dedup import check_vh_duplicate_async
-
-        if not self.repos:
-            raise RuntimeError("Database not connected")
-
-        function_name = params.get("function_name", "")
-        harness_name = params.get("harness_name", "")
-        sanitizer = params.get("sanitizer", "")
-        description = params.get("description", "")
-        score = params.get("score", 0.0)
-        important_controlflow = params.get("important_controlflow", "")
-        lg_id = params.get("lg_id", "")
-        agent_id = params.get("agent_id", "")  # Agent that created this VH
-
-        # Check for duplicates in the same function (MongoDB query in thread pool)
-        existing_vh_dicts = await self._run_sync(
-            self._find_existing_vhs_sync, function_name
-        )
-
-        if existing_vh_dicts:
-            # Use LLM to check for semantic duplicates (async LLM call)
-            duplicate_id = await check_vh_duplicate_async(
-                description, existing_vh_dicts
-            )
-
-            if duplicate_id:
-                # Found a duplicate - merge the source (MongoDB in thread pool)
-                source_added = await self._run_sync(
-                    self._merge_vh_source_sync,
-                    duplicate_id,
-                    harness_name,
-                    sanitizer,
-                    description,
-                    score,
-                )
-
-                self._log(
-                    f"Merged VH source: {harness_name}/{sanitizer} -> existing VH {duplicate_id[:8]}... "
-                    f"in {function_name} (source_added={source_added})"
-                )
-                return {
-                    "id": duplicate_id,
-                    "merged": True,
-                    "created": False,
-                    "message": f"Merged with existing VH in {function_name}",
-                }
-
-        # No duplicate found - create new VH (MongoDB in thread pool)
-        vh_id = await self._run_sync(
-            self._save_new_vh_sync,
-            function_name,
-            harness_name,
-            sanitizer,
-            description,
-            score,
-            important_controlflow,
-            lg_id,
-            agent_id,
-        )
-
-        self._log(
-            f"Created vulnerability hypothesis: {vh_id} in {function_name} "
-            f"(harness={harness_name}, sanitizer={sanitizer}, logic group={lg_id[:8] if lg_id else 'none'})"
-        )
-
-        return {
-            "id": vh_id,
-            "created": True,
-            "merged": False,
-        }
-
-    def _update_vulnerability_hypothesis_sync(
-        self, vulnerability_hypothesis_id: str, updates: dict
-    ) -> bool:
-        """Sync implementation of _update_vulnerability_hypothesis."""
-        return self.repos.vulnerability_hypotheses.update(vulnerability_hypothesis_id, updates)
-
-    async def _update_vulnerability_hypothesis(self, params: dict) -> dict:
-        """Update a vulnerability hypothesis."""
-        if not self.repos:
-            raise RuntimeError("Database not connected")
-
-        vulnerability_hypothesis_id = params.get("id")
-        if not vulnerability_hypothesis_id:
-            raise ValueError("Missing vulnerability hypothesis id")
-
-        updates = {}
-        if "is_checked_by_verifier" in params:
-            updates["is_checked_by_verifier"] = params["is_checked_by_verifier"]
-        if "is_crash_found" in params:
-            updates["is_crash_found"] = params["is_crash_found"]
-        # Recall-first verdict: the verifier sets a confidence score; proceed/priority
-        # are derived from it. A reproduced crash always proceeds and ranks top.
-        if params.get("score") is not None:
-            _s = float(params["score"])
-            updates["score"] = _s
-            updates["priority"] = round(_s, 3)
-            updates["proceed"] = bool(_s >= 0.5 or params.get("is_crash_found"))
-        if "evidence" in params:
-            updates["evidence"] = params["evidence"] or ""
-        if "verification_notes" in params:
-            updates["verification_notes"] = params["verification_notes"]
-        if "poc_guidance" in params:
-            updates["poc_guidance"] = params["poc_guidance"]
-        # The verifier may correct an imprecise finder hypothesis.
-        if "description" in params:
-            updates["description"] = params["description"]
-        if "important_controlflow" in params:
-            updates["important_controlflow"] = params["important_controlflow"]
-        if params.get("is_checked_by_verifier"):
-            updates["checked_at"] = datetime.now()
-        # Track which agent verified this VH
-        if params.get("agent_id") and params.get("is_checked_by_verifier"):
-            from bson import ObjectId
-
-            updates["verified_by_agent_id"] = ObjectId(params["agent_id"])
-
-        self._log(
-            f"Updating vulnerability hypothesis {vulnerability_hypothesis_id[:8]}... with: is_checked_by_verifier={updates.get('is_checked_by_verifier')}, score={updates.get('score')}"
-        )
-        success = await self._run_sync(
-            self._update_vulnerability_hypothesis_sync, vulnerability_hypothesis_id, updates
-        )
-        if success:
-            self._log(f"Updated vulnerability hypothesis: {vulnerability_hypothesis_id[:8]}...")
-        else:
-            self._log(
-                f"Failed to update vulnerability hypothesis: {vulnerability_hypothesis_id[:8]}... (not found or no changes)",
-                "WARNING",
-            )
-        return {"updated": success}
-
-    def _list_vulnerability_hypotheses_sync(
-        self, filter_unchecked: bool, filter_real: bool, filter_important: bool
-    ) -> dict:
-        """Sync implementation of _list_vulnerability_hypotheses."""
-        if filter_unchecked:
-            points = self.repos.vulnerability_hypotheses.find_unchecked(self.run_id)
-        elif filter_real:
-            points = self.repos.vulnerability_hypotheses.find_real(self.run_id)
-        elif filter_important:
-            points = self.repos.vulnerability_hypotheses.find_important(self.run_id)
-        else:
-            points = self.repos.vulnerability_hypotheses.find_by_run(self.run_id)
-
-        counts = self.repos.vulnerability_hypotheses.count_by_status(self.run_id)
-
-        return {
-            "vulnerability_hypotheses": [vh.to_dict() for vh in points],
-            "count": len(points),
-            "stats": counts,
-        }
-
-    async def _list_vulnerability_hypotheses(self, params: dict) -> dict:
-        """List vulnerability hypotheses with optional filters."""
-        if not self.repos:
-            raise RuntimeError("Database not connected")
-
-        filter_unchecked = params.get("filter_unchecked", False)
-        filter_real = params.get("filter_real", False)
-        filter_important = params.get("filter_important", False)
-
-        return await self._run_sync(
-            self._list_vulnerability_hypotheses_sync,
-            filter_unchecked,
-            filter_real,
-            filter_important,
-        )
-
-    def _get_vulnerability_hypothesis_sync(self, vulnerability_hypothesis_id: str) -> Optional[dict]:
-        """Sync implementation of _get_vulnerability_hypothesis."""
-        vh = self.repos.vulnerability_hypotheses.find_by_id(vulnerability_hypothesis_id)
-        if vh:
-            return vh.to_dict()
-        return None
-
-    async def _get_vulnerability_hypothesis(self, vulnerability_hypothesis_id: str) -> Optional[dict]:
-        """Get a single vulnerability hypothesis by ID."""
-        if not self.repos or not vulnerability_hypothesis_id:
-            return None
-        return await self._run_sync(
-            self._get_vulnerability_hypothesis_sync, vulnerability_hypothesis_id
-        )
-
-    # =========================================================================
-    # Logic group operations (Full-scan)
-    # =========================================================================
-
-    def _create_logic_group_sync(self, params: dict) -> dict:
-        """Sync implementation of _create_logic_group."""
-        from ..core.models import LogicGroup
-
-        agent_id = params.get("agent_id", "")
-        logic_group = LogicGroup(
-            run_id=self.run_id,
-            created_by_agent_id=agent_id if agent_id else None,
-            name=params.get("name", ""),
-            risk_level=params.get("risk_level", "medium"),
-            risk_reason=params.get("risk_reason", ""),
-            core_functions=params.get("core_functions", []),
-            entry_functions=params.get("entry_functions", []),
-            call_chain_summary=params.get("call_chain_summary", ""),
-            code_summary=params.get("code_summary", ""),
-            fuzzer=params.get("fuzzer", ""),
-        )
-
-        success = self.repos.logic_groups.save(logic_group)
-        if success:
-            return {
-                "id": logic_group.lg_id,
-                "created": True,
-                "name": logic_group.name,
-                "risk_level": logic_group.risk_level,
-            }
-        else:
-            return {"created": False, "error": "Failed to save logic group"}
-
-    async def _create_logic_group(self, params: dict) -> dict:
-        """Create a new logic group for Full-scan analysis."""
-        if not self.repos:
-            return {"created": False, "error": "Database not available"}
-
-        result = await self._run_sync(self._create_logic_group_sync, params)
-        if result.get("created"):
-            self._log(
-                f"Created logic group: {result.get('name')} ({result.get('risk_level')})"
-            )
-        return {"id": result.get("id"), "created": result.get("created", False)}
-
-    def _list_logic_groups_sync(
-        self, fuzzer: Optional[str], status: Optional[str]
-    ) -> dict:
-        """Sync implementation of _list_logic_groups."""
-        if fuzzer:
-            logic_groups = self.repos.logic_groups.find_by_fuzzer(self.run_id, fuzzer)
-        else:
-            logic_groups = self.repos.logic_groups.find_by_run(self.run_id)
-
-        if status:
-            logic_groups = [d for d in logic_groups if d.status == status]
-
-        logic_groups.sort(key=lambda d: d.get_priority_score(), reverse=True)
-        stats = self.repos.logic_groups.get_stats(self.run_id, fuzzer)
-
-        return {
-            "logic_groups": [_serialize_doc(d.to_dict()) for d in logic_groups],
-            "count": len(logic_groups),
-            "stats": stats,
-        }
-
-    async def _list_logic_groups(self, params: dict) -> dict:
-        """List logic groups with optional filters."""
-        if not self.repos:
-            return {"logic_groups": [], "count": 0, "stats": {}}
-
-        fuzzer = params.get("fuzzer")
-        status = params.get("status")
-        return await self._run_sync(self._list_logic_groups_sync, fuzzer, status)
-
-    def _get_logic_group_sync(self, lg_id: str) -> Optional[dict]:
-        """Sync implementation of _get_logic_group."""
-        logic_group = self.repos.logic_groups.find_by_id(lg_id)
-        if logic_group:
-            return _serialize_doc(logic_group.to_dict())
-        return None
-
-    async def _get_logic_group(self, lg_id: str) -> Optional[dict]:
-        """Get a single logic group by ID."""
-        if not self.repos or not lg_id:
-            return None
-        return await self._run_sync(self._get_logic_group_sync, lg_id)
-
-    def _claim_logic_group_sync(self, fuzzer: str, processor_id: str) -> Optional[dict]:
-        """Sync implementation of _claim_logic_group."""
-        logic_group = self.repos.logic_groups.claim(self.run_id, fuzzer, processor_id)
-        if logic_group:
-            return {
-                "logic_group": _serialize_doc(logic_group.to_dict()),
-                "name": logic_group.name,
-            }
-        return None
-
-    async def _claim_logic_group(self, fuzzer: str, processor_id: str) -> Optional[dict]:
-        """Claim a pending logic group for analysis."""
-        if not self.repos or not fuzzer or not processor_id:
-            return None
-
-        result = await self._run_sync(self._claim_logic_group_sync, fuzzer, processor_id)
-        if result:
-            self._log(f"Logic group claimed: {result.get('name')} by {processor_id}")
-            return result.get("logic_group")
-        return None
-
-    def _complete_logic_group_sync(
-        self, lg_id: str, vh_count: int, functions_analyzed: int
-    ) -> bool:
-        """Sync implementation of _complete_logic_group."""
-        return self.repos.logic_groups.complete(
-            lg_id,
-            vh_count=vh_count,
-            functions_analyzed=functions_analyzed,
-        )
-
-    async def _complete_logic_group(self, params: dict) -> dict:
-        """Mark a logic group as completed."""
-        if not self.repos:
-            return {"updated": False, "error": "Database not available"}
-
-        lg_id = params.get("id")
-        if not lg_id:
-            return {"updated": False, "error": "Logic group ID required"}
-
-        success = await self._run_sync(
-            self._complete_logic_group_sync,
-            lg_id,
-            params.get("vh_count", 0),
-            params.get("functions_analyzed", 0),
-        )
-
-        if success:
-            self._log(f"Logic group completed: {lg_id}")
-            return {"updated": True}
-        else:
-            return {"updated": False, "error": "Failed to update logic group"}
 
     # =========================================================================
     # Lifecycle

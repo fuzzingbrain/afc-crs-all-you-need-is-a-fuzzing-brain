@@ -6,7 +6,7 @@ Request/Response models for communication between Controller and Analyzer.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 
 
@@ -122,6 +122,9 @@ class AnalyzeResult:
     static_analysis_ready: bool = False  # the index has functions
     reachable_functions_count: int = 0
     callgraph_nodes_count: int = 0  # call edges
+    # The graphs-table record of the index (Store.register_graph), harness
+    # names mapped to [n_reachable, max_depth].
+    graph: Dict[str, Any] = field(default_factory=dict)
 
     # Timing
     build_duration_seconds: float = 0.0
@@ -148,6 +151,7 @@ class AnalyzeResult:
             "static_analysis_ready": self.static_analysis_ready,
             "reachable_functions_count": self.reachable_functions_count,
             "callgraph_nodes_count": self.callgraph_nodes_count,
+            "graph": self.graph,
             "build_duration_seconds": self.build_duration_seconds,
             "analysis_duration_seconds": self.analysis_duration_seconds,
             "error_msg": self.error_msg,
@@ -170,6 +174,7 @@ class AnalyzeResult:
             static_analysis_ready=data.get("static_analysis_ready", False),
             reachable_functions_count=data.get("reachable_functions_count", 0),
             callgraph_nodes_count=data.get("callgraph_nodes_count", 0),
+            graph=data.get("graph") or {},
             build_duration_seconds=data.get("build_duration_seconds", 0.0),
             analysis_duration_seconds=data.get("analysis_duration_seconds", 0.0),
             error_msg=data.get("error_msg"),

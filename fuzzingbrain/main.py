@@ -25,9 +25,6 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from .core import (  # noqa: E402
     Config,
-    Run,
-    JobType,
-    ScanMode,
     setup_logging,
     setup_celery_logging,
 )
@@ -40,7 +37,7 @@ from .core.environment import (  # noqa: E402
     ensure_postgres,
     ensure_redis,
 )
-from .db import RepositoryManager, connect_repositories  # noqa: E402
+from .db.store import Store, get_store  # noqa: E402
 from .db.pg import migrate  # noqa: E402
 
 
@@ -76,10 +73,9 @@ _current_run_id: Optional[str] = None
 
 
 def signal_handler(signum, frame):
-    """Handle Ctrl+C gracefully"""
-    global _shutdown_requested, _repos, _current_run_id
+    """Ctrl+C / SIGTERM: record the run as cancelled, stop what it started."""
+    global _shutdown_requested
     if _shutdown_requested:
-        # Second Ctrl+C - force exit
         print("\n\033[0;31m[FORCE]\033[0m Forcing shutdown...")
         reset_terminal()
         sys.exit(1)
@@ -89,197 +85,35 @@ def signal_handler(signum, frame):
         "\n\033[1;33m[INTERRUPT]\033[0m Shutting down gracefully... (Press Ctrl+C again to force)"
     )
 
-    # If no run was started, exit immediately
-    if not _repos or not _current_run_id:
+    if _store is None or not _current_run_id:
         reset_terminal()
         sys.exit(0)
 
-    # Mark workers and run as cancelled (scoped to current run only)
     try:
-        from bson import ObjectId as _ObjectId
+        from .agents.context import get_all_agent_contexts
 
-        run_oid = (
-            _ObjectId(_current_run_id)
-            if len(_current_run_id) == 24
-            else _current_run_id
+        for ctx in get_all_agent_contexts().values():
+            if ctx.run_id == _current_run_id and ctx.status == "running":
+                try:
+                    ctx.cancel()
+                except Exception:
+                    pass
+        workers = _store.end_open_workers(_current_run_id, "cancelled")
+        agents = _store.end_running_agents(run_id=_current_run_id, status="cancelled")
+        _store.end_run(_current_run_id, "cancelled")
+        print(
+            f"\033[1;33m[INTERRUPT]\033[0m Run cancelled "
+            f"({workers} worker(s), {agents} agent(s) stopped)"
         )
-
-        # Update workers for THIS run only
-        result = _repos.workers.collection.update_many(
-            {
-                "run_id": run_oid,
-                "status": {"$in": ["pending", "building", "running"]},
-            },
-            {
-                "$set": {
-                    "status": "failed",
-                    "error_msg": "Cancelled by user (Ctrl+C)",
-                }
-            },
-        )
-        worker_count = result.modified_count
-
-        # Update THIS run only
-        run_result = _repos.runs.collection.update_one(
-            {
-                "_id": run_oid,
-                "status": {"$in": ["pending", "running"]},
-            },
-            {
-                "$set": {
-                    "status": "cancelled",
-                    "error_msg": "Cancelled by user (Ctrl+C)",
-                }
-            },
-        )
-        run_count = run_result.modified_count
-
-        # Cancel in-memory agents for this run
         try:
-            from .agents.context import get_all_agent_contexts, force_cleanup_agents
-            from .db import get_database
+            from .core.logging import print_run_summary
 
-            for ctx in get_all_agent_contexts().values():
-                if ctx.run_id == _current_run_id and ctx.status == "running":
-                    try:
-                        ctx.cancel()
-                    except Exception:
-                        pass
-
-            # Force-cleanup zombie agents in DB
-            try:
-                db = get_database()
-            except Exception:
-                db = None
-            if db is not None:
-                force_cleanup_agents(_current_run_id, db)
-        except Exception:
-            pass
-
-        if worker_count > 0 or run_count > 0:
-            print(
-                f"\033[1;33m[INTERRUPT]\033[0m Marked {worker_count} worker(s) and {run_count} run(s) as cancelled"
-            )
-
-        # Display summary for current run
-        try:
-            from .core.logging import create_final_summary
-            from datetime import datetime
-
-            recent_run = _repos.runs.collection.find_one({"_id": run_oid})
-            if recent_run:
-                run_id = str(
-                    recent_run.get("run_id") or recent_run.get("_id") or "unknown"
-                )
-                project_name = recent_run.get("project_name", "unknown")
-
-                # Get workers for this run
-                workers = list(_repos.workers.collection.find({"run_id": run_oid}))
-                worker_results = []
-                for w in workers:
-                    started = w.get("started_at")
-                    finished = w.get("finished_at") or datetime.now()
-                    duration_sec = (
-                        (finished - started).total_seconds() if started else 0
-                    )
-                    fuzzer = w.get("fuzzer", "N/A")
-                    sanitizer = w.get("sanitizer", "N/A")
-
-                    # Query VH count from database
-                    vh_count = _repos.vulnerability_hypotheses.count(
-                        {
-                            "run_id": run_oid,
-                            "sources": {
-                                "$elemMatch": {
-                                    "harness_name": fuzzer,
-                                    "sanitizer": sanitizer,
-                                }
-                            },
-                        }
-                    )
-
-                    # Query PoC count from database
-                    worker_vh_ids = [
-                        str(vh.get("vulnerability_hypothesis_id") or vh.get("_id"))
-                        for vh in _repos.vulnerability_hypotheses.collection.find(
-                            {
-                                "run_id": run_oid,
-                                "sources": {
-                                    "$elemMatch": {
-                                        "harness_name": fuzzer,
-                                        "sanitizer": sanitizer,
-                                    }
-                                },
-                            },
-                            {"vulnerability_hypothesis_id": 1, "_id": 1},
-                        )
-                    ]
-                    poc_count = 0
-                    if worker_vh_ids:
-                        vh_oids = []
-                        for x in worker_vh_ids:
-                            try:
-                                vh_oids.append(_ObjectId(x))
-                            except Exception:
-                                vh_oids.append(x)
-                        poc_count = _repos.pocs.count(
-                            {
-                                "run_id": run_oid,
-                                "vulnerability_hypothesis_id": {"$in": vh_oids},
-                                "is_successful": True,
-                            }
-                        )
-                    # Also count fuzzer-discovered PoCs
-                    fuzzer_poc_count = _repos.pocs.count(
-                        {
-                            "run_id": run_oid,
-                            "harness_name": fuzzer,
-                            "sanitizer": sanitizer,
-                            "vulnerability_hypothesis_id": {"$in": ["", None]},
-                            "is_successful": True,
-                        }
-                    )
-                    poc_count += fuzzer_poc_count
-
-                    worker_results.append(
-                        {
-                            "fuzzer": fuzzer,
-                            "sanitizer": sanitizer,
-                            "status": w.get("status", "cancelled"),
-                            "duration_str": f"{duration_sec / 60:.1f}m",
-                            "vhs_found": vh_count,
-                            "poc_generated": poc_count,
-                            "patch_generated": w.get("patch_generated", 0),
-                        }
-                    )
-
-                # Read cost from database
-                total_cost = recent_run.get("llm_cost", 0.0)
-                budget_limit = recent_run.get("budget_limit", 0.0)
-
-                # Calculate elapsed time
-                created_at = recent_run.get("created_at", datetime.now())
-                elapsed_minutes = (datetime.now() - created_at).total_seconds() / 60
-
-                summary = create_final_summary(
-                    project_name=project_name,
-                    run_id=run_id,
-                    workers=worker_results,
-                    total_elapsed_minutes=elapsed_minutes,
-                    use_color=True,
-                    total_cost=total_cost,
-                    budget_limit=budget_limit,
-                    exit_reason="cancelled",
-                )
-                print(summary)
+            print_run_summary(_store, _current_run_id, exit_reason="cancelled")
         except Exception as e:
             print(f"\033[0;31m[ERROR]\033[0m Failed to generate summary: {e}")
-
     except Exception as e:
         print(f"\033[0;31m[ERROR]\033[0m Failed to update status: {e}")
 
-    # Close LLM clients before stopping infrastructure
-    # (prevents SSL transport errors when event loop closes)
     try:
         from .llms import LLMClient
 
@@ -287,7 +121,6 @@ def signal_handler(signum, frame):
     except Exception:
         pass
 
-    # Stop infrastructure
     try:
         from .core.infrastructure import InfrastructureManager
 
@@ -309,35 +142,15 @@ signal.signal(signal.SIGTERM, signal_handler)
 # Global State
 # =============================================================================
 
-# Global Repository Manager - initialized in init_database()
-_repos: Optional[RepositoryManager] = None
+_store: Optional[Store] = None
 
 
-def get_repos() -> RepositoryManager:
-    """Get global RepositoryManager instance"""
-    global _repos
-    if _repos is None:
-        raise RuntimeError("Database not initialized. Call init_database() first.")
-    return _repos
-
-
-def init_database(config: Config) -> RepositoryManager:
-    """
-    Initialize database connection (global singleton)
-
-    Called once at application startup, then shared by all components.
-    """
-    global _repos
-
-    if _repos is not None:
-        return _repos
-
-    try:
-        _repos = connect_repositories()
-        return _repos
-    except Exception as e:
-        print_error(str(e))
-        sys.exit(1)
+def init_database(config: Config) -> Store:
+    """This process's connection to the run database (schema already migrated)."""
+    global _store
+    if _store is None:
+        _store = get_store(config.postgres_url)
+    return _store
 
 
 # =============================================================================
@@ -401,42 +214,40 @@ def parse_args(argv=None) -> argparse.Namespace:
 # The Run record
 # =============================================================================
 
-def create_run(config: Config) -> Run:
-    """The Run record the pipeline and the database work with."""
-    workspace = config.workspace
-    return Run(
-        run_id=config.run_id,
-        task_type=JobType(config.task_type),
-        scan_mode=ScanMode(config.scan_mode),
-        workspace_path=workspace,
-        src_path=f"{workspace}/repo",
-        fuzz_tooling_path=f"{workspace}/fuzz-tooling",
-        diff_path=f"{workspace}/diff" if config.scan_mode == "delta" else None,
-        repo_url=config.repo_url,
-        project_name=config.project_name,
-        ossfuzz_project_name=config.ossfuzz_project_name,
-        sanitizers=config.sanitizers,
-        timeout_minutes=config.timeout_minutes,
-        poc_count=config.poc_count,
-        budget_limit=config.budget_limit,
-        target_commit=config.target_commit,
-        base_commit=config.base_commit,
-        delta_commit=config.delta_commit,
-        fuzz_tooling_url=config.fuzz_tooling_url,
-        fuzz_tooling_ref=config.fuzz_tooling_ref,
-        is_fuzz_tooling_provided=config.fuzz_tooling_path is not None,
-    )
+def code_version() -> Optional[str]:
+    """The FBv2 version that runs this: git describe on fb-v* tags."""
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            ["git", "describe", "--tags", "--always", "--dirty", "--match", "fb-v*"],
+            cwd=Path(__file__).resolve().parent.parent,
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout.strip() or None if r.returncode == 0 else None
+    except Exception:
+        return None
 
 
 def run_task(config: Config) -> dict:
     """Run one task end to end. Every way of starting FuzzingBrain ends here."""
     global _current_run_id
-    run = create_run(config)
-    _current_run_id = run.run_id
+    store = init_database(config)
+    store.create_run(
+        run_id=config.run_id,
+        project_name=config.project_name,
+        scan_mode=config.scan_mode,
+        config=config.record(),
+        config_given=dict(config.given),
+        workspace_path=config.workspace,
+        code_version=code_version(),
+        label=config.label,
+    )
+    _current_run_id = config.run_id
 
     log_dir = setup_logging(
         config.project_name,
-        run.run_id,
+        config.run_id,
         metadata={label: value for label, value in config.summary()},
     )
     setup_celery_logging()
@@ -445,7 +256,7 @@ def run_task(config: Config) -> dict:
 
     from .core.run_processor import process_run
 
-    result = process_run(run, config, get_repos())
+    result = process_run(config, store)
 
     print("")
     if result["status"] == "error":
@@ -520,7 +331,6 @@ def main(argv=None) -> int:
         if err:
             _fail("Environment check failed", [err])
     migrate(config.postgres_url)
-    init_database(config)
 
     # 8. Output directory
     Path(config.workspace).mkdir(parents=True, exist_ok=True)

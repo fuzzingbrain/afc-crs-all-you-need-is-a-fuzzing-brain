@@ -16,7 +16,7 @@ Breadth-First Per-Logic group Architecture:
 
 import asyncio
 import time
-from datetime import datetime
+from dataclasses import dataclass
 from typing import Dict, Any, List, Optional
 
 from .poc_base import POCBaseStrategy
@@ -27,11 +27,21 @@ from ...agents import (
 )
 from ...llms.routing import Role, model_for
 from ...core.concurrency import get_concurrency
-from ...core.models.logic_group import LogicGroupStatus
-from ...core.scoring import get_scoring
-from ...tools.logic_groups import set_logic_group_context
+from ...db.store import get_store
 from ...tools.vulnerability_hypotheses import set_vh_context
 from ...fuzzer import SeedAgent
+
+
+@dataclass
+class PoolFunction:
+    """A function a finder is given: from the graph when it is there."""
+
+    name: str
+    file_path: str = ""
+    start_line: int = 0
+    end_line: int = 0
+    content: str = ""
+    analyzed: bool = False
 
 
 class POCFullscanStrategy(POCBaseStrategy):
@@ -48,7 +58,6 @@ class POCFullscanStrategy(POCBaseStrategy):
     def __init__(
         self,
         executor,
-        use_pipeline: bool = True,
         num_parallel_agents: Optional[int] = None,
     ):
         """
@@ -56,12 +65,11 @@ class POCFullscanStrategy(POCBaseStrategy):
 
         Args:
             executor: WorkerExecutor instance
-            use_pipeline: Whether to use parallel pipeline (default: True)
             num_parallel_agents: Concurrent VH Find agents; the configured
                 value when not given, so a task file that asks for serial
                 execution gets it here too.
         """
-        super().__init__(executor, use_pipeline)
+        super().__init__(executor)
         self.num_parallel_agents = (
             num_parallel_agents
             if num_parallel_agents is not None
@@ -107,23 +115,16 @@ class POCFullscanStrategy(POCBaseStrategy):
 
         try:
             # Run everything in a single event loop to avoid litellm client caching issues
-            set_logic_group_context(self.fuzzer)
             pipeline_stats = asyncio.run(self._run_full_pipeline())
 
-            # Collect results
-            all_points = self.repos.vulnerability_hypotheses.find_by_run(self.run_id)
-            result["vulnerability_hypotheses_found"] = len(all_points)
+            vhs = self._worker_vhs()
+            result["vulnerability_hypotheses_found"] = len(vhs)
             result["vulnerability_hypotheses_verified"] = pipeline_stats.vh_verified
             result["poc_generated"] = pipeline_stats.poc_generated
-
-            # Count high-confidence bugs
-            bar = get_scoring().high_confidence
-            high_conf = [p for p in all_points if p.proceed]
-            result["high_confidence_bugs"] = len(high_conf)
-
-            # Save results
-            sorted_points = self._sort_by_priority(all_points)
-            self._save_results(sorted_points)
+            result["high_confidence_bugs"] = sum(
+                1 for v in vhs if v["status"] in ("pending_poc", "generating_poc", "poc_generated", "poc_failed")
+            )
+            self._save_results(vhs)
 
             total_time = time.time() - start_time
             self.log_info(f"========== {self.strategy_name} Complete ==========")
@@ -179,7 +180,7 @@ class POCFullscanStrategy(POCBaseStrategy):
         phase1_duration = time.time() - phase1_start
         self.log_info(f"Phase 1 completed in {phase1_duration:.1f}s")
 
-        return self.repos.logic_groups.find_pending(self.run_id, self.fuzzer)
+        return get_store().logic_groups(self.worker_id)
 
     async def _run_lg_planning_async(self) -> List:
         """Run logic group planning phase asynchronously."""
@@ -220,7 +221,7 @@ class POCFullscanStrategy(POCBaseStrategy):
         phase1_duration = time.time() - phase1_start
         self.log_info(f"Phase 1 completed in {phase1_duration:.1f}s")
 
-        return self.repos.logic_groups.find_pending(self.run_id, self.fuzzer)
+        return get_store().logic_groups(self.worker_id)
 
     async def _run_full_pipeline(self):
         """
@@ -404,7 +405,6 @@ class POCFullscanStrategy(POCBaseStrategy):
 
         pipeline = AgentPipeline(
             run_id=self.run_id,
-            repos=self.repos,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             scan_mode="full",
@@ -473,9 +473,9 @@ class POCFullscanStrategy(POCBaseStrategy):
         for logic_group, pools in logic_group_pools:
             n = sum(len(pools.get(key, [])) for key, _ in phase_labels)
             if n:
-                planned[logic_group.lg_id] = n
-                remaining[logic_group.lg_id] = n
-                self._mark_logic_group_started(logic_group)
+                planned[logic_group.id] = n
+                remaining[logic_group.id] = n
+                self._mark_logic_group_started(logic_group, n)
             else:
                 self._mark_logic_group_skipped(logic_group, "no functions in its pools")
 
@@ -486,7 +486,7 @@ class POCFullscanStrategy(POCBaseStrategy):
             for logic_group, pools in logic_group_pools:
                 funcs = pools.get(phase_key, [])
                 for func in funcs:
-                    phase_work.append((func, logic_group.lg_id))
+                    phase_work.append((func, logic_group.id))
 
             if not phase_work:
                 self.log_info(f"=== {phase_label}: 0 functions, skipping ===")
@@ -531,44 +531,27 @@ class POCFullscanStrategy(POCBaseStrategy):
     # that is finding bugs.
     # =========================================================================
 
-    def _mark_logic_group_started(self, logic_group) -> None:
+    def _mark_logic_group_started(self, logic_group, planned: int) -> None:
+        # A logic group's progress is its function_analyses rows against
+        # planned_functions; there is no status column to keep in step.
         try:
-            self.repos.logic_groups.update(
-                str(logic_group.lg_id),
-                {
-                    "status": LogicGroupStatus.IN_PROGRESS.value,
-                    "processor_id": str(self.worker_id),
-                    "started_at": datetime.now(),
-                },
-            )
+            get_store().set_planned_functions(logic_group.id, planned)
         except Exception as e:
-            self.log_debug(f"Could not mark logic group in progress: {e}")
+            self.log_warning(f"Could not record the plan of logic group {logic_group.name}: {e}")
 
-    def _mark_logic_group_completed(
-        self, lg_id: str, functions_analyzed: int
-    ) -> None:
+    def _mark_logic_group_completed(self, lg_id, functions_analyzed: int) -> None:
         try:
-            vhs = self.repos.vulnerability_hypotheses.find_by_run(self.run_id) or []
-            vh_count = sum(
-                1
-                for vh in vhs
-                if str(getattr(vh, "lg_id", "")) == str(lg_id)
-            )
-            self.repos.logic_groups.complete(
-                str(lg_id),
-                vh_count=vh_count,
-                functions_analyzed=functions_analyzed,
-            )
-        except Exception as e:
-            self.log_debug(f"Could not mark logic group complete: {e}")
+            done = get_store().analysis_count(lg_id)
+        except Exception:
+            done = "?"
+        self.log_info(
+            f"Logic group {str(lg_id)[:8]} done: {done}/{functions_analyzed} functions analysed"
+        )
 
     def _mark_logic_group_skipped(self, logic_group, reason: str) -> None:
-        # The reason goes to the log, not to the repository: skip() writes it
-        # over risk_reason, which holds the planner's account of why this
-        # logic group was worth looking at and is what the dashboard shows.
         self.log_info(f"Logic group '{logic_group.name}' skipped: {reason}")
         try:
-            self.repos.logic_groups.skip(str(logic_group.lg_id))
+            get_store().set_planned_functions(logic_group.id, 0)
         except Exception as e:
             self.log_debug(f"Could not mark logic group skipped: {e}")
 
@@ -614,28 +597,25 @@ class POCFullscanStrategy(POCBaseStrategy):
 
         return depth
 
-    def _resolve_function(self, name: str):
-        """A Function for `name`, from the index when there is one.
+    def _resolve_function(self, name: str) -> PoolFunction:
+        """A function for `name`, from the graph when it has it.
 
-        The index is an accelerator here, not a precondition. Logic group planning
-        names its functions by reading the source, so the names are real whether
-        or not an introspector run ever indexed them -- and the VH agent that
-        receives one has Read and Grep and can find it the same way.
-
-        Dropping unresolvable names is what made a run without an index report
-        "0 functions, skipping" for every phase and finish with zero suspicious
-        points, having looked at nothing. The log read like there was nothing to
-        examine rather than like the pool had been emptied.
+        The graph is an accelerator here, not a precondition: the planner names
+        functions by reading the source, and a finder given only a name has
+        Read and Grep to find it.
         """
-        func = self.repos.functions.find_by_name(self.run_id, name)
-        if func:
-            return func
-        from ...core.models.function import Function
-
-        return Function(
-            function_id=f"{self.run_id}_{name}",
-            run_id=self.run_id,
+        try:
+            row = self.executor.graph.function(name, self.executor.graph_harness)
+        except Exception:
+            row = None
+        if not row:
+            return PoolFunction(name=name)
+        return PoolFunction(
             name=name,
+            file_path=row.get("file_path") or "",
+            start_line=row.get("start_line") or 0,
+            end_line=row.get("end_line") or 0,
+            content=row.get("content") or "",
         )
 
     def _build_logic_group_pools(self, sorted_logic_groups: List) -> List[tuple]:
@@ -658,6 +638,14 @@ class POCFullscanStrategy(POCBaseStrategy):
             phase keys to lists of resolved function objects.
         """
         result = []
+        # Analysed before (a resumed worker), or planned by an earlier group:
+        # those come after the functions nobody has looked at yet.
+        try:
+            done = {name for (_f, name, _l) in get_store().analyzed_functions(self.worker_id)}
+        except Exception:
+            done = set()
+        seen_small: set = set()
+        seen_any: set = set()
 
         for logic_group in sorted_logic_groups:
             # Build small pool names
@@ -697,23 +685,19 @@ class POCFullscanStrategy(POCBaseStrategy):
                 "big/re": [],
             }
 
-            for name in small_pool_names:
+            for name in sorted(small_pool_names):
                 func = self._resolve_function(name)
-                if not func:
-                    continue
-                if not func.analyzed_by_logic_groups:
-                    pools["small/new"].append(func)
-                else:
-                    pools["small/re"].append(func)
+                func.analyzed = name in done or name in seen_small
+                pools["small/re" if func.analyzed else "small/new"].append(func)
 
             for name in big_pool_names:
                 func = self._resolve_function(name)
-                if not func:
-                    continue
-                if not func.analyzed_by_logic_groups:
-                    pools["big/new"].append(func)
-                else:
-                    pools["big/re"].append(func)
+                func.analyzed = name in done or name in seen_any or name in seen_small
+                pools["big/re" if func.analyzed else "big/new"].append(func)
+
+            seen_small.update(small_pool_names)
+            seen_any.update(small_pool_names)
+            seen_any.update(big_pool_names)
 
             self.log_info(
                 f"    small/new={len(pools['small/new'])}, "
@@ -753,7 +737,7 @@ class POCFullscanStrategy(POCBaseStrategy):
 
         async def analyze_one(func, lg_id: str, index: int):
             async with semaphore:
-                set_vh_context(self.fuzzer, self.sanitizer, lg_id)
+                set_vh_context(lg_id=str(lg_id))
                 return await self._analyze_single_function_v2(
                     func=func,
                     index=global_index_start + index,
@@ -793,7 +777,7 @@ class POCFullscanStrategy(POCBaseStrategy):
         except Exception:
             pass
 
-        # Get function source - use DB content or fetch via tree-sitter fallback
+        # Function source: the graph's, else the analyzer's tree-sitter fallback
         func_source = func.content or ""
         if not func_source and self.executor.analysis_socket_path:
             try:
@@ -824,7 +808,7 @@ class POCFullscanStrategy(POCBaseStrategy):
                 fuzzer=self.fuzzer,
                 sanitizer=self.sanitizer,
                 model=model_for(Role.FINDER),
-                lg_id=lg_id,
+                lg_id=str(lg_id),
                 run_id=self.run_id,
                 worker_id=self.worker_id,
                 log_dir=agent_log_dir,
@@ -842,7 +826,7 @@ class POCFullscanStrategy(POCBaseStrategy):
                 fuzzer=self.fuzzer,
                 sanitizer=self.sanitizer,
                 model=model_for(Role.FINDER),
-                lg_id=lg_id,
+                lg_id=str(lg_id),
                 run_id=self.run_id,
                 worker_id=self.worker_id,
                 log_dir=agent_log_dir,
@@ -852,11 +836,20 @@ class POCFullscanStrategy(POCBaseStrategy):
         try:
             result = await agent.analyze_async()
 
-            # Mark function as analyzed by this logic group
-            if hasattr(func, "function_id") and func.function_id:
-                self.repos.functions.mark_analyzed_by_logic_group(
-                    func.function_id, lg_id
-                )
+            # This logic group has analysed this function.
+            agent_id = getattr(agent, "last_agent_id", None)
+            if agent_id:
+                try:
+                    get_store().record_function_analysis(
+                        lg_id,
+                        func.file_path or "?",
+                        func.name,
+                        func.start_line or 1,
+                        func.end_line or func.start_line or 1,
+                        agent_id,
+                    )
+                except Exception as e:
+                    self.log_warning(f"Could not record the analysis of {func.name}: {e}")
 
             func_duration = time.time() - func_start
             vh_status = "VH!" if result.get("vh_created") else "OK"
@@ -885,16 +878,14 @@ class POCFullscanStrategy(POCBaseStrategy):
             small_pool_total += len(logic_group.core_functions or [])
             small_pool_total += len(logic_group.entry_functions or [])
 
-        # Big pool stats
-        all_functions = self.repos.functions.find_by_run(self.run_id)
-        big_pool_total = len(all_functions) if all_functions else 0
-
-        # Analyzed counts
-        analyzed_count = sum(
-            1
-            for f in (all_functions or [])
-            if f.analyzed_by_logic_groups and len(f.analyzed_by_logic_groups) > 0
-        )
+        try:
+            big_pool_total = len(self.executor.graph.reachable_names(self.executor.graph_harness)) if self.executor.graph_harness else 0
+        except Exception:
+            big_pool_total = 0
+        try:
+            analyzed_count = len({n for (_f, n, _l) in get_store().analyzed_functions(self.worker_id)})
+        except Exception:
+            analyzed_count = 0
 
         self.log_info(f"  Small Pool: {small_pool_total} functions")
         self.log_info(f"  Big Pool: {big_pool_total} total reachable functions")
@@ -945,12 +936,11 @@ class POCFullscanStrategy(POCBaseStrategy):
             try:
                 seed_agent = SeedAgent(
                     run_id=self.run_id,
-                    worker_id=self.worker_id,  # ObjectId for MongoDB linking
+                    worker_id=self.worker_id,
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
                     model=model_for(Role.SEED),
                     fuzzer_manager=fuzzer_manager,
-                    repos=self.repos,
                     fuzzer_source=self.executor.harness_source(),  # full harness
                     log_dir=agent_log_dir,
                     max_iterations=20,
@@ -959,10 +949,10 @@ class POCFullscanStrategy(POCBaseStrategy):
                 )
 
                 result = await seed_agent.generate_logic_group_seeds(
-                    lg_id=logic_group.lg_id,
+                    lg_id=str(logic_group.id),
                     target_functions=logic_group.core_functions or [],
                     risk_level=logic_group.risk_level,
-                    risk_reason=logic_group.risk_reason or "",
+                    risk_reason=logic_group.summary or "",
                 )
                 return {"logic_group": logic_group, "result": result}
 

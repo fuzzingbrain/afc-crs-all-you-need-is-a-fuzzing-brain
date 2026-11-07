@@ -397,6 +397,31 @@ class BaseAgent(ABC):
             "Run ID": self.run_id,
         }
 
+    # llm_calls.role of each agent type (docs/db-design.md).
+    _ROLES = {
+        "LGPlanningAgent": "lg_planner",
+        "FullVHGenerator": "finder",
+        "LargeFullVHGenerator": "finder",
+        "DeltaVHGenerator": "finder",
+        "VHVerifier": "verifier",
+        "POCAgent": "poc",
+        "SeedAgent": "seed",
+        "POCReportAgent": "utility",
+    }
+
+    @property
+    def llm_role(self) -> str:
+        return self._ROLES.get(self.agent_name, "utility")
+
+    def _agent_row(self) -> Dict[str, Any]:
+        """What this agent works on, for its agents row: vh_id, lg_id,
+        crash_id or function (file, name, start line). Subclasses fill it."""
+        return {}
+
+    def _end_reason(self) -> Optional[str]:
+        """agents.end_reason (or cancelled / error) from how the loop ended."""
+        return self.stop_reason
+
     def _configure_context(self, ctx: AgentContext) -> None:
         """
         Configure agent context after creation. Subclasses should override to set
@@ -1082,7 +1107,7 @@ class BaseAgent(ABC):
             # Track tool call in AgentContext (persisted to MongoDB)
             if self._context:
                 self._context.increment_tool_calls()
-            self._record_tool_call(tool_name, True, latency_ms)
+            self._record_tool_call(tool_name, True, latency_ms, result=result_str)
 
             return result_str
 
@@ -1092,37 +1117,42 @@ class BaseAgent(ABC):
             # Track tool call in AgentContext even on failure
             if self._context:
                 self._context.increment_tool_calls()
+            failed = json.dumps({"success": False, "error": str(e)})
             self._record_tool_call(
-                tool_name, False, int((time.time() - t0) * 1000), error=str(e)
+                tool_name, False, int((time.time() - t0) * 1000), error=str(e),
+                result=failed,
             )
 
-            return json.dumps({"success": False, "error": str(e)})
+            return failed
 
     def _record_tool_call(
-        self, tool_name: str, success: bool, latency_ms: int, error: str = ""
+        self,
+        tool_name: str,
+        success: bool,
+        latency_ms: int,
+        error: str = "",
+        result: Optional[str] = None,
     ) -> None:
-        """File one tool call with the buffer that persists them.
+        """Queue a tool_calls row for the LLM call that asked for this tool.
 
-        The agent's own counter says how many tools it called; this says which,
-        how long each took and whether it worked -- the difference between a
-        number on a page and something that can be acted on. Best-effort: a
-        failure to record must not turn into a failed tool call.
+        Best-effort: a failure to record must not turn into a failed tool call.
         """
         try:
-            from ..llms.buffer import get_llm_call_buffer
+            from ..llms.buffer import get_worker_buffer
 
-            buffer = get_llm_call_buffer()
-            if buffer is None:
+            buffer = get_worker_buffer()
+            key = getattr(self, "_call_key", None)
+            if buffer is None or key is None:
                 return
-            ctx = self._context
+            message = None
+            if result is not None:
+                message = {
+                    "role": "tool",
+                    "tool_call_id": getattr(self, "_tool_call_id", None),
+                    "content": result,
+                }
             buffer.record_tool_call(
-                tool_name=tool_name,
-                success=success,
-                latency_ms=latency_ms,
-                run_id=getattr(ctx, "run_id", "") if ctx else "",
-                worker_id=getattr(ctx, "worker_id", "") if ctx else "",
-                agent_id=getattr(ctx, "agent_id", "") if ctx else "",
-                error=error,
+                key, tool_name, success, latency_ms, result=message, error=error or None
             )
         except Exception:
             pass
@@ -1228,6 +1258,7 @@ class BaseAgent(ABC):
                     model=self.model,
                     temperature=self.temperature,
                 )
+                self._call_key = getattr(response, "record_key", None)
             except Exception as e:
                 import traceback
 
@@ -1289,6 +1320,7 @@ class BaseAgent(ABC):
                     )
 
                     # Execute tool via MCP
+                    self._tool_call_id = tool_id
                     tool_result = await self._execute_tool(client, tool_name, tool_args)
                     self.total_tool_calls += 1
 
@@ -1346,6 +1378,8 @@ class BaseAgent(ABC):
             self._log(
                 f"Max iterations ({self.max_iterations}) reached", level="WARNING"
             )
+            if self.stop_reason is None:
+                self.stop_reason = "max_iterations"
             final_response = response.content if response else ""
 
         return final_response
@@ -1371,9 +1405,8 @@ class BaseAgent(ABC):
         initial_message = self.get_initial_message(**kwargs)
         self._log(f"Initial message: {initial_message[:500]}...", level="DEBUG")
 
-        # Create AgentContext for isolation and persistence
-        # This provides unique ObjectId and lifecycle management for each agent instance
-        # All state is persisted to MongoDB automatically
+        # The agents row is written when the context opens, so what the agent
+        # works on (_agent_row) has to be known before it does.
         with AgentContext(
             run_id=self.run_id,
             worker_id=self.worker_id,
@@ -1381,24 +1414,26 @@ class BaseAgent(ABC):
             target=self.target_name,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
+            **self._agent_row(),
         ) as ctx:
             self._context = ctx
             ctx.agent = self  # Back-reference for cancellation
-            agent_id = ctx.agent_id  # Use ObjectId from context
+            agent_id = ctx.agent_id
+            self.last_agent_id = agent_id
 
-            # Allow subclasses to configure context (set vh_id, lg_id, etc.)
+            # Subclasses register their tool state under the agent id.
             self._configure_context(ctx)
 
-            # Record the log location now, not at the end: the dashboard reads the
-            # transcript through it while the agent runs, and an agent that fails
-            # or is killed never reaches the end.
+            # Record the log location now, not at the end: the transcript is
+            # read through it while the agent runs.
             if self._log_file:
                 ctx.set_log_path(str(self._log_file))
 
-            # Update LLMClient with agent_id for call tracking
             self.llm_client.agent_id = agent_id
+            self.llm_client.worker_id = self.worker_id
+            self.llm_client.run_id = self.run_id
+            self.llm_client.role = self.llm_role
 
-            # Update VH context with agent_id for tracking VH creator/verifier
             from ..tools.vulnerability_hypotheses import set_vh_agent_id
             from ..tools.logic_groups import set_logic_group_agent_id
 
@@ -1455,13 +1490,8 @@ class BaseAgent(ABC):
                 async with Client(mcp_server) as client:
                     result = await self._run_agent_loop(client, initial_message)
 
-                # Update context with final stats (auto-persisted on exit)
                 ctx.iterations = self.total_iterations
                 ctx.tool_calls = self.total_tool_calls
-                ctx.result_summary = {
-                    "iterations": self.total_iterations,
-                    "tool_calls": self.total_tool_calls,
-                }
 
             except Exception as e:
                 self._log(f"Agent run failed: {e}", level="ERROR")
@@ -1469,7 +1499,11 @@ class BaseAgent(ABC):
 
                 self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
                 self.stop_reason = "error"  # Mark as actual failure
+                ctx.error = traceback.format_exc()
                 result = f"Agent failed: {e}"
+            finally:
+                ctx.iterations = self.total_iterations
+                ctx.stop_reason = self._end_reason()
 
         # Context exits here, automatically persisting to MongoDB
 

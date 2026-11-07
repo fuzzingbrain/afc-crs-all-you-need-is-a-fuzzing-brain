@@ -1,40 +1,51 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Run Processor
+Run processing: everything between reading the task and the final summary.
 
-Core business logic for processing FuzzingBrain runs.
-This module handles:
-1. Workspace setup and validation
-2. Repository cloning/setup
-3. Fuzzer discovery and building
-4. Run dispatch to workers
+    1. workspace: repo/, fuzz-tooling/, diff/ (delta), sanitised
+    2. build + index (the analyzer)
+    3. harnesses registered (one row each, with a binary per sanitizer and
+       the harness source), the graph registered against them
+    4. preflight (core/preflight.py): every check that can fail before money
+       is spent; results/preflight.json
+    5. one worker per harness, then wait for poc_target / budget / timeout
+    6. runs row closed, final summary from the database
 """
 
 import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime
+import traceback
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from bson import ObjectId
-
-from .logging import logger, create_final_summary, WorkerColors, get_log_dir
+from .logging import logger, final_summary, WorkerColors, get_log_dir
 from .config import Config
 from .workspace_guard import (
     assert_workspace_clean,
     format_banner,
     sanitize_workspace,
 )
-from .models import Run, RunStatus, Fuzzer, FuzzerStatus
-from ..db import RepositoryManager
+
+
+@dataclass
+class RunPaths:
+    """Where a run's inputs are laid out (filled in by WorkspaceSetup)."""
+
+    run_id: str
+    project_name: str
+    workspace_path: str = ""
+    src_path: str = ""
+    fuzz_tooling_path: str = ""
+    is_fuzz_tooling_provided: bool = False
 
 
 class WorkspaceSetup:
     """Lays out the run's output directory: repo/, fuzz-tooling/, results/, logs/."""
 
-    def __init__(self, config: Config, run: Run):
+    def __init__(self, config: Config, run: RunPaths):
         self.config = config
         self.run = run
 
@@ -159,930 +170,338 @@ class WorkspaceSetup:
         return True, "Ready"
 
 
-class FuzzerDiscovery:
+# ------------------------------------------------------------- harnesses
+
+_SOURCE_SUFFIXES = (".cc", ".cpp", ".c", ".cxx", ".c++")
+
+
+def _harness_name_candidates(name: str) -> List[str]:
+    """curl_fuzzer_ws -> [curl_fuzzer_ws, curl_fuzzer]: one source, many binaries."""
+    out = [name]
+    parts = name.split("_")[:-1]
+    while parts:
+        stem = "_".join(parts)
+        if "fuzz" not in stem and "harness" not in stem:
+            break
+        out.append(stem)
+        parts = parts[:-1]
+    return out
+
+
+def find_harness_source(
+    name: str, workspace: Path, project: str, reported: Optional[str] = None
+) -> Optional[str]:
+    """The harness's source on disk: the build's report, else a search of the
+    repo and the OSS-Fuzz project directory. None when there is none."""
+    if reported:
+        p = Path(reported)
+        if not p.is_absolute():
+            p = workspace / p
+        if p.is_file():
+            return str(p.resolve())
+    roots = [workspace / "repo", workspace / "fuzz-tooling" / "projects" / project]
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for stem in _harness_name_candidates(name):
+            for suffix in _SOURCE_SUFFIXES:
+                for hit in sorted(root.rglob(f"{stem}{suffix}")):
+                    if hit.is_file():
+                        return str(hit.resolve())
+    return None
+
+
+def register_harnesses(store, config: Config, run_id: str, analyze_result) -> list:
+    """One harnesses row per harness the run works on, with its binaries.
+
+    The build is authoritative for what exists. A name in config.fuzzers that
+    did not build, a harness missing a sanitizer's binary, or a harness with
+    no source anywhere stops the run: each would otherwise be a worker that
+    silently does nothing (or feeds its agents an empty harness).
     """
-    Multi-layer fuzzer discovery.
+    from .dispatcher import HarnessUnit
 
-    Layer 1: Pattern matching (fuzz_*.c, *_fuzzer.c, etc.)
-    Layer 2: LLVMFuzzerTestOneInput function search
-    Layer 3: Analyzer result fallback (handled in RunProcessor)
-    """
+    built: Dict[str, Dict[str, str]] = {}
+    reported: Dict[str, str] = {}
+    for fi in analyze_result.fuzzers:
+        built.setdefault(fi.name, {})[fi.sanitizer] = fi.binary_path
+        if fi.source_path and fi.name not in reported:
+            reported[fi.name] = fi.source_path
 
-    # Common fuzzer file patterns
-    FUZZER_PATTERNS = [
-        "fuzz_*.c",
-        "fuzz_*.cc",
-        "fuzz_*.cpp",
-        "*_fuzzer.c",
-        "*_fuzzer.cc",
-        "*_fuzzer.cpp",
-        "fuzzer_*.c",
-        "fuzzer_*.cc",
-        "fuzzer_*.cpp",
-    ]
-
-    def __init__(self, run: Run, config: Config, repos: RepositoryManager):
-        self.run = run
-        self.config = config
-        self.repos = repos
-
-    def discover_fuzzers(self) -> List[Fuzzer]:
-        """
-        Discover fuzzer source files using multi-layer approach.
-
-        Layer 1: Pattern matching on filenames
-        Layer 2: Search for LLVMFuzzerTestOneInput function
-
-        Returns:
-            List of Fuzzer objects
-        """
-        fuzzers = []
-        seen_names = set()
-
-        # Layer 1: Pattern matching
-        logger.info("Layer 1: Pattern matching for fuzzers")
-        self._discover_by_pattern(fuzzers, seen_names)
-
-        if fuzzers:
-            logger.info(f"Layer 1 found {len(fuzzers)} fuzzers")
-            return fuzzers
-
-        # Layer 2: LLVMFuzzerTestOneInput search
-        logger.info(
-            "Layer 1 found nothing, trying Layer 2: LLVMFuzzerTestOneInput search"
+    names = list(config.fuzzers) or sorted(built)
+    errors = []
+    missing = [n for n in names if n not in built]
+    if missing:
+        errors.append(f"fuzzers {missing} are not among the built harnesses {sorted(built)}")
+    project = config.ossfuzz_project_name or config.project_name
+    workspace = Path(config.workspace)
+    units = []
+    for name in names:
+        if name not in built:
+            continue
+        bins = built[name]
+        lacking = [s for s in config.sanitizers if s not in bins]
+        if lacking:
+            errors.append(f"harness {name!r} has no {lacking} binary")
+            continue
+        sources = config.fuzzer_sources.get(name) or []
+        source = sources[0] if sources else find_harness_source(
+            name, workspace, project, reported.get(name)
         )
-        self._discover_by_entry_point(fuzzers, seen_names)
+        if not source:
+            errors.append(
+                f"no source found for harness {name!r}; name it in fuzzer.sources"
+            )
+            continue
+        if not config.fuzzer_sources.get(name):
+            # The worker reads the harness for its agents from fuzzer_sources:
+            # an entry found here travels with the assignment.
+            config.fuzzer_sources[name] = [source]
+        binaries = {s: bins[s] for s in config.sanitizers}
+        hid = store.add_harness(run_id, name, source, binaries)
+        units.append(HarnessUnit(str(hid), name, binaries, list(config.sanitizers)))
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    if not units:
+        raise RuntimeError("no harness to run")
+    return units
 
-        if fuzzers:
-            logger.info(f"Layer 2 found {len(fuzzers)} fuzzers")
 
-        return fuzzers
+def register_graph(store, run_id: str, graph: dict, units: list) -> None:
+    if not graph:
+        return
+    by_name = {u.name: u.harness_id for u in units}
+    reach = {
+        by_name[h]: (int(v[0]), int(v[1]))
+        for h, v in (graph.get("harnesses") or {}).items()
+        if h in by_name
+    }
+    store.register_graph(
+        run_id,
+        commit=graph.get("commit") or "",
+        path=graph["path"],
+        content_sha256=graph["content_sha256"],
+        n_functions=int(graph.get("n_functions") or 0),
+        n_edges=int(graph.get("n_edges") or 0),
+        n_indirect_edges=int(graph.get("n_indirect_edges") or 0),
+        harness_reach=reach,
+    )
 
-    def _discover_by_pattern(self, fuzzers: List[Fuzzer], seen_names: set):
-        """Layer 1: Pattern matching on filenames"""
-        # Search in OSS-Fuzz project directory
-        if self.run.fuzz_tooling_path:
-            fuzz_tooling = Path(self.run.fuzz_tooling_path)
-            ossfuzz_project = self.config.ossfuzz_project_name or self.run.project_name
-            if ossfuzz_project:
-                project_dir = fuzz_tooling / "projects" / ossfuzz_project
-                if project_dir.exists():
-                    for pattern in self.FUZZER_PATTERNS:
-                        for fuzzer_file in project_dir.glob(pattern):
-                            self._add_fuzzer(
-                                fuzzers, seen_names, fuzzer_file, project_dir
-                            )
 
-        # Search in source repo
-        if self.run.src_path:
-            repo_path = Path(self.run.src_path)
-            if repo_path.exists():
-                for pattern in self.FUZZER_PATTERNS:
-                    for fuzzer_file in repo_path.glob(f"**/{pattern}"):
-                        self._add_fuzzer(fuzzers, seen_names, fuzzer_file, repo_path)
+# ------------------------------------------------------------- the run
 
-    def _discover_by_entry_point(self, fuzzers: List[Fuzzer], seen_names: set):
-        """Layer 2: Search for LLVMFuzzerTestOneInput function"""
-        import subprocess
-
-        search_paths = []
-
-        # Add OSS-Fuzz project directory
-        if self.run.fuzz_tooling_path:
-            fuzz_tooling = Path(self.run.fuzz_tooling_path)
-            ossfuzz_project = self.config.ossfuzz_project_name or self.run.project_name
-            if ossfuzz_project:
-                project_dir = fuzz_tooling / "projects" / ossfuzz_project
-                if project_dir.exists():
-                    search_paths.append(project_dir)
-
-        # Add source repo
-        if self.run.src_path:
-            repo_path = Path(self.run.src_path)
-            if repo_path.exists():
-                search_paths.append(repo_path)
-
-        for search_path in search_paths:
-            try:
-                # Use grep to find files containing LLVMFuzzerTestOneInput
-                result = subprocess.run(
-                    [
-                        "grep",
-                        "-rl",
-                        "--include=*.c",
-                        "--include=*.cc",
-                        "--include=*.cpp",
-                        "LLVMFuzzerTestOneInput",
-                        str(search_path),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-
-                if result.returncode == 0 and result.stdout.strip():
-                    for line in result.stdout.strip().split("\n"):
-                        fuzzer_file = Path(line.strip())
-                        if fuzzer_file.exists():
-                            self._add_fuzzer(
-                                fuzzers, seen_names, fuzzer_file, search_path
-                            )
-
-            except subprocess.TimeoutExpired:
-                logger.warning(f"Grep timeout searching in {search_path}")
-            except Exception as e:
-                logger.warning(f"Grep failed in {search_path}: {e}")
-
-    def _add_fuzzer(
-        self,
-        fuzzers: List[Fuzzer],
-        seen_names: set,
-        fuzzer_file: Path,
-        search_path: Path,
-    ):
-        """Add a fuzzer to the list if not already seen"""
-        fuzzer_name = fuzzer_file.stem
-        if fuzzer_name in seen_names:
-            return
-        seen_names.add(fuzzer_name)
-
-        try:
-            rel_path = str(fuzzer_file.relative_to(search_path))
-        except ValueError:
-            rel_path = str(fuzzer_file)
-
-        fuzzer = Fuzzer(
-            run_id=self.run.run_id,
-            fuzzer_name=fuzzer_name,
-            source_path=rel_path,
-            repo_name=self.run.project_name,
-            status=FuzzerStatus.PENDING,
-        )
-        fuzzers.append(fuzzer)
-        logger.info(f"Discovered fuzzer: {fuzzer_name} ({fuzzer_file})")
-
-    def save_fuzzers(self, fuzzers: List[Fuzzer]):
-        """Save discovered fuzzers to database"""
-        for fuzzer in fuzzers:
-            self.repos.fuzzers.save(fuzzer)
-            logger.debug(f"Saved fuzzer: {fuzzer.fuzzer_name}")
+# wait_for_completion's status -> (runs.status, runs.end_reason)
+_RUN_END = {
+    "poc_target_reached": ("completed", "poc_target"),
+    "timeout": ("completed", "timeout"),
+    "budget_exceeded": ("completed", "budget"),
+}
 
 
 class RunProcessor:
-    """
-    Main run processor.
-
-    Orchestrates the run processing pipeline:
-    1. Setup workspace
-    2. Clone repository
-    3. Discover fuzzers
-    4. Build fuzzers (TODO)
-    5. Dispatch workers (TODO)
-    """
-
-    def __init__(self, config: Config, repos: RepositoryManager):
-        """
-        Initialize run processor
-
-        Args:
-            config: Configuration object
-            repos: RepositoryManager instance (passed from main.py)
-        """
+    def __init__(self, config: Config, store):
         self.config = config
-        self.repos = repos
+        self.store = store
+        self.run_id = str(config.run_id)
+        self.paths = RunPaths(run_id=self.run_id, project_name=config.project_name)
+        self.project = config.ossfuzz_project_name or config.project_name
 
-    def _get_commit_hash(self) -> Optional[str]:
-        """
-        Get the current commit hash from the repo directory.
+    # ---------------------------------------------------------- workspace
 
-        Returns:
-            Commit hash string or None if not available
-        """
-        try:
-            # Try to get commit from workspace repo
-            repo_path = None
-            if self.config.workspace:
-                repo_path = Path(self.config.workspace) / "repo"
-            elif self.config.repo_path:
-                repo_path = Path(self.config.repo_path)
+    def _prepare_workspace(self) -> None:
+        setup = WorkspaceSetup(self.config, self.paths)
+        for step, fn in (
+            ("Workspace", setup.setup),
+            ("Source", setup.clone_repository),
+            ("Fuzz-tooling", setup.setup_fuzz_tooling),
+        ):
+            logger.info(f"{step}...")
+            ok, msg = fn()
+            if not ok:
+                raise RuntimeError(f"{step} setup failed: {msg}")
+        if self.config.scan_mode == "delta":
+            self._write_diff()
 
-            if repo_path and (repo_path / ".git").exists():
-                result = subprocess.run(
-                    ["git", "rev-parse", "HEAD"],
-                    cwd=repo_path,
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                if result.returncode == 0:
-                    return result.stdout.strip()
-
-            # Try fuzz-tooling repo as fallback (for OSS-Fuzz projects)
-            if self.config.workspace:
-                fuzz_tooling = Path(self.config.workspace) / "fuzz-tooling"
-                if (fuzz_tooling / ".git").exists():
-                    result = subprocess.run(
-                        ["git", "rev-parse", "HEAD"],
-                        cwd=fuzz_tooling,
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                    )
-                    if result.returncode == 0:
-                        return result.stdout.strip()
-
-            return None
-
-        except Exception as e:
-            logger.debug(f"Failed to get commit hash: {e}")
-            return None
-
-    def _log_fuzzer_summary(self, fuzzers: List[Fuzzer], project_name: str):
-        """Log a formatted summary of fuzzer build results"""
-        success_count = sum(1 for f in fuzzers if f.status == FuzzerStatus.SUCCESS)
-        total_count = len(fuzzers)
-
-        # Calculate box width
-        lines = []
-        for f in fuzzers:
-            lines.append(f"  Binary Path:  {f.binary_path or 'N/A'}")
-            lines.append(f"  Source Path:  {f.source_path or 'N/A'}")
-            lines.append(f"  Status:       {f.status.value}")
-
-        width = max(len(line) for line in lines) + 4 if lines else 60
-        width = max(width, 60)
-
-        # Build the box
-        box_lines = []
-        box_lines.append("")
-        box_lines.append("┌" + "─" * width + "┐")
-
-        # Header
-        header = f" {project_name} - Built {success_count}/{total_count} fuzzers "
-        box_lines.append("│" + header.center(width) + "│")
-        box_lines.append("├" + "─" * width + "┤")
-
-        # Each fuzzer
-        for i, f in enumerate(fuzzers):
-            status_icon = "✓" if f.status == FuzzerStatus.SUCCESS else "✗"
-            fuzzer_header = f" {status_icon} {f.fuzzer_name} "
-            box_lines.append("│" + fuzzer_header.ljust(width) + "│")
-            box_lines.append(
-                "│" + f"  Binary Path:  {f.binary_path or 'N/A'}".ljust(width) + "│"
-            )
-            box_lines.append(
-                "│" + f"  Source Path:  {f.source_path or 'N/A'}".ljust(width) + "│"
-            )
-            box_lines.append(
-                "│" + f"  Status:       {f.status.value}".ljust(width) + "│"
-            )
-
-            # Separator between fuzzers (except last)
-            if i < len(fuzzers) - 1:
-                box_lines.append("│" + "─" * width + "│")
-
-        box_lines.append("└" + "─" * width + "┘")
-        box_lines.append("")
-
-        # Log the box
-        for line in box_lines:
+        workspace = Path(self.paths.workspace_path)
+        # The checked-out revision, before remove_git takes the history away:
+        # preflight compares it with the commit the task named.
+        self.head_commit = self._git_head(workspace / "repo")
+        report = sanitize_workspace(
+            workspace,
+            remove_git=self.config.remove_git,
+            diff_ready=(workspace / "diff" / "ref.diff").exists()
+            if self.config.scan_mode == "delta"
+            else True,
+        )
+        for line in format_banner(
+            report, remove_git=self.config.remove_git, confined_to=f"{workspace.name}/repo"
+        ):
             logger.info(line)
+        assert_workspace_clean(workspace, require_no_git=self.config.remove_git)
 
-    def _log_dispatch_summary(self, jobs: List[dict], project_name: str):
-        """Log a formatted summary of dispatched workers as a table"""
-        if not jobs:
-            logger.info("No workers dispatched")
+    @staticmethod
+    def _git_head(repo: Path) -> Optional[str]:
+        if not (repo / ".git").exists():
+            return None
+        r = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    def _write_diff(self) -> None:
+        workspace = Path(self.paths.workspace_path)
+        diff_file = workspace / "diff" / "ref.diff"
+        if diff_file.exists():
             return
-
-        # Column widths
-        col_worker = 12
-        col_fuzzer = 28
-        col_sanitizer = 12
-        col_status = 10
-        col_worker_id = 45
-
-        # Total width = sum of columns + 4 internal separators (┬/┼)
-        total_width = (
-            col_worker + col_fuzzer + col_sanitizer + col_status + col_worker_id + 4
+        diff_file.parent.mkdir(parents=True, exist_ok=True)
+        delta = self.config.delta_commit or "HEAD"
+        r = subprocess.run(
+            ["git", "diff", f"{self.config.base_commit}..{delta}", "--", ".",
+             ":!.aixcc", ":!*/.aixcc"],
+            cwd=str(workspace / "repo"), capture_output=True, text=True, timeout=300,
         )
+        if r.returncode != 0:
+            raise RuntimeError(f"git diff failed: {r.stderr.strip()}")
+        if not r.stdout.strip():
+            raise RuntimeError(f"no changes between {self.config.base_commit} and {delta}")
+        diff_file.write_text(r.stdout)
+        logger.info(f"Diff: {self.config.base_commit[:12]}..{delta[:12]}")
 
-        # Build header lines (no color)
-        header_lines = []
-        header_lines.append("")
-        header_lines.append("┌" + "─" * total_width + "┐")
-        header = f" {project_name} - Dispatched {len(jobs)} Workers "
-        header_lines.append("│" + header.center(total_width) + "│")
-        header_lines.append(
-            "├"
-            + "─" * col_worker
-            + "┬"
-            + "─" * col_fuzzer
-            + "┬"
-            + "─" * col_sanitizer
-            + "┬"
-            + "─" * col_status
-            + "┬"
-            + "─" * col_worker_id
-            + "┤"
-        )
-        header_row = (
-            "│"
-            + " Worker".center(col_worker)
-            + "│"
-            + " Fuzzer".ljust(col_fuzzer)
-            + "│"
-            + " Sanitizer".ljust(col_sanitizer)
-            + "│"
-            + " Status".ljust(col_status)
-            + "│"
-            + " Worker ID".ljust(col_worker_id)
-            + "│"
-        )
-        header_lines.append(header_row)
-        header_lines.append(
-            "├"
-            + "─" * col_worker
-            + "┼"
-            + "─" * col_fuzzer
-            + "┼"
-            + "─" * col_sanitizer
-            + "┼"
-            + "─" * col_status
-            + "┼"
-            + "─" * col_worker_id
-            + "┤"
-        )
+    # ------------------------------------------------------------ analyzer
 
-        # Build data rows (colored and plain versions)
-        colored_rows = []
-        plain_rows = []
+    def _analyze(self):
+        from ..analyzer import AnalyzeRequest, AnalyzeResult
+        from ..analyzer.tasks import run_analyzer
 
-        for i, job in enumerate(jobs, 1):
-            fuzzer_name = (
-                job["fuzzer"][: col_fuzzer - 2]
-                if len(job["fuzzer"]) > col_fuzzer - 2
-                else job["fuzzer"]
-            )
-            display_name = job.get(
-                "display_name", f"{job['fuzzer']}_{job['sanitizer']}"
-            )
-            worker_id = (
-                display_name[: col_worker_id - 2]
-                if len(display_name) > col_worker_id - 2
-                else display_name
-            )
-
-            # Build cell content
-            worker_cell = f" Worker {i}".ljust(col_worker)
-            fuzzer_cell = " " + fuzzer_name.ljust(col_fuzzer - 1)
-            sanitizer_cell = " " + job["sanitizer"].ljust(col_sanitizer - 1)
-            status_cell = " " + "PENDING".ljust(col_status - 1)
-            id_cell = " " + worker_id.ljust(col_worker_id - 1)
-
-            # Plain row (for log file)
-            plain_row = (
-                "│"
-                + worker_cell
-                + "│"
-                + fuzzer_cell
-                + "│"
-                + sanitizer_cell
-                + "│"
-                + status_cell
-                + "│"
-                + id_cell
-                + "│"
-            )
-            plain_rows.append(plain_row)
-
-            # Colored row (for console)
-            color = WorkerColors.get(i - 1)
-            reset = WorkerColors.RESET
-            colored_row = (
-                "│"
-                + color
-                + worker_cell
-                + reset
-                + "│"
-                + color
-                + fuzzer_cell
-                + reset
-                + "│"
-                + color
-                + sanitizer_cell
-                + reset
-                + "│"
-                + color
-                + status_cell
-                + reset
-                + "│"
-                + color
-                + id_cell
-                + reset
-                + "│"
-            )
-            colored_rows.append(colored_row)
-
-        # Footer
-        footer = (
-            "└"
-            + "─" * col_worker
-            + "┴"
-            + "─" * col_fuzzer
-            + "┴"
-            + "─" * col_sanitizer
-            + "┴"
-            + "─" * col_status
-            + "┴"
-            + "─" * col_worker_id
-            + "┘"
-        )
-
-        # Output table - separate handling for console (colored) and file (plain)
-        import sys
-
-        # Print colored version to console
-        for line in header_lines:
-            sys.stderr.write(line + "\n")
-        for row in colored_rows:
-            sys.stderr.write(row + "\n")
-        sys.stderr.write(footer + "\n")
-        sys.stderr.write("\n")
-        sys.stderr.flush()
-
-        # Write plain version to log file
         log_dir = get_log_dir()
-        if log_dir:
-            log_file = log_dir / "fuzzingbrain.log"
-            with open(log_file, "a", encoding="utf-8") as f:
-                for line in header_lines:
-                    f.write(line + "\n")
-                for row in plain_rows:
-                    f.write(row + "\n")
-                f.write(footer + "\n")
-                f.write("\n")
+        request = AnalyzeRequest(
+            run_id=self.run_id,
+            workspace_path=self.paths.workspace_path,
+            project_name=self.project,
+            sanitizers=self.config.sanitizers,
+            language="c",
+            ossfuzz_project_name=self.config.ossfuzz_project_name,
+            log_dir=str(log_dir) if log_dir else None,
+            graph_path=self.config.graph,
+            fuzzer_sources=self.config.fuzzer_sources,
+            build_coverage=self.config.build_coverage,
+            prebuilt_fuzzers=self.config.prebuilt_binaries,
+        )
+        logger.info(f"Analyzer: sanitizers={self.config.sanitizers} (this may take a while)")
+        result = AnalyzeResult.from_dict(run_analyzer(request.to_dict()))
+        if not result.success:
+            raise RuntimeError(f"Code Analyzer failed: {result.error_msg}")
+        logger.info(
+            f"Analyzer: {len(result.fuzzers)} binaries, {result.reachable_functions_count} "
+            f"functions, build {result.build_duration_seconds:.0f}s"
+        )
+        if result.coverage_fuzzer_path:
+            from ..tools.coverage import set_coverage_fuzzer_path
 
-    def process(self, run: Run) -> dict:
-        """
-        Process a run.
+            set_coverage_fuzzer_path(result.coverage_fuzzer_path)
+        return result
 
-        Args:
-            run: Run to process
+    # ---------------------------------------------------------------- run
 
-        Returns:
-            Result dictionary with run_id, status, message
-        """
-        logger.info(f"Processing run: {run.run_id}")
-
-        # Save run to database
-        run.mark_running()
-        self.repos.runs.save(run)
-
+    def process(self) -> dict:
+        logger.info(f"Processing run {self.run_id}")
         try:
-            # Step 1: Setup workspace
-            logger.info("Step 1: Setting up workspace")
-            workspace_setup = WorkspaceSetup(self.config, run)
+            self._prepare_workspace()
 
-            success, msg = workspace_setup.setup()
-            if not success:
-                raise Exception(f"Workspace setup failed: {msg}")
+            from .fuzzer_spec import runner_image
 
-            # Step 2: Clone repository
-            logger.info("Step 2: Cloning repository")
-            success, msg = workspace_setup.clone_repository()
-            if not success:
-                raise Exception(f"Repository clone failed: {msg}")
-
-            # Step 3: Setup fuzz-tooling
-            logger.info("Step 3: Setting up fuzz-tooling")
-            success, msg = workspace_setup.setup_fuzz_tooling()
-            if not success:
-                raise Exception(f"Fuzz-tooling setup failed: {msg}")
-
-            # Update run in database with new paths
-            self.repos.runs.save(run)
-
-            # Step 3.5: Generate diff for delta scan (before build to fail fast)
-            if self.config.scan_mode == "delta" and self.config.base_commit:
-                diff_path = Path(run.workspace_path) / "diff"
-                diff_file = diff_path / "ref.diff"
-
-                if not diff_file.exists():
-                    logger.info("Generating diff for delta scan...")
-                    diff_path.mkdir(parents=True, exist_ok=True)
-
-                    repo_path = Path(run.workspace_path) / "repo"
-                    delta_commit = self.config.delta_commit or "HEAD"
-
-                    try:
-                        import subprocess
-
-                        result = subprocess.run(
-                            [
-                                "git",
-                                "diff",
-                                f"{self.config.base_commit}..{delta_commit}",
-                                "--",
-                                ".",
-                                ":!.aixcc",
-                                ":!*/.aixcc",
-                            ],
-                            cwd=str(repo_path),
-                            capture_output=True,
-                            text=True,
-                        )
-                        if result.returncode == 0:
-                            diff_content = result.stdout
-                            if diff_content.strip():
-                                diff_file.write_text(diff_content)
-                                logger.info(
-                                    f"Generated diff: {self.config.base_commit[:8]}..{delta_commit[:8] if delta_commit != 'HEAD' else 'HEAD'}"
-                                )
-                            else:
-                                raise Exception(
-                                    f"No changes between {self.config.base_commit[:8]} and {delta_commit[:8] if delta_commit != 'HEAD' else 'HEAD'}"
-                                )
-                        else:
-                            raise Exception(f"git diff failed: {result.stderr}")
-                    except Exception as e:
-                        raise Exception(f"Failed to generate diff for delta scan: {e}")
-
-            # Step 4: Discover fuzzers
-            if self.config.fuzzers:
-                # Use explicitly specified fuzzers from config
-                logger.info(
-                    f"Step 4: Using {len(self.config.fuzzers)} fuzzers from config"
+            if not self.config.docker_image:
+                self.config.docker_image = runner_image(
+                    Path(self.paths.fuzz_tooling_path), self.project
                 )
-                fuzzers = []
-                for fuzzer_name in self.config.fuzzers:
-                    fuzzer = Fuzzer(
-                        run_id=run.run_id,
-                        fuzzer_name=fuzzer_name,
-                        repo_name=run.project_name,
-                        status=FuzzerStatus.PENDING,
-                    )
-                    fuzzers.append(fuzzer)
-                    self.repos.fuzzers.save(fuzzer)
-                    logger.info(f"  - {fuzzer_name}")
-            else:
-                logger.info("Step 4: Discovering fuzzers")
-                fuzzer_discovery = FuzzerDiscovery(run, self.config, self.repos)
-                fuzzers = fuzzer_discovery.discover_fuzzers()
+                logger.info(f"Runner image: {self.config.docker_image}")
 
-                if not fuzzers:
-                    logger.warning("No fuzzers found in workspace")
-                else:
-                    logger.info(f"Found {len(fuzzers)} fuzzers")
-                    fuzzer_discovery.save_fuzzers(fuzzers)
-
-            # Sanitisation belongs here rather than at any one entry point,
-            # because this pipeline is what every entry point funnels through:
-            # the shell wrapper's plain-URL and flag forms, a JSON task file,
-            # the REST API, the MCP server. Wiring it into a single entry point
-            # covered the JSON form and silently left the plain-URL form -- the
-            # first example in the README -- running against a workspace that
-            # still held its own answer. It sits after Step 3.5 so a delta run's
-            # diff already exists, and before the build so nothing is compiled
-            # from a tree that has not been cleaned.
-            workspace_path = Path(run.workspace_path)
-            diff_ready = (workspace_path / "diff" / "ref.diff").exists()
-            report = sanitize_workspace(
-                workspace_path,
-                remove_git=self.config.remove_git,
-                diff_ready=diff_ready if self.config.scan_mode == "delta" else True,
-            )
-            logger.info("Workspace posture")
-            for line in format_banner(
-                report,
-                remove_git=self.config.remove_git,
-                confined_to=f"{workspace_path.name}/repo",
-            ):
-                logger.info(line)
-
-            # Then refuse to proceed if anything survived. This raises rather
-            # than warns on purpose -- a run that looks successful while its
-            # findings are worthless is the exact failure being prevented, and
-            # it is what caught the gap described above.
-            assert_workspace_clean(
-                workspace_path,
-                require_no_git=self.config.remove_git,
-            )
-
-            # Step 5: Run Code Analyzer (build + static analysis)
-            from ..analyzer import AnalyzeRequest, AnalyzeResult
-            from ..analyzer.tasks import run_analyzer
-
-            project_name = self.config.ossfuzz_project_name or run.project_name
-            analyze_result = None
-
-            logger.info("Step 5: Running Code Analyzer")
-
-            # Create analyze request
-            log_dir = get_log_dir()
-            analyze_request = AnalyzeRequest(
-                run_id=run.run_id,
-                workspace_path=run.workspace_path,
-                project_name=project_name,
-                sanitizers=self.config.sanitizers,
-                language="c",  # TODO: detect language
-                ossfuzz_project_name=self.config.ossfuzz_project_name,
-                log_dir=str(log_dir) if log_dir else None,
-                graph_path=self.config.graph,
-                fuzzer_sources=self.config.fuzzer_sources,
-                build_coverage=self.config.build_coverage,
-                prebuilt_fuzzers=self.config.prebuilt_binaries,
-            )
-
-            logger.info(f"Analyzer request: sanitizers={self.config.sanitizers}")
-            logger.info("Waiting for Analyzer to complete (this may take a while)...")
-
-            result_dict = run_analyzer(analyze_request.to_dict())
-
-            analyze_result = AnalyzeResult.from_dict(result_dict)
-
-            if not analyze_result.success:
-                raise Exception(f"Code Analyzer failed: {analyze_result.error_msg}")
-
-            logger.info(
-                f"Analyzer completed: {len(analyze_result.fuzzers)} fuzzers built"
-            )
-            logger.info(f"Build duration: {analyze_result.build_duration_seconds:.1f}s")
-            logger.info(
-                f"Static analysis: {analyze_result.reachable_functions_count} functions"
-            )
-
-            # Set shared coverage fuzzer path for tools
-            if analyze_result.coverage_fuzzer_path:
-                from ..tools.coverage import set_coverage_fuzzer_path
-
-                set_coverage_fuzzer_path(analyze_result.coverage_fuzzer_path)
-                logger.info(
-                    f"Coverage fuzzer path set: {analyze_result.coverage_fuzzer_path}"
-                )
-
-            # Update fuzzer status in database based on Analyzer result
-            built_fuzzer_names = analyze_result.get_fuzzer_names()
-
-            # Layer 3: If discovery (Layer 1 & 2) found nothing, create from analyzer results
-            if not fuzzers and analyze_result.fuzzers:
-                logger.info("Layer 3: Creating fuzzers from analyzer build results")
-                seen_names = set()
-                for fi in analyze_result.fuzzers:
-                    if fi.name in seen_names:
-                        continue
-                    seen_names.add(fi.name)
-                    fuzzer = Fuzzer(
-                        run_id=run.run_id,
-                        fuzzer_name=fi.name,
-                        source_path="",  # Unknown from build output
-                        repo_name=run.project_name,
-                        status=FuzzerStatus.SUCCESS,
-                        binary_path=fi.binary_path,
-                    )
-                    fuzzers.append(fuzzer)
-                    self.repos.fuzzers.save(fuzzer)
-                logger.info(f"Layer 3 created {len(fuzzers)} fuzzers from analyzer")
-            else:
-                # Normal path: update discovered fuzzers with build status
-                for fuzzer in fuzzers:
-                    if fuzzer.fuzzer_name in built_fuzzer_names:
-                        fuzzer.status = FuzzerStatus.SUCCESS
-                        for fi in analyze_result.fuzzers:
-                            if fi.name == fuzzer.fuzzer_name:
-                                fuzzer.binary_path = fi.binary_path
-                                break
-                    else:
-                        fuzzer.status = FuzzerStatus.FAILED
-                        fuzzer.error_msg = "Not found in build output"
-                    self.repos.fuzzers.save(fuzzer)
-
-                # The build is authoritative for what actually exists. Add any
-                # fuzzer that built but discovery missed - e.g. a harness that
-                # lives outside repo/ (imported bring-your-own-harness targets),
-                # which repo pattern-matching cannot see. Without this, a target
-                # whose only built fuzzer was not pattern-discovered dispatches
-                # zero workers.
-                discovered_names = {f.fuzzer_name for f in fuzzers}
-                for fi in analyze_result.fuzzers:
-                    if fi.name in discovered_names:
-                        continue
-                    fuzzer = Fuzzer(
-                        run_id=run.run_id,
-                        fuzzer_name=fi.name,
-                        source_path="",
-                        repo_name=run.project_name,
-                        status=FuzzerStatus.SUCCESS,
-                        binary_path=fi.binary_path,
-                    )
-                    fuzzers.append(fuzzer)
-                    self.repos.fuzzers.save(fuzzer)
-                    logger.info(f"Added built-but-undiscovered fuzzer: {fi.name}")
-
-            successful_fuzzers = [
-                f for f in fuzzers if f.status == FuzzerStatus.SUCCESS
-            ]
-
-            # Log fuzzer build summary
-            self._log_fuzzer_summary(fuzzers, project_name)
-
-            # Store analyze_result for dispatcher to use
-            self._analyze_result = analyze_result
-
-            # Step 6: Start infrastructure
-            logger.info("Step 6: Starting infrastructure")
-            from .infrastructure import InfrastructureManager
-
-            log_dir = get_log_dir()
-            # This is the number that decides how many workers run at
-            # once -- it overrides the one in celery_app's settings, so
-            # that one is not the answer to "what is our concurrency".
-            infra = InfrastructureManager(
-                redis_url=self.config.redis_url,
-                concurrency=self.config.concurrency.celery_workers,
-                run_id=run.run_id,
-            )
-            if not infra.start(log_dir=str(log_dir) if log_dir else None):
-                raise Exception("Failed to start infrastructure (Redis/Celery)")
-
+            analyze_result = self._analyze()
             try:
-                # Step 7: Dispatch workers
-                logger.info("Step 7: Dispatching workers")
-                from .dispatcher import WorkerDispatcher
-
-                dispatcher = WorkerDispatcher(
-                    run,
-                    self.config,
-                    self.repos,
-                    analyze_result=self._analyze_result,
-                    celery_queue=infra.queue_name,
-                )
-                jobs = dispatcher.dispatch(fuzzers)
-
-                if not jobs:
-                    raise Exception("No workers were dispatched")
-
-                # Log dispatch summary
-                self._log_dispatch_summary(jobs, project_name)
-
-                # Mark run as running
-                run.status = RunStatus.RUNNING
-                run.updated_at = datetime.now()
-                self.repos.runs.save(run)
-
-                # Step 8: Wait for completion
-                logger.info("Step 8: Waiting for workers to complete")
-                result = dispatcher.wait_for_completion(
-                    timeout_minutes=self.config.timeout_minutes
-                )
-
-                # Mark run as complete
-                if result["status"] == "completed":
-                    if result["failed"] == 0:
-                        run.mark_completed()
-                    else:
-                        run.mark_error(f"{result['failed']} workers failed")
-                elif result["status"] == "poc_target_reached":
-                    run.mark_completed()
-                    logger.info(
-                        f"Run completed: PoC target reached ({result.get('poc_count', 0)} PoCs)"
-                    )
-                elif result["status"] == "budget_exceeded":
-                    run.mark_error(result.get("error", "Budget limit exceeded"))
-                    logger.warning(
-                        f"Run stopped: {result.get('error', 'Budget limit exceeded')}"
-                    )
-                else:
-                    run.mark_error(f"Timeout after {self.config.timeout_minutes} minutes")
-
-                # Use update() instead of save() to avoid overwriting
-                # llm_cost/llm_calls fields that buffer.$inc has accumulated
-                updates = {
-                    "status": run.status.value,
-                    "updated_at": run.updated_at,
-                }
-                if run.error_msg:
-                    updates["error_msg"] = run.error_msg
-                self.repos.runs.update(run.run_id, updates)
-
-                # Redis counter cleanup is handled by WorkerContext.__exit__
-
-                # Get worker results for summary
-                worker_results = dispatcher.get_results()
-
-                # Count merged duplicates for dedup stats
-                dedup_count = 0
-                try:
-                    vhs_with_merges = (
-                        self.repos.vulnerability_hypotheses.find_with_merged_duplicates(
-                            run.run_id
-                        )
-                    )
-                    for vh in vhs_with_merges:
-                        dedup_count += len(vh.merged_duplicates)
-                except Exception as e:
-                    logger.warning(f"Failed to count merged duplicates: {e}")
-
-                # Read cost from database
-                run_doc = self.repos.runs.collection.find_one(
-                    {"_id": ObjectId(run.run_id)},
-                    {"llm_cost": 1},
-                )
-                total_cost = (run_doc or {}).get("llm_cost", 0.0)
-
-                # Create and output final summary with worker colors via loguru
-                summary = create_final_summary(
-                    project_name=project_name,
-                    run_id=run.run_id,
-                    workers=worker_results,
-                    total_elapsed_minutes=result.get("elapsed_minutes", 0),
-                    use_color=True,
-                    dedup_count=dedup_count,
-                    total_cost=total_cost,
-                    budget_limit=self.config.budget_limit,
-                    exit_reason=result.get("status", "completed"),
-                    verified_pocs=result.get("poc_count"),
-                )
-                # Reset terminal settings before output (subprocess may have changed them)
-                os.system("stty sane 2>/dev/null")
-
-                # Print clean summary to console without log prefixes to avoid wrapping
-                # Add ANSI reset at the end to ensure terminal state is restored
-                sys.stdout.write("\n" + summary + "\n\033[0m")
-                sys.stdout.flush()
-
-                # Append plain summary (no ANSI codes) to log file for record
-                log_dir = get_log_dir()
-                if log_dir:
-                    plain_summary = WorkerColors.strip(summary)
-                    with open(
-                        Path(log_dir) / "fuzzingbrain.log", "a", encoding="utf-8"
-                    ) as f:
-                        f.write("\n" + plain_summary + "\n")
-
-                logger.info("Final summary written to console and log file")
-
-                return {
-                    "run_id": run.run_id,
-                    "status": result["status"],
-                    "message": f"Completed {result['completed']}/{result['total']} workers",
-                    "workspace": run.workspace_path,
-                    "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
-                    "workers": worker_results,
-                    "elapsed_minutes": result.get("elapsed_minutes", 0),
-                }
-
+                return self._run(analyze_result)
             finally:
-                # Close cached LLM httpx clients (prevents SSL transport warnings)
                 from ..llms import LLMClient
+                from ..analyzer.tasks import stop_analysis_server
 
                 LLMClient.close_all()
-
-                # Stop Analysis Server
-                if run and run.workspace_path:
-                    from ..analyzer.tasks import stop_analysis_server
-
-                    logger.info("Stopping Analysis Server...")
-                    stop_analysis_server(run.workspace_path)
-
-                # Stop infrastructure
-                infra.stop()
-
+                stop_analysis_server(self.paths.workspace_path)
         except Exception as e:
-            logger.exception(f"Run processing failed: {e}")
-            run.mark_error(str(e))
-            self.repos.runs.update(
-                run.run_id,
-                {
-                    "status": run.status.value,
-                    "error_msg": run.error_msg,
-                    "updated_at": run.updated_at,
-                },
+            logger.exception(f"Run failed: {e}")
+            try:
+                self.store.end_run(self.run_id, "error", error=traceback.format_exc())
+            except Exception as db_err:
+                logger.error(f"Could not close the run row: {db_err}")
+            return {"run_id": self.run_id, "status": "error", "message": str(e)}
+
+    def _run(self, analyze_result) -> dict:
+        units = register_harnesses(self.store, self.config, self.run_id, analyze_result)
+        register_graph(self.store, self.run_id, analyze_result.graph, units)
+        logger.info("Harnesses: " + ", ".join(f"{u.name} {sorted(u.binaries)}" for u in units))
+
+        from .preflight import run_preflight
+
+        report = run_preflight(
+            self.config, units, analyze_result,
+            head_commit=getattr(self, "head_commit", None),
+            out_dir=Path(self.paths.workspace_path),
+        )
+        if not report["ok"]:
+            raise RuntimeError("preflight failed: " + "; ".join(report["failures"]))
+
+        from .infrastructure import InfrastructureManager
+        from .dispatcher import WorkerDispatcher
+
+        log_dir = get_log_dir()
+        infra = InfrastructureManager(
+            redis_url=self.config.redis_url,
+            concurrency=self.config.concurrency.celery_workers,
+            run_id=self.run_id,
+        )
+        if not infra.start(log_dir=str(log_dir) if log_dir else None):
+            raise RuntimeError("Failed to start infrastructure (Redis/Celery)")
+        try:
+            dispatcher = WorkerDispatcher(
+                self.run_id, self.config, self.store, units,
+                analyze_result=analyze_result, celery_queue=infra.queue_name,
             )
+            jobs = dispatcher.dispatch()
+            self.store.run_dispatched(self.run_id)
+            for j in jobs:
+                logger.info(f"  worker {j['worker_id'][:8]}  {j['fuzzer']}  {j['sanitizers']}")
 
+            result = dispatcher.wait_for_completion(timeout_minutes=self.config.timeout_minutes)
+            status, end_reason = _RUN_END[result["status"]]
+            self.store.end_run(self.run_id, status, end_reason=end_reason)
+
+            summary = final_summary(
+                self.store, self.run_id, self.project, end_reason,
+                elapsed_minutes=result.get("elapsed_minutes", 0),
+                budget_limit=self.config.budget_limit,
+                use_color=sys.stdout.isatty(),
+            )
+            os.system("stty sane 2>/dev/null")
+            sys.stdout.write("\n" + summary + "\n\033[0m")
+            sys.stdout.flush()
+            if log_dir:
+                with open(Path(log_dir) / "fuzzingbrain.log", "a", encoding="utf-8") as f:
+                    f.write("\n" + WorkerColors.strip(summary) + "\n")
             return {
-                "run_id": run.run_id,
-                "status": "error",
-                "message": str(e),
+                "run_id": self.run_id,
+                "status": result["status"],
+                "message": f"{end_reason}: {result.get('poc_count', 0)} distinct bug(s), "
+                           f"{result['completed']}/{result['total']} workers completed",
+                "workspace": self.paths.workspace_path,
+                "fuzzers": [u.name for u in units],
+                "elapsed_minutes": result.get("elapsed_minutes", 0),
+                "poc_count": result.get("poc_count", 0),
             }
+        except KeyboardInterrupt:
+            self.store.end_run(self.run_id, "cancelled")
+            raise
+        finally:
+            infra.stop()
 
 
-def process_run(run: Run, config: Config, repos: RepositoryManager = None) -> dict:
-    """
-    Process a run - main entry point.
-
-    Args:
-        run: Run to process
-        config: Configuration
-        repos: RepositoryManager instance (optional, gets global instance from main.py if not provided)
-
-    Returns:
-        Result dictionary
-    """
-    # Get from global if repos not provided
-    if repos is None:
-        from ..main import get_repos
-
-        repos = get_repos()
-
-    processor = RunProcessor(config, repos)
-    return processor.process(run)
+def process_run(config: Config, store) -> dict:
+    return RunProcessor(config, store).process()
