@@ -187,6 +187,12 @@ checked again for its key source.
 
 ## What it did on its first live runs
 
+**Discovery** (zlib, 1.2 min, one session): asked for two targets, proposed
+`inflateBack` (raw DEFLATE through the callback API, over
+`/src/zlib_uncompress3_fuzzer.cc`) and `gzread` (the gzip reader, driving
+`gz_look` / `gz_decomp` / `inflate`, over `/src/gzio_fuzzer.c`) -- both real
+parser surfaces, each mapped to a source build.sh already compiles.
+
 **Harness generation** (zlib, `compress2`, one target, 11.6 min, 3 sessions):
 the researcher produced a 12.8 KB API report citing file:line throughout; the
 generator built a three-phase harness -- a round trip with an oracle, the
@@ -220,7 +226,7 @@ not a bug.
 ## Tests
 
 ```sh
-python -m pytest            # 227 tests, no docker, no network, no agent
+python -m pytest            # 249 tests, no docker, no network, no agent
 python -m pytest -m docker  # 6 more that really build and run containers (~30s)
 ```
 
