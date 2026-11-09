@@ -576,9 +576,14 @@ class DirectedRun:
     # -- the scheduler -------------------------------------------------------------------
 
     def _schedule(self) -> None:
-        """One pool, two lanes. The frontier lane keeps a breaker running to grow A;
-        the bug lane drains the priority queue under a per-role cap, so verify and
-        PoC never starve behind a crowd of finders (and the reverse)."""
+        """One pool, two lanes. The bug lane drains the priority queue under a
+        per-role cap, so verify and PoC never starve behind a crowd of finders
+        (and the reverse). The frontier lane grows A with a breaker, but only
+        when the bug lane has nothing to run: the breaker exists to open ground
+        *for* the finders, so taking a slot while they queue defeats it. Three
+        live runs showed the cost -- a breaker held the single slot for 657s and
+        left its finders 30 seconds, and in another the finders never ran at
+        all while 200 functions sat in the queue."""
         slots = {"finder": max(1, self.cfg.finder_slots), "verifier": max(1, self.cfg.verifier_slots),
                  "poc": max(1, self.cfg.poc_slots), "fp_seed": max(1, self.cfg.fp_seed_slots)}
         sem = {r: threading.Semaphore(n) for r, n in slots.items()}
@@ -594,7 +599,9 @@ class DirectedRun:
         refresh = threading.Thread(target=self._coverage_refresh, daemon=True,
                                    name=f"cov-{self.lg.name}")
         refresh.start()
-        rounds, inflight = 0, set()
+        rounds: int = 0
+        inflight: set[Future] = set()
+        breaker_futures: set[Future] = set()
 
         def done(fut: Future, release) -> None:
             release()
@@ -603,13 +610,16 @@ class DirectedRun:
 
         try:
             while self._left() > 150:
-                if breaker_slots and (self.cfg.breaker_max_rounds == 0
-                                      or rounds < self.cfg.breaker_max_rounds):
+                bug_lane_idle = self._bugq.empty() and not any(
+                    not f.done() and f not in breaker_futures for f in inflight)
+                if breaker_slots and bug_lane_idle and (
+                        self.cfg.breaker_max_rounds == 0 or rounds < self.cfg.breaker_max_rounds):
                     if breaker_sem.acquire(blocking=False):
                         if self._enough_time("breaker"):
                             fut = pool.submit(self._breaker)
                             fut.add_done_callback(lambda f: done(f, breaker_sem.release))
                             inflight.add(fut)
+                            breaker_futures.add(fut)
                             rounds += 1
                         else:
                             breaker_sem.release()
@@ -631,6 +641,7 @@ class DirectedRun:
                 for item in deferred:
                     self._bugq.put(item)
                 inflight = {f for f in inflight if not f.done()}
+                breaker_futures &= inflight
                 if not progressed:
                     time.sleep(2.0)
             self._stop_threads.set()

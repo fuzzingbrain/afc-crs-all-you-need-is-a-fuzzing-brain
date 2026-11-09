@@ -621,3 +621,44 @@ def test_each_role_tells_the_pool_how_much_time_it_needs(tmp_path):
     run._finder({"name": "f", "file": "/src/a.c", "start_line": 1, "end_line": 9})
     role, bar = pool.min_runtimes[-1]
     assert role == "finder" and bar == max(150.0, run.task.agents.roles["finder"].timeout_s / 3)
+
+
+def test_the_breaker_waits_until_the_bug_lane_is_idle(tmp_path, monkeypatch):
+    """It exists to open ground for the finders; taking the only slot while they
+    queue is what left one run with 200 functions queued and zero analysed."""
+    run, pool, store = make(tmp_path, breaker=True)
+    run.ws.path("out/coverage").mkdir(parents=True, exist_ok=True)
+    (run.ws.path("out/coverage") / "fuzz").write_bytes(b"\x7fELF")  # a coverage build exists
+    order = []
+    monkeypatch.setattr(run, "_breaker", lambda: order.append("breaker"))
+    monkeypatch.setattr(run, "_coverage_refresh", lambda: None)
+
+    def finder(fn):
+        order.append("finder:" + fn["name"])
+        if len(order) >= 2:
+            run.stop_flag.set()  # end the stage once both have run
+
+    monkeypatch.setattr(run, "_finder", finder)
+    run._enqueue(1, run._finder, {"name": "a"})
+    run._enqueue(1, run._finder, {"name": "b"})
+    run._deadline = time.monotonic() + 3600
+    run._schedule()
+    # every queued finder ran, and the breaker never took the slot from them
+    assert sorted(order) == ["finder:a", "finder:b"]
+
+
+def test_the_breaker_runs_when_nothing_else_needs_the_slot(tmp_path, monkeypatch):
+    run, pool, store = make(tmp_path, breaker=True)
+    run.ws.path("out/coverage").mkdir(parents=True, exist_ok=True)
+    (run.ws.path("out/coverage") / "fuzz").write_bytes(b"\x7fELF")
+    ran = []
+
+    def breaker():
+        ran.append("breaker")
+        run.stop_flag.set()
+
+    monkeypatch.setattr(run, "_breaker", breaker)
+    monkeypatch.setattr(run, "_coverage_refresh", lambda: None)
+    run._deadline = time.monotonic() + 3600  # the breaker needs a third of its budget
+    run._schedule()
+    assert ran == ["breaker"]
