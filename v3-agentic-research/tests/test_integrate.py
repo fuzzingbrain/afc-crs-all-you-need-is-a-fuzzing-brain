@@ -270,3 +270,15 @@ def test_a_plain_tree_needs_no_project_image(tmp_path, stages, ok):
     else:
         with pytest.raises(ConfigError, match="builder_image"):
             Task.from_dict(data)
+
+
+def test_a_vanished_container_is_not_blamed_on_the_harness(tmp_path, monkeypatch):
+    """A workspace container can be OOM-killed or cleaned away mid-run."""
+    stage, pool, store, ws, _ = make(tmp_path, monkeypatch, functions=8, max_rounds=2)
+    ws.smoke = "Error: No such container: fbv3-ws-5d4910024f\n"
+    pool.files["integrator"] = submission(tmp_path)
+    stage.run(Target("mylib_parse"))
+    assert store.harness_rounds("integrate")[0]["verdict"] == "infra"
+    second = pool.prompts[1][2]
+    assert "INFRA:" in second and "Nothing is wrong with your build" in second
+    assert "barely covers anything" not in second  # not blamed for reachability either

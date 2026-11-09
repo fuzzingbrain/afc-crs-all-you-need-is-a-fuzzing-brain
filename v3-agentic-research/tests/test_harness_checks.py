@@ -154,3 +154,13 @@ def test_the_smoke_script_bounds_the_run():
     script = smoke.script("/ws/builds/b1/out/fuzz", "/ws/logs/smoke-x", 30)
     assert "-max_total_time=30" in script and "timeout 60 " in script
     assert "-detect_leaks=0" in script  # no leak challenges: a leak is not the bug we want
+
+
+def test_docker_failing_is_not_a_verdict_on_the_harness():
+    for text in ("Error: No such container: fbv3-ws-abc",
+                 "Cannot connect to the Docker daemon at unix:///var/run/docker.sock",
+                 "Error response from daemon: container abc is not running"):
+        out = smoke.judge(text, seconds=10, min_edges=20, min_exec_s=10, harness_names=[])
+        assert out["verdict"] == "no_run"  # judge alone cannot tell
+        assert smoke.infra_failure(text)   # but this can
+    assert not smoke.infra_failure(LIBFUZZER_OUT)

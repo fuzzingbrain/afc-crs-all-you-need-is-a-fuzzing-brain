@@ -24,6 +24,11 @@ RATE = re.compile(r"\bexec/s:?\s*(\d+)")
 RUN_ENV = {"ASAN_OPTIONS": "detect_leaks=0:symbolize=1:abort_on_error=0:handle_abort=1:allocator_may_return_null=1",
            "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1", "MSAN_OPTIONS": "halt_on_error=1"}
 SYMBOLIZER = "/ws/out/llvm/llvm-symbolizer"
+# docker itself failing is not a verdict on the harness. A workspace container
+# can be gone -- OOM-killed by the host, removed by a cleanup -- and blaming the
+# agent for it sends it to fix code that was never the problem.
+INFRA_MARKERS = ("No such container", "Cannot connect to the Docker daemon",
+                 "is not running", "No space left on device", "OCI runtime")
 
 
 def run_env(have_symbolizer: bool = True) -> dict:
@@ -71,12 +76,25 @@ def script(binary: str, corpus: str, seconds: int) -> str:
             f"2>&1 | tail -c 60000")
 
 
+def infra_failure(text: str) -> str:
+    """The infrastructure error in this output, if that is what went wrong."""
+    for m in INFRA_MARKERS:
+        if m in text:
+            return m
+    return ""
+
+
 def smoke(run: Callable[[str, int], tuple[int, str]], *, binary: str, work_dir: str, seconds: int,
           min_edges: int, min_exec_s: int, harness_names: list[str]) -> dict:
     """``run(shell_script, timeout_s) -> (exit_code, output)`` runs in the workspace container."""
     seconds = max(5, min(int(seconds), 300))
     corpus = f"{work_dir}/smoke-{uuid.uuid4().hex[:6]}"
     _, text = run(script(binary, corpus, seconds), seconds + 60)
+    infra = infra_failure(text)
+    if infra:
+        return {"verdict": "infra", "edges": 0, "exec_s": 0, "detail": f"the smoke run could not start: {infra}",
+                "stats": {}, "signature": "", "seconds": seconds, "infra": infra,
+                "output_tail": text[-2000:]}
     out = judge(text, seconds=seconds, min_edges=min_edges, min_exec_s=min_exec_s, harness_names=harness_names)
     out["seconds"] = seconds
     out["output_tail"] = text[-(5000 if out["verdict"] in ("crash", "no_run") else 1500):]

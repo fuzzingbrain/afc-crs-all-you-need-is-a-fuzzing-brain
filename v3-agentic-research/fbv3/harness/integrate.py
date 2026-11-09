@@ -164,6 +164,10 @@ class IntegrateStage:
                  binary_container=f"/ws/out/address/{binary}", harness_names=[binary])
         record = {"stage": "gate", "functions": len(rows), "files": len(files),
                   "coverage_out": cov.out_dir, "coverage_binary": cov.binary, "gate": g}
+        if g.get("infra"):
+            return ({"stage": "infra", "error": g["infra"]},
+                    "INFRA: the smoke run could not start (" + g["infra"] + "). Nothing is wrong with "
+                    "your build as far as this tells us; it will be retried.")
         errors = [f for f in g["findings"] if f["severity"] == "error"]
         if errors:
             return record, ("The first harness has a defect the checks reject:\n"

@@ -78,6 +78,10 @@ def gate(ws: Workspace, task: Task, *, code: str, binary_container: str, harness
 
     sm = smoke(run, binary=binary_container, work_dir="/ws/logs", seconds=hc.smoke_seconds,
                min_edges=hc.min_edges, min_exec_s=hc.min_exec_s, harness_names=harness_names)
+    if sm["verdict"] == "infra":
+        # Nothing was learned about the harness, so it is neither passed nor failed.
+        return {"passed": False, "reviewable": False, "infra": sm.get("infra", "docker"),
+                "findings": findings, "smoke": sm}
     passed = not errors and sm["verdict"] in ("ok", "slow")
     # A crash at smoke time is either a harness bug or a real shallow bug: the
     # reviewer decides, so it does not fail the gate on its own.
