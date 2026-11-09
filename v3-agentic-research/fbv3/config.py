@@ -34,10 +34,11 @@ from pathlib import Path
 
 BACKENDS = ("claude", "codex")
 ROLES = (
+    "integrator",  # writes build.sh for a plain source tree
     "discoverer", "researcher", "harness", "reviewer",  # harness generation
     "seed", "mapper", "breaker", "finder", "verifier", "poc", "fp_seed",  # directed
 )
-STAGES = ("discovery", "harness", "directed")
+STAGES = ("integrate", "discovery", "harness", "directed")
 SANITIZERS = ("address", "memory", "undefined")
 ENGINES = ("libfuzzer", "afl")
 LANGUAGES = ("c", "c++")
@@ -68,6 +69,7 @@ def _default_roles() -> dict[str, RoleConfig]:
     # limit), while the mapper, the finder, the discoverer and the researcher
     # ran on codex in those same runs without trouble.
     return {
+        "integrator": RoleConfig("claude", timeout_s=3600, max_turns=120),
         "discoverer": RoleConfig("codex", timeout_s=1200, max_turns=60),
         "researcher": RoleConfig("codex", timeout_s=1200, max_turns=60),
         "harness": RoleConfig("claude", timeout_s=1800, max_turns=80),
@@ -124,6 +126,27 @@ class Prebuilt:
     entries: tuple[str, ...] = ()
     engine: str = "libfuzzer"
     sanitizer: str = "address"
+
+
+@dataclass
+class IntegrateConfig:
+    """Teaching a plain source tree to build a fuzz target.
+
+    The agent writes ``build.sh`` (reusing the project's own OSS-Fuzz
+    integration when the tree has one) and the first harness; ``compile`` in
+    the base image runs it, which is what supplies the sanitizer flags and the
+    fuzzing engine.
+    """
+
+    base_image: str = "gcr.io/oss-fuzz-base/base-builder:ubuntu-24-04"
+    max_rounds: int = 4
+    # Coverage guards per function. Instrumented projects measure ~19-20; a
+    # build that instrumented only the harness collapses below one.
+    min_guards_per_function: float = 3.0
+    allow_network: bool = False  # a build that fetches dependencies is not reproducible
+    build_timeout_s: int = 3600
+    build_memory_mb: int = 8192
+    build_cpus: float = 4.0
 
 
 @dataclass
@@ -188,9 +211,11 @@ class Task:
     language: str = "c"
     engine: str = "libfuzzer"
     output: str = ""  # run directory; default runs/<name>-<stamp>
+    source_dir: str = ""  # a plain source tree, for the integrate stage
     stages: tuple[str, ...] = ("harness", "directed")
     targets: list[Target] = field(default_factory=list)
     prebuilt: list[Prebuilt] = field(default_factory=list)
+    integrate: IntegrateConfig = field(default_factory=IntegrateConfig)
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     harness: HarnessConfig = field(default_factory=HarnessConfig)
     directed: DirectedConfig = field(default_factory=DirectedConfig)
@@ -208,7 +233,7 @@ class Task:
     def from_dict(cls, data: dict) -> "Task":
         data = dict(data)
         sub = {
-            "discovery": DiscoveryConfig, "harness": HarnessConfig,
+            "integrate": IntegrateConfig, "discovery": DiscoveryConfig, "harness": HarnessConfig,
             "directed": DirectedConfig, "limits": LimitsConfig,
         }
         kw = {}
@@ -241,8 +266,12 @@ class Task:
             raise ConfigError(f"language must be one of {LANGUAGES} (C/C++ only for now)")
         if self.engine not in ENGINES:
             raise ConfigError(f"engine must be one of {ENGINES}")
-        if ("harness" in self.stages or "discovery" in self.stages) and not self.builder_image:
-            raise ConfigError("the harness/discovery stages need builder_image (an OSS-Fuzz project image)")
+        if "integrate" in self.stages and not self.source_dir:
+            raise ConfigError("the integrate stage needs source_dir (a C/C++ source tree)")
+        needs_image = {"harness", "discovery"} & set(self.stages)
+        if needs_image and not self.builder_image and "integrate" not in self.stages:
+            raise ConfigError(f"the {'/'.join(sorted(needs_image))} stage(s) need builder_image (an "
+                              "OSS-Fuzz project image), or the integrate stage to build the tree")
         if "harness" in self.stages and not self.targets and "discovery" not in self.stages:
             raise ConfigError("the harness stage needs targets, or the discovery stage to find them")
         if "directed" in self.stages and "harness" not in self.stages and not self.prebuilt:

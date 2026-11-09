@@ -576,6 +576,62 @@ def submit_harness(notes: str = "") -> dict:
 
 
 @recorded
+def build_project(build_sh: str, harness_path: str, harness_code: str, target_name: str = "") -> dict:
+    """Run your build.sh over the source tree and report what happened.
+
+    build_sh: the whole script. It runs through the fuzzing toolchain's `compile`, so $CC, $CXX,
+    $CFLAGS, $CXXFLAGS, $LIB_FUZZING_ENGINE and $OUT are set; the working directory is a writable
+    copy of the tree. harness_path: where to put your harness, relative to the tree root (e.g.
+    "fuzz/parse_fuzzer.c"). target_name: the file name to produce in $OUT (default: the harness's
+    stem). The reply carries the compiler errors when it fails; fix and call again.
+    """
+    from fbv3.build.workspace_build import build_workspace
+
+    n = len(list(Path(CTX["builds_dir"]).glob("i*"))) + 1
+    bdir = Path(CTX["builds_dir"]) / f"i{n:02d}-{CTX['session_id'][:6]}"
+    res = build_workspace(
+        base_image=CTX["base_image"], source_dir=Path(CTX["source_dir"]), build_sh=build_sh,
+        harness_files={harness_path: harness_code}, build_dir=bdir, sanitizer="address",
+        engine="libfuzzer", language=CTX.get("language", "c"), run_id=CTX.get("run_id", ""),
+        timeout_s=int(CTX.get("build_timeout_s", 3600)), memory_mb=int(CTX.get("build_memory_mb", 8192)),
+        cpus=float(CTX.get("build_cpus", 4.0)), allow_network=bool(CTX.get("allow_network", False)),
+        expected_binary=target_name or Path(harness_path).stem)
+    rec = {"ts": _now(), "n": n, "ok": res.ok, "binary": res.binary, "binaries": res.binaries,
+           "error": res.error, "infra": res.infra, "build_dir": str(bdir),
+           "harness_path": harness_path, "target_name": target_name}
+    if res.ok:
+        (_out() / "last_build.json").write_text(json.dumps(
+            {**rec, "build_sh": build_sh, "harness_code": harness_code}, indent=2) + "\n")
+    _append(_out() / "builds.jsonl", rec)
+    reply = {"ok": res.ok, "binary": res.binary, "fuzz_targets_found": res.binaries, "error": res.error}
+    if not res.ok:
+        reply["build_log_excerpt"] = res.log_excerpt
+        if res.infra:
+            reply["note"] = "this failure is infrastructure, not your build; retrying once is reasonable"
+    else:
+        reply["note"] = ("it builds. Before you submit, make sure the LIBRARY was compiled with $CFLAGS "
+                         "-- a build that only instruments the harness passes this step and then finds "
+                         "nothing, and the gate after you submit will reject it.")
+    return reply
+
+
+@recorded
+def submit_build(notes: str = "") -> dict:
+    """Submit your last successful build. notes: how the library is built, where the flags go in,
+    and anything a later harness author needs to know."""
+    last = _last_integrate_build()
+    if not last.get("ok"):
+        return {"ok": False, "error": "nothing to submit: no successful build yet (call build_project)"}
+    (_out() / "build.json").write_text(json.dumps({**last, "notes": notes}, indent=2) + "\n")
+    return {"ok": True, "submitted": last["binary"], "harness_path": last["harness_path"]}
+
+
+def _last_integrate_build() -> dict:
+    p = _out() / "last_build.json"
+    return json.loads(p.read_text()) if p.is_file() else {}
+
+
+@recorded
 def submit_review(verdict: str, violations: list[dict], feedback: str, probes: str = "") -> dict:
     """Finish the review with ONE call.
 
@@ -624,7 +680,7 @@ def submit_targets(targets: list[dict]) -> dict:
 TOOLS = {f.__name__: f for f in (
     exec, run_target, reach_probe, create_seed, coverage_frontier, submit_functions, submit_vh,
     submit_verdict, create_poc, submit_poc, list_build_targets, build_harness, smoke_test, run_harness,
-    submit_harness, submit_review, submit_report, submit_targets)}
+    submit_harness, submit_review, submit_report, submit_targets, build_project, submit_build)}
 
 
 def main() -> None:

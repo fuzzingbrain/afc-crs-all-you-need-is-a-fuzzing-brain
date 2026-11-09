@@ -80,9 +80,9 @@ def test_msan_principles_only_appear_for_an_msan_build():
 
 
 def test_every_role_has_tools_and_every_tool_exists():
-    assert set(prompts.ROLE_TOOLS) == set(
-        ["discoverer", "researcher", "harness", "reviewer", "seed", "fp_seed", "mapper", "breaker",
-         "finder", "verifier", "poc"])
+    from fbv3.config import ROLES
+
+    assert set(prompts.ROLE_TOOLS) == set(ROLES)  # every role can act
     for role, tools in prompts.ROLE_TOOLS.items():
         assert tools, role
         for tool in tools:

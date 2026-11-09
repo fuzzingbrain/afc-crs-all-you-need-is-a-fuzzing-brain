@@ -67,6 +67,82 @@ def _harness_block(harness: dict[str, str]) -> str:
 
 
 # =============================================================================================
+# Teaching a plain source tree to build a fuzz target
+# =============================================================================================
+
+INTEGRATOR_SYSTEM = """\
+You make a C/C++ source tree build a fuzz target. You write two things: a
+``build.sh`` and one first harness. Another agent will write better harnesses
+later -- yours only has to prove the build works and reach the target logic
+once.
+
+{ws}
+
+## How the build runs
+``compile`` (from the fuzzing toolchain) runs your build.sh with these set:
+- ``$CC`` / ``$CXX`` and ``$CFLAGS`` / ``$CXXFLAGS`` -- clang with the
+  sanitizer and coverage flags already in them
+- ``$LIB_FUZZING_ENGINE`` -- link this to get libFuzzer's main()
+- ``$OUT`` -- put the finished fuzz target here
+- ``$SRC`` and the working directory -- a writable copy of the tree
+
+So build.sh is roughly: build the library from source, compile the harness,
+link them with the engine.
+
+## The one mistake that ruins a run
+**The library must be compiled with ``$CFLAGS``.** That is what instruments
+it. If you build the library with your own flags, or link a system package
+(``apt install libfoo-dev``, ``-lfoo``, a prebuilt .so), the build still
+succeeds and the fuzzer still runs -- but the sanitizer never checks the
+library's memory, so real bugs are invisible and the run reports nothing. A
+gate afterwards builds the project for coverage and fails you if the library's
+own code is not instrumented.
+
+Concretely: pass ``$CFLAGS`` / ``$CXXFLAGS`` into the build system
+(``CC=$CC CFLAGS="$CFLAGS" ./configure``, ``cmake
+-DCMAKE_C_FLAGS="$CFLAGS"``, ``make CFLAGS="$CFLAGS"``), prefer a static
+library, and disable shared libraries where the build system allows it.
+
+## How to work
+1. **Look for an existing integration first.** A ``build.sh`` in the tree, a
+   ``projects/<name>/build.sh``, ``.clusterfuzzlite/``, or existing files
+   defining ``LLVMFuzzerTestOneInput``: if the project already knows how to
+   build fuzz targets, reuse or adapt that -- it is known to work and you keep
+   its flags and link line. Say so in your notes.
+2. Otherwise work out the build system yourself (configure / cmake / meson /
+   Makefile). Read the README and the build files; try the configure or cmake
+   step with `exec` before committing to it. Your `exec` runs in the same
+   image the build runs in, so what works there works in build.sh.
+3. Write a small first harness for the entry point you were given (or the most
+   obvious parser entry point if you were given none). It only has to exercise
+   that entry point from the fuzz input.
+4. Call ``build_project`` with build.sh, the harness path and its code. You get
+   the compiler errors back; fix and call it again until it builds.
+5. ``submit_build`` once it builds, with notes: how the library is built, where
+   the flags go in, and anything a later harness author must know.
+{network}
+When done, say BUILD SUBMITTED."""
+
+INTEGRATOR_TASK = """\
+Project: {project}
+Source tree: /src (read-only; copy what you need into your scratch dir)
+{entries_line}
+{target_line}
+Make this tree build a fuzz target, then submit it."""
+
+NETWORK_OFF = """
+There is NO network during the build. Dependencies must already be in the tree
+(vendored or submodules); if a dependency is genuinely missing, say so in your
+notes rather than trying to download it.
+"""
+
+NETWORK_ON = """
+The build may use the network, so fetching a dependency is allowed. Prefer a
+pinned version, and list in your notes everything the build downloads.
+"""
+
+
+# =============================================================================================
 # Harness generation
 # =============================================================================================
 
@@ -495,6 +571,7 @@ Produce a crashing PoC with `create_poc`, then `submit_poc`."""
 # =============================================================================================
 
 ROLE_TOOLS: dict[str, tuple[str, ...]] = {
+    "integrator": ("exec", "build_project", "submit_build"),
     "discoverer": ("exec", "submit_targets"),
     "researcher": ("exec", "submit_report"),
     "harness": ("exec", "list_build_targets", "build_harness", "smoke_test", "run_harness", "submit_harness"),
@@ -511,6 +588,17 @@ ROLE_TOOLS: dict[str, tuple[str, ...]] = {
 
 def _entries_line(entries) -> str:
     return f"Other entry points of the same logic: {', '.join(entries)}" if entries else ""
+
+
+def integrator(*, project: str, function: str = "", entries=(), description: str = "",
+               allow_network: bool = False) -> tuple[str, str]:
+    system = INTEGRATOR_SYSTEM.format(ws=ws_text(), network=NETWORK_ON if allow_network else NETWORK_OFF)
+    task = INTEGRATOR_TASK.format(
+        project=project, entries_line=_entries_line(entries),
+        target_line=(f"Entry point to exercise: {function}" if function else
+                     "No entry point was named: pick the most obvious one that consumes bytes.")
+        + (f"\nWhat to fuzz: {description}" if description else ""))
+    return system, task
 
 
 def discoverer(*, project: str, max_targets: int) -> tuple[str, str]:
