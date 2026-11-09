@@ -147,7 +147,7 @@ def test_view_renders_a_result(tmp_path, capsys):
         "distinct_bugs": 1}))
     assert cli.main(["view", str(tmp_path)]) == 0
     text = capsys.readouterr().out
-    assert "heap-buffer-overflow" in text and "1 distinct crash" in text
+    assert "heap-buffer-overflow" in text and "1 distinct bug" in text
     assert cli.main(["view", str(tmp_path), "--json"]) == 0
 
 

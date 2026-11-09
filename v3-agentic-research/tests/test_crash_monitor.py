@@ -203,3 +203,58 @@ def test_a_leak_is_not_counted(tmp_path):
     m, store = monitor(tmp_path)
     assert m.handle("global", artifact(tmp_path), output=leak) is None
     assert m.skipped == {"memory-leak": 1}
+
+
+STACK_OVERFLOW_A = """\
+==1==ERROR: AddressSanitizer: stack-overflow on address 0x7ffd
+    #0 0x1 in skip_array_like<char> /src/toml11/scanner.hpp:40:5
+    #1 0x2 in skip_array_like<char> /src/toml11/scanner.hpp:40:5
+    #2 0x3 in parse_value /src/toml11/parser.hpp:900:3
+SUMMARY: AddressSanitizer: stack-overflow /src/toml11/scanner.hpp:40:5 in skip_array_like<char>
+"""
+STACK_OVERFLOW_B = """\
+==1==ERROR: AddressSanitizer: stack-overflow on address 0x7ffe
+    #0 0x9 in allocate /usr/lib/allocator.h:105:9
+    #1 0x1 in skip_inline_table<char> /src/toml11/scanner.hpp:77:5
+    #2 0x2 in skip_array_like<char> /src/toml11/scanner.hpp:40:5
+    #3 0x3 in skip_inline_table<char> /src/toml11/scanner.hpp:77:5
+    #4 0x4 in skip_array_like<char> /src/toml11/scanner.hpp:40:5
+SUMMARY: AddressSanitizer: stack-overflow /usr/lib/allocator.h:105:9 in allocate
+"""
+
+
+def test_the_recursion_cycle_is_recorded_for_a_stack_overflow(tmp_path):
+    from fbv3.fuzz import signature as sigmod
+
+    assert sigmod.recursion_cycle(STACK_OVERFLOW_A, ["fuzz"]) == ["skip_array_like<char>"]
+    assert sigmod.recursion_cycle(STACK_OVERFLOW_B, ["fuzz"]) == [
+        "skip_array_like<char>", "skip_inline_table<char>"]
+    m, store = monitor(tmp_path)
+    m.handle("global", artifact(tmp_path, "a"), output=STACK_OVERFLOW_A)
+    assert store.crashes()[0]["cycle"] == ["skip_array_like<char>"]
+
+
+def test_one_unbounded_recursion_is_one_bug_however_many_signatures(tmp_path):
+    """toml11 gave two signatures for one defect: the stack ran out in different
+    places, so the top frames differed."""
+    from fbv3 import report
+
+    m, store = monitor(tmp_path)
+    a = m.handle("global", artifact(tmp_path, "a"), output=STACK_OVERFLOW_A)
+    b = m.handle("poc", artifact(tmp_path, "b"), output=STACK_OVERFLOW_B)
+    assert a["signature"] != b["signature"]  # two signatures
+    s = report.summarize(store, elapsed_s=1)
+    assert s["distinct_signatures"] == 2
+    assert s["distinct_bugs"] == 1  # but one defect
+    assert s["recursion_groups"] == [[a["signature"], b["signature"]]]
+    assert "share a recursion cycle" in report.render(s)
+
+
+def test_unrelated_crashes_are_not_merged(tmp_path):
+    from fbv3 import report
+
+    m, store = monitor(tmp_path)
+    m.handle("global", artifact(tmp_path, "a"), output=STACK_OVERFLOW_A)
+    m.handle("global", artifact(tmp_path, "b"), output=ASAN)  # a heap overflow, no cycle
+    s = report.summarize(store, elapsed_s=1)
+    assert s["distinct_bugs"] == 2 and s["recursion_groups"] == []

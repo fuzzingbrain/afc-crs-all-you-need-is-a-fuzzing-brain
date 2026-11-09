@@ -280,9 +280,12 @@ class CrashMonitor:
         saved = self.save_dir / f"{sig.short}-{art.name}"
         if not saved.exists():
             shutil.copyfile(art, saved)
+        cycle = (sigmod.recursion_cycle(output, self.harness_names)
+                 if sig.crash_class in ("stack-overflow", "segv") else [])
         crash_id, new = self.store.add_crash(
             self.lg, sig.key, sig.short, crash_class=sig.crash_class, source=source, vh_id=vh_id,
-            artifact=str(saved), top_frames=[list(f) for f in sig.frames[:5]], output_tail=output[-8000:])
+            artifact=str(saved), top_frames=[list(f) for f in sig.frames[:5]], cycle=cycle,
+            output_tail=output[-8000:])
         rec = {"crash_id": crash_id, "new": new, "signature": sig.short, "key": sig.key,
                "crash_class": sig.crash_class, "describe": sig.describe(), "artifact": str(saved)}
         if new:

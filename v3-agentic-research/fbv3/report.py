@@ -8,6 +8,31 @@ import time
 from pathlib import Path
 
 
+def merge_recursions(crashes: list[dict]) -> list[list[dict]]:
+    """Group crashes that are one unbounded-recursion defect seen several ways.
+
+    A stack overflow's top frames are wherever the stack ran out, so the
+    signature splits one recursive scanner into several "distinct" crashes.
+    toml11 gave two: one cycling through skip_array_like, one through
+    skip_inline_table_like and skip_array_like together -- one defect, two
+    signatures. Crashes whose recursion cycles share a function are grouped;
+    everything else stands alone.
+    """
+    groups: list[list[dict]] = []
+    for c in crashes:
+        cycle = set(c.get("cycle") or [])
+        if not cycle:
+            groups.append([c])
+            continue
+        for g in groups:
+            if any(cycle & set(o.get("cycle") or []) for o in g):
+                g.append(c)
+                break
+        else:
+            groups.append([c])
+    return groups
+
+
 def _bucket(rows: list[dict], key: str) -> dict[str, int]:
     out: dict[str, int] = {}
     for r in rows:
@@ -54,7 +79,12 @@ def summarize(store, *, status: str = "", end_reason: str = "", stages: list[str
             "by_status": _bucket(sessions, "status"),
             "agent_minutes": round(sum(s["duration_s"] or 0 for s in sessions) / 60.0, 1),
         },
-        "distinct_bugs": len({c["signature_short"] for c in crashes}),
+        # One unbounded recursion can produce several signatures; counting them
+        # separately overstates what was found.
+        "distinct_bugs": len(merge_recursions(crashes)),
+        "distinct_signatures": len({c["signature_short"] for c in crashes}),
+        "recursion_groups": [[c["signature_short"] for c in g] for g in merge_recursions(crashes)
+                             if len(g) > 1],
     }
 
 
@@ -113,7 +143,11 @@ def render(summary: dict) -> str:
     lines.append(f"\nVHs: {v['total']} total, {v['with_poc']} with a PoC"
                  + (f"  ({', '.join(f'{k} {n}' for k, n in v['by_status'].items())})" if v["by_status"] else ""))
     if s["crashes"]:
-        lines.append(f"\n{s['distinct_bugs']} distinct crash(es)")
+        head = f"\n{s['distinct_bugs']} distinct bug(s)"
+        if s.get("distinct_signatures", 0) > s["distinct_bugs"]:
+            head += (f" from {s['distinct_signatures']} signatures "
+                     f"({len(s.get('recursion_groups') or [])} group(s) share a recursion cycle)")
+        lines.append(head)
         for c in s["crashes"]:
             lines.append(f"  [{c['signature']}] {c['class'] or '?'}  {c['where']}  (via {c['source']})")
     else:

@@ -144,6 +144,23 @@ def _is_runtime_frame(func: str, path: str, harness_names: Sequence[str]) -> boo
     return bool(re.search(r"(?:_fuzzer|_fuzz|fuzz_target)\.(?:c|cc|cpp)$", base))
 
 
+def recursion_cycle(output: str, harness_names: Optional[Sequence[str]] = None) -> List[str]:
+    """The functions that repeat in the stack: the cycle an unbounded recursion runs in.
+
+    A stack overflow's top frames are wherever the stack happened to run out,
+    so they do not identify the defect -- two overflows in one recursive
+    scanner come out as different signatures. What identifies it is the cycle.
+    """
+    harness_names = list(harness_names or [])
+    seen: dict = {}
+    for m in _FRAME.finditer(output):
+        func, path = m.group(1), m.group(2) or ""
+        if _is_runtime_frame(func, path, harness_names):
+            continue
+        seen[func] = seen.get(func, 0) + 1
+    return sorted(f for f, n in seen.items() if n > 1)
+
+
 def extract_class(output: str) -> str:
     """The sanitizer's name for what went wrong."""
     m = _ASAN_ERROR.search(output)

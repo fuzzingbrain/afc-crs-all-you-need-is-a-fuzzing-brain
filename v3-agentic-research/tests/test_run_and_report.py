@@ -181,7 +181,7 @@ def test_render_mentions_the_crashes_and_the_failures(tmp_path):
     s = report.summarize(store, status="completed", stages=["directed"], elapsed_s=60)
     s["sessions"]["by_status"]["timeout"] = 2
     text = report.render(s)
-    assert "1 distinct crash" in text and "heap-buffer-overflow" in text
+    assert "1 distinct bug" in text and "heap-buffer-overflow" in text
     assert "session failures: timeout 2" in text
     s["crashes"] = []
     assert "no crashes" in report.render(s)

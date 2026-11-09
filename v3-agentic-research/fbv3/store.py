@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS vh_events (
 );
 CREATE TABLE IF NOT EXISTS crashes (
   id TEXT PRIMARY KEY, lg TEXT NOT NULL, signature TEXT NOT NULL, signature_short TEXT NOT NULL,
-  crash_class TEXT, source TEXT, vh_id TEXT, artifact TEXT, top_frames TEXT, output_tail TEXT,
+  crash_class TEXT, source TEXT, vh_id TEXT, artifact TEXT, top_frames TEXT, cycle TEXT, output_tail TEXT,
   created_at REAL NOT NULL, UNIQUE (lg, signature_short)
 );
 CREATE TABLE IF NOT EXISTS seeds (
@@ -259,10 +259,10 @@ class Store:
         with self._lock:
             cur = self._x(
                 "INSERT OR IGNORE INTO crashes (id, lg, signature, signature_short, crash_class, source, vh_id,"
-                " artifact, top_frames, output_tail, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " artifact, top_frames, cycle, output_tail, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (cid, lg, signature, signature_short, f.get("crash_class"), f.get("source"), f.get("vh_id"),
-                 f.get("artifact"), json.dumps(f.get("top_frames") or []), (f.get("output_tail") or "")[-8000:],
-                 _now()),
+                 f.get("artifact"), json.dumps(f.get("top_frames") or []),
+                 json.dumps(f.get("cycle") or []), (f.get("output_tail") or "")[-8000:], _now()),
             )
             new = cur.rowcount == 1
             if not new:
@@ -278,6 +278,7 @@ class Store:
                           (lg,) if lg else ())
         for r in rows:
             r["top_frames"] = json.loads(r["top_frames"] or "[]")
+            r["cycle"] = json.loads(r["cycle"] or "[]")
         return rows
 
     # -- seeds and coverage ---------------------------------------------------------------------
