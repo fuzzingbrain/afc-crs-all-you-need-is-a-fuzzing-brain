@@ -23,6 +23,7 @@ Everything a run produces lives here; the container is disposable.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 import uuid
@@ -30,6 +31,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from fbv3.sandbox import docker
+
+logger = logging.getLogger(__name__)
 
 TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools" / "container"
 CONTAINER_TOOLS = "/opt/fbv3"
@@ -164,10 +167,16 @@ class Workspace:
         return docker.run(cmd, timeout=timeout, input=stdin)
 
     def stop(self) -> None:
+        """Remove the container. Keeping its log is best-effort: the workspace
+        directory may be gone (moved aside, or on a filesystem that filled up),
+        and losing a log must not turn a clean shutdown into a failed run."""
         if not self.container:
             return
-        logs = docker.run(["docker", "logs", self.container], timeout=60)
-        (self.root / "logs" / "container.log").write_bytes(logs.stdout + logs.stderr)
+        try:
+            logs = docker.run(["docker", "logs", self.container], timeout=60)
+            (self.root / "logs" / "container.log").write_bytes(logs.stdout + logs.stderr)
+        except OSError as exc:
+            logger.warning("could not keep the container log for %s: %s", self.container, exc)
         docker.run(["docker", "rm", "-f", self.container], timeout=120)
         self.container = ""
 

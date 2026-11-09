@@ -226,3 +226,18 @@ def test_short_region_rows_are_tolerated():
     export = {"data": [{"functions": [{
         "name": "f", "count": 1, "filenames": ["/src/a.c"], "regions": [[5, 1, 9, 2, 1]]}]}]}
     assert coverage.parse_export(export)[0].end_line == 9
+
+
+def test_losing_the_container_log_does_not_fail_the_shutdown(tmp_path, monkeypatch):
+    """A run whose directory was moved aside still shuts down cleanly."""
+    from fbv3.sandbox import docker as dockermod
+    from fbv3.sandbox.workspace import Workspace
+
+    ws = Workspace(root=tmp_path / "gone", run_id="r1")
+    ws.container = "fbv3-ws-test"
+    removed = []
+    monkeypatch.setattr(dockermod, "run", lambda argv, **kw: removed.append(argv[:3]) or
+                        subprocess.CompletedProcess(argv, 0, b"log", b""))
+    ws.stop()  # the logs dir does not exist
+    assert ws.container == ""
+    assert ["docker", "rm", "-f"] in removed  # it still removed the container
