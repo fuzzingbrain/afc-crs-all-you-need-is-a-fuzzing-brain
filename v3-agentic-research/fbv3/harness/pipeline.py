@@ -117,14 +117,25 @@ def _feedback_from_review(review: dict) -> str:
 
 
 class HarnessStage:
-    def __init__(self, task: Task, store, pool: AgentPool, ws: Workspace, *, run_id: str, run_dir: Path):
+    def __init__(self, task: Task, store, pool: AgentPool, ws: Workspace, *, run_id: str, run_dir: Path,
+                 integration=None):
         self.task, self.store, self.pool, self.ws = task, store, pool, ws
         self.run_id, self.run_dir = run_id, run_dir
+        # When the tree was integrated in this run, every build goes through the
+        # build.sh the integrator wrote instead of a project image's own.
+        self.integration = integration
 
     # -- helpers -------------------------------------------------------------------------
 
     def _ctx(self, target: Target, slug: str, **extra) -> dict:
         hc = self.task.harness
+        integrated = {}
+        if self.integration is not None:
+            integrated = {"source_dir": self.integration.source_dir,
+                          "build_sh": self.integration.build_sh,
+                          "harness_path": self.integration.harness_path,
+                          "base_image": self.task.integrate.base_image,
+                          "allow_network": self.task.integrate.allow_network}
         return {
             "container": self.ws.container, "ws_root": str(self.ws.root), "run_id": self.run_id,
             "builder_image": self.task.builder_image, "language": self.task.language,
@@ -133,6 +144,7 @@ class HarnessStage:
             "smoke_seconds": hc.smoke_seconds, "min_edges": hc.min_edges, "min_exec_s": hc.min_exec_s,
             "build_timeout_s": hc.build_timeout_s, "build_memory_mb": hc.build_memory_mb,
             "build_cpus": hc.build_cpus, "harness_names": [target.binary] if target.binary else [],
+            **integrated,
             **extra,
         }
 
@@ -275,10 +287,7 @@ class HarnessStage:
         shutil.copytree(best["build_out"], addr, symlinks=True)
         builds["address"] = str(addr)
         for san in ["coverage", *[s for s in hc.sanitizers if s != "address"]]:
-            res = build_harness(builder_image=self.task.builder_image, overlay=best["overlay"], source=best["code"],
-                                build_dir=final / f"_{san}", sanitizer=san, engine=self.task.engine,
-                                language=self.task.language, run_id=self.run_id, timeout_s=hc.build_timeout_s,
-                                memory_mb=hc.build_memory_mb, cpus=hc.build_cpus, expected_binary=best["binary"])
+            res = self._build_final(best, san, final / f"_{san}")
             if res.ok:
                 builds[san] = res.out_dir
             else:
@@ -291,6 +300,26 @@ class HarnessStage:
         self.store.set_harness(slug, outcome.status, overlay=best["overlay"], binary=best["binary"],
                                source_path=str(src), builds=builds, rounds=outcome.rounds, notes=outcome.notes)
         return outcome
+
+    def _build_final(self, best: dict, sanitizer: str, build_dir: Path):
+        """The coverage / extra-sanitizer build, by whichever mechanism built the candidate."""
+        hc = self.task.harness
+        if self.integration is not None:
+            from fbv3.build.workspace_build import build_workspace
+
+            return build_workspace(
+                base_image=self.task.integrate.base_image,
+                source_dir=Path(self.integration.source_dir), build_sh=self.integration.build_sh,
+                harness_files={self.integration.harness_path: best["code"]}, build_dir=build_dir,
+                sanitizer=sanitizer, engine=self.task.engine, language=self.task.language,
+                run_id=self.run_id, timeout_s=self.task.integrate.build_timeout_s,
+                memory_mb=self.task.integrate.build_memory_mb, cpus=self.task.integrate.build_cpus,
+                allow_network=self.task.integrate.allow_network, expected_binary=best["binary"])
+        return build_harness(builder_image=self.task.builder_image, overlay=best["overlay"],
+                             source=best["code"], build_dir=build_dir, sanitizer=sanitizer,
+                             engine=self.task.engine, language=self.task.language, run_id=self.run_id,
+                             timeout_s=hc.build_timeout_s, memory_mb=hc.build_memory_mb,
+                             cpus=hc.build_cpus, expected_binary=best["binary"])
 
     def run(self, targets: list[Target], deadline: float | None = None) -> list[HarnessOutcome]:
         out = []

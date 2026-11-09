@@ -22,6 +22,7 @@ from pathlib import Path
 from fbv3 import report
 from fbv3.config import Prebuilt, Task
 from fbv3.directed.loop import DirectedRun, LogicGroup
+from fbv3.harness.integrate import IntegrateStage
 from fbv3.harness.pipeline import HarnessStage
 from fbv3.runtime import auth
 from fbv3.runtime.pool import AgentPool
@@ -63,7 +64,22 @@ def preflight(task: Task, *, build_image: bool = True) -> Preflight:
         return "server " + proc.stdout.decode().strip()
 
     check("docker", docker_ok)
-    for name, tag in (("builder image", task.builder_image), ("runner image", task.runner_image)):
+    if "integrate" in task.stages:
+        def tree_ok() -> str:
+            p = Path(task.source_dir)
+            if not p.is_dir():
+                raise PreflightError(f"source_dir {p} is not a directory")
+            n = sum(1 for _ in p.rglob("*.c")) + sum(1 for _ in p.rglob("*.cc")) \
+                + sum(1 for _ in p.rglob("*.cpp")) + sum(1 for _ in p.rglob("*.cxx"))
+            if n == 0:
+                raise PreflightError(f"{p} holds no C/C++ sources")
+            return f"{p} ({n} C/C++ source files)"
+
+        check("source tree", tree_ok)
+    images = [("builder image", task.builder_image), ("runner image", task.runner_image)]
+    if "integrate" in task.stages:
+        images.append(("toolchain image", task.integrate.base_image))
+    for name, tag in images:
         if not tag:
             continue
         check(name, lambda t=tag: f"{t} present" if docker.image_exists(t)
@@ -130,7 +146,9 @@ class Runner:
     def _source(self) -> Path:
         """The project source every agent reads, on the host."""
         assert self.shared is not None
-        src_dir = next((Path(p.source_dir) for p in self.task.prebuilt if p.source_dir), None)
+        src_dir = Path(self.task.source_dir) if self.task.source_dir else None
+        if src_dir is None:
+            src_dir = next((Path(p.source_dir) for p in self.task.prebuilt if p.source_dir), None)
         if src_dir is not None:
             from fbv3.directed.loop import link_tree
 
@@ -138,6 +156,17 @@ class Runner:
         elif self.task.builder_image:
             self.shared.extract_source(self.task.builder_image)
         return self.shared.path("src")
+
+    def _ws_image_for(self, ws_image: str) -> str:
+        """Agents work in the image their commands have to run in.
+
+        A plain source tree is explored and built in the toolchain image, which
+        has clang and the OSS-Fuzz conventions; otherwise the small analysis
+        image is enough.
+        """
+        if "integrate" in self.task.stages:
+            return self.task.integrate.base_image
+        return ws_image
 
     def _logic_groups(self, harnesses) -> list[LogicGroup]:
         groups: list[LogicGroup] = []
@@ -172,20 +201,37 @@ class Runner:
             llvm = (self.shared.extract_llvm_tools(task.builder_image)
                     if task.builder_image else None)
             harnesses = []
-            needs_container = "discovery" in task.stages or "harness" in task.stages
+            integration = None
+            needs_container = bool({"integrate", "discovery", "harness"} & set(task.stages))
             if needs_container:
-                self.shared.start(ws_image, memory_mb=task.limits.ws_memory_mb,
+                self.shared.start(self._ws_image_for(ws_image), memory_mb=task.limits.ws_memory_mb,
                                   cpus=task.limits.ws_cpus, pids=task.limits.ws_pids)
-                stage = HarnessStage(task, self.store, self.pool, self.shared,
-                                     run_id=self.run_id, run_dir=self.run_dir)
                 targets = list(task.targets)
+                if "integrate" in task.stages and not self.stop.is_set():
+                    self._stages.append("integrate")
+                    integration = IntegrateStage(task, self.store, self.pool, self.shared,
+                                                 run_id=self.run_id, run_dir=self.run_dir).run(
+                        targets[0] if targets else None)
+                    if not integration.usable:
+                        end_reason = "the source tree could not be made to build a fuzz target"
+                        logger.error("%s", end_reason)
+                        integration = None
+                    else:
+                        logger.info("integrated: %s via %s", integration.binary,
+                                    integration.harness_path)
+                        harnesses = [integration]
+                stage = HarnessStage(task, self.store, self.pool, self.shared,
+                                     run_id=self.run_id, run_dir=self.run_dir,
+                                     integration=integration)
                 if "discovery" in task.stages and not targets:
                     self._stages.append("discovery")
                     targets = stage.discover()
                     logger.info("discovery proposed: %s", ", ".join(t.function for t in targets) or "(none)")
-                if "harness" in task.stages and targets and not self.stop.is_set():
+                if "harness" in task.stages and targets and not self.stop.is_set() and (
+                        integration is not None or task.builder_image):
                     self._stages.append("harness")
-                    harnesses = stage.run(targets)
+                    improved = stage.run(targets)
+                    harnesses = [h for h in improved if h.usable] or harnesses
                     for h in harnesses:
                         logger.info("harness %s: %s (%s)", h.target, h.status, h.binary or "no binary")
                 self.shared.stop()

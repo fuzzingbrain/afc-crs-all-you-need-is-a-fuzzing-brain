@@ -75,7 +75,9 @@ def _add_task_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--prebuilt", metavar="DIR", help="build output dir holding the ASan fuzz target")
     g.add_argument("--binary", help="the fuzz target's file name inside --prebuilt")
     g.add_argument("--coverage-build", metavar="DIR", help="build output dir of the coverage build")
-    g.add_argument("--src", metavar="DIR", help="the project source the build was made from")
+    g.add_argument("--src", metavar="DIR",
+                   help="the source tree the build was made from (with --prebuilt), or the tree to "
+                        "make buildable (without it)")
     g.add_argument("--harness", action="append", default=[], metavar="FILE",
                    help="the harness source file(s) of that target (repeatable)")
     g.add_argument("--entry", action="append", default=[], metavar="FN",
@@ -92,6 +94,10 @@ def _add_task_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--no-review", action="store_true", help="skip the harness reviewer agent")
     g.add_argument("--no-research", action="store_true", help="skip the API research agent")
     g.add_argument("--no-breaker", action="store_true", help="skip the frontier (breaker) agent")
+    g.add_argument("--allow-build-network", action="store_true",
+                   help="let the build fetch dependencies (a build that downloads is not reproducible)")
+    g.add_argument("--base-image", metavar="IMAGE",
+                   help="toolchain image the build runs in (default: OSS-Fuzz base-builder)")
     g.add_argument("-o", "--output", metavar="DIR", help="run directory (default runs/<name>-<stamp>)")
     g.add_argument("--set", action="append", default=[], metavar="a.b=value",
                    help="override any task field, e.g. --set directed.poc_threshold=0.6")
@@ -128,6 +134,22 @@ def task_from_args(args) -> Task:
     if targets:
         data["targets"] = targets
 
+    # A source tree with no prebuilt build and no project image is a tree to
+    # integrate: the agent writes its build.sh.
+    if args.src and not args.prebuilt:
+        data["source_dir"] = str(Path(args.src).resolve())
+    if args.base_image:
+        data.setdefault("integrate", {})["base_image"] = args.base_image
+    if data.get("source_dir") and not data.get("runner_image") and not args.runner_image:
+        # The fuzzers must run where the build's glibc lives: base-runner:latest
+        # is older than the toolchain image and would refuse the binaries.
+        from fbv3.config import IntegrateConfig
+
+        data["runner_image"] = (data.get("integrate", {}).get("base_image")
+                                or IntegrateConfig().base_image)
+    if args.allow_build_network:
+        data.setdefault("integrate", {})["allow_network"] = True
+
     if args.prebuilt:
         if not args.binary:
             raise ConfigError("--prebuilt needs --binary (the fuzz target's file name)")
@@ -144,9 +166,12 @@ def task_from_args(args) -> Task:
         data["stages"] = list(dict.fromkeys(args.stage))
     elif "stages" not in data:
         stages = []
-        if not targets and not data.get("prebuilt"):
+        if data.get("source_dir"):
+            # A plain tree: teach it to build, then improve the harness, then hunt.
+            stages.append("integrate")
+        elif not targets and not data.get("prebuilt"):
             stages.append("discovery")
-        if targets or "discovery" in stages:
+        if targets or {"discovery", "integrate"} & set(stages):
             stages.append("harness")
         stages.append("directed")
         data["stages"] = stages

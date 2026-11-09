@@ -36,7 +36,7 @@ def test_stage_requirements():
         Task.from_dict(base(builder_image=""))
     with pytest.raises(ConfigError, match="needs targets"):
         Task.from_dict(base(targets=[]))
-    with pytest.raises(ConfigError, match="needs prebuilt"):
+    with pytest.raises(ConfigError, match="needs a fuzz target"):
         Task.from_dict(base(stages=["directed"], targets=[]))
     task = Task.from_dict({"name": "t", "project": "p", "stages": ["directed"],
                            "prebuilt": [{"name": "f", "binary": "f", "asan_out": "/tmp/out"}]})

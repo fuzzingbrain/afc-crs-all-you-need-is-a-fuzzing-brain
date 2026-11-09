@@ -274,8 +274,10 @@ class Task:
                               "OSS-Fuzz project image), or the integrate stage to build the tree")
         if "harness" in self.stages and not self.targets and "discovery" not in self.stages:
             raise ConfigError("the harness stage needs targets, or the discovery stage to find them")
-        if "directed" in self.stages and "harness" not in self.stages and not self.prebuilt:
-            raise ConfigError("the directed stage alone needs prebuilt fuzz targets")
+        if "directed" in self.stages and not self.prebuilt and not (
+                {"harness", "integrate"} & set(self.stages)):
+            raise ConfigError("the directed stage needs a fuzz target: the integrate or harness stage "
+                              "to produce one, or prebuilt")
         for s in self.harness.sanitizers:
             if s not in SANITIZERS:
                 raise ConfigError(f"harness.sanitizers: {s!r} not in {SANITIZERS}")

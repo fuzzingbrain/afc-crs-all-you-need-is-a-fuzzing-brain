@@ -492,23 +492,44 @@ def list_build_targets() -> dict:
 
 
 @recorded
-def build_harness(code: str, overlay: str) -> dict:
-    """Compile `code` as the fuzz-target source at `overlay` (an existing /src/... path build.sh compiles).
+def build_harness(code: str, overlay: str = "") -> dict:
+    """Compile `code` as this project's fuzz-target source and report what happened.
 
-    Runs the project's own build (ASan, libFuzzer) with your file in place of the original. The reply has
-    the compiler errors when it fails, or the built fuzz target and the deterministic principle checks
-    when it succeeds. Fix and call again until it builds; then call smoke_test.
+    When the project has its own OSS-Fuzz build, `overlay` is the existing /src/... source your file
+    replaces, and the project's own build runs with your file in place of it. When the build script was
+    written for this run, your code goes to the harness path that script compiles and `overlay` is
+    ignored. Either way the reply carries the compiler errors when it fails, or the built fuzz target
+    and the deterministic principle checks when it succeeds. Fix and call again until it builds; then
+    call smoke_test.
     """
-    from fbv3.build.builder import build_harness as _build
     from fbv3.harness.principles import static_findings
 
     n = len(list(Path(CTX["builds_dir"]).glob("b*"))) + 1
     bdir = Path(CTX["builds_dir"]) / f"b{n:02d}-{CTX['session_id'][:6]}"
-    res = _build(builder_image=CTX["builder_image"], overlay=overlay, source=code, build_dir=bdir,
-                 sanitizer="address", engine="libfuzzer", language=CTX.get("language", "c"),
-                 run_id=CTX.get("run_id", ""), timeout_s=int(CTX.get("build_timeout_s", 1800)),
-                 memory_mb=int(CTX.get("build_memory_mb", 8192)), cpus=float(CTX.get("build_cpus", 4.0)),
-                 expected_binary=CTX.get("expected_binary", ""))
+    if CTX.get("build_sh"):  # an integrated tree: rebuild through the run's own build.sh
+        from fbv3.build.workspace_build import build_workspace
+
+        overlay = CTX["harness_path"]
+        res = build_workspace(
+            base_image=CTX["base_image"], source_dir=Path(CTX["source_dir"]), build_sh=CTX["build_sh"],
+            harness_files={overlay: code}, build_dir=bdir, sanitizer="address", engine="libfuzzer",
+            language=CTX.get("language", "c"), run_id=CTX.get("run_id", ""),
+            timeout_s=int(CTX.get("build_timeout_s", 3600)),
+            memory_mb=int(CTX.get("build_memory_mb", 8192)), cpus=float(CTX.get("build_cpus", 4.0)),
+            allow_network=bool(CTX.get("allow_network", False)),
+            expected_binary=CTX.get("expected_binary", ""))
+    else:
+        from fbv3.build.builder import build_harness as _build
+
+        if not overlay:
+            return {"ok": False, "error": "give the overlay: the /src/... source your harness replaces "
+                                          "(list_build_targets shows which ones build.sh compiles)"}
+        res = _build(builder_image=CTX["builder_image"], overlay=overlay, source=code, build_dir=bdir,
+                     sanitizer="address", engine="libfuzzer", language=CTX.get("language", "c"),
+                     run_id=CTX.get("run_id", ""), timeout_s=int(CTX.get("build_timeout_s", 1800)),
+                     memory_mb=int(CTX.get("build_memory_mb", 8192)),
+                     cpus=float(CTX.get("build_cpus", 4.0)),
+                     expected_binary=CTX.get("expected_binary", ""))
     findings = [f.to_dict() for f in static_findings(code, CTX.get("sanitizers", ["address"]), CTX.get("language", "c"))]
     rec = {"ts": _now(), "n": n, "overlay": overlay, "ok": res.ok, "binary": res.binary, "error": res.error,
            "infra": res.infra, "build_dir": str(bdir), "code_sha1": hashlib.sha1(code.encode()).hexdigest(),
