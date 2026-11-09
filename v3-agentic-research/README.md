@@ -226,6 +226,40 @@ from every session's environment, each backend is checked to be on a
 subscription before a run starts, and each Claude session's `init` event is
 checked again for its key source.
 
+## Verified on repositories it had never seen
+
+Four C/C++ libraries cloned from GitHub minutes earlier, none of them an
+OSS-Fuzz project, each given nothing but its source tree and one entry point.
+Every one passed both gates on the first round -- the agent wrote the build.sh
+and the first harness, the coverage build proved the library instrumented, and
+the reviewer accepted the harness -- and every directed stage got its function
+index from coverage:
+
+| repo | build system | instrumented | covered | result |
+| --- | --- | --- | --- | --- |
+| microtar | none at all | 29 fns | 17/30 | **stack-buffer-overflow** |
+| tinyexpr | single file | 46 fns | 45/47 | no bug |
+| tomlc99 | Makefile | 85 fns | 82/86 | no bug |
+| libcsv | autotools, which the agent judged unnecessary | 26 fns | 21/28 | no bug |
+
+About 27 minutes each, one agent session at a time.
+
+**The bug.** `microtar.c:112` in `raw_to_header` does
+`strcpy(h->name, rh->name)`, where `rh->name` is a 100-byte tar header field
+read straight from the input and `h->name` is 100 bytes on the stack. The
+field carries no guarantee of a NUL, so an input without one makes strcpy read
+on into the following header fields and write past the destination. Only the
+checksum is validated before it. Found from a 265-byte input and reproduced
+outside the agent afterwards.
+
+Two things worth saying about the other three. A library like tinyexpr --
+small, careful, 45 of its 47 functions exercised -- having no memory-safety
+bug is the honest answer, not a failure. And in a 900-second directed budget
+the fuzzing half did nearly all the work: one or two finder sessions ran per
+run, so the hypothesis chain barely contributed, and microtar's crash came
+from the global fuzzer rather than from a verified hypothesis. A longer budget,
+or more than one session at a time, is what that half needs.
+
 ## What it did on its first live runs
 
 **Discovery** (zlib, 1.2 min, one session): asked for two targets, proposed
