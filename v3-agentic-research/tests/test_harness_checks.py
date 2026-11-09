@@ -164,3 +164,12 @@ def test_docker_failing_is_not_a_verdict_on_the_harness():
         assert out["verdict"] == "no_run"  # judge alone cannot tell
         assert smoke.infra_failure(text)   # but this can
     assert not smoke.infra_failure(LIBFUZZER_OUT)
+
+
+def test_p4_covers_the_peer_a_protocol_library_needs():
+    """Code that only runs against a peer is reachable: loopback and in-process
+    transports work, only the outward network is closed."""
+    text = principles_text(("address",))
+    assert "in-process transport" in text and "127.0.0.1" in text
+    assert "Never an outside host" in text
+    assert "could not be reproduced" in text

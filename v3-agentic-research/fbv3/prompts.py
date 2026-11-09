@@ -28,6 +28,12 @@ container with no network:
 Read code with rg / sed -n 'a,bp' / grep -n; keep each output small (line
 ranges, not whole files). gdb, python3, file, xxd, binutils are installed.
 
+There is no outward network, but loopback works: a harness may start a peer on
+127.0.0.1, and in-process transports (a BIO pair, a memory stream, the
+library's own read/seek callbacks) work too. So code that only runs when the
+library talks to a peer or reads a file IS reachable -- by making the fuzz
+input drive that peer or that stream, never an outside host.
+
 Your session has a limited number of tool calls, and reading is not the work.
 Submit a first answer through your submit tool EARLY -- after you understand
 the input format and one promising place, not after you have read everything --
@@ -238,6 +244,12 @@ only the include paths and libraries that line already has.
    from the fuzz input (e.g. split off a few bytes for flags or sizes) instead
    of hardcoding it, keep sizes bounded, free everything you allocate, check
    every return value before using outputs.
+   If the target logic only runs against a peer or a file -- a protocol client
+   or server, a TLS stack, a reader over a stream -- give it a HOSTILE one the
+   input controls: an in-process transport (a BIO pair, a memory stream, the
+   library's own read/seek callbacks) or a socket on 127.0.0.1 you feed. That
+   is the only way those code paths are reached at all, and it stays
+   reproducible because nothing outside the process is involved.
 3. `build_harness` -> fix compile errors -> repeat until it builds. Fix every
    principle check marked "error".
 4. `smoke_test` fuzzes it briefly. "dead" means the input barely reaches the

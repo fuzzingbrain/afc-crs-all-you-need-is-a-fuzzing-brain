@@ -47,8 +47,13 @@ PRINCIPLES = {
         "The right entry point, with essential setup, reaching the target",
         "The harness drives the API entry point that owns the target logic, at the right level of "
         "abstraction, with the setup without which the code path is dead (e.g. a TLS server with no "
-        "certificate, a decoder never given a stream header). Inputs must actually reach the target: a "
-        "harness whose fuzzing covers almost no edges, or runs too slowly to explore, fails this.",
+        "certificate, a decoder never given a stream header). For code that only runs when the library "
+        "talks to a peer or reads a file, that setup is a peer or a stream the FUZZ INPUT controls: an "
+        "in-process transport (a BIO pair, a memory stream, the library's own read/seek callbacks) or a "
+        "socket on 127.0.0.1 whose bytes come from the input. Never an outside host: there is no outward "
+        "network, and a crash that depended on one could not be reproduced. Inputs must actually reach "
+        "the target: a harness whose fuzzing covers almost no edges, or runs too slowly to explore, "
+        "fails this.",
     ),
     "P5": (
         "Outputs are checked under MemorySanitizer",

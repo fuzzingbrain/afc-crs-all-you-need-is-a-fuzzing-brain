@@ -130,3 +130,16 @@ def test_the_breaker_seeds_as_it_goes():
     assert "as soon as it gets closer" in system
     assert "do not save it for the end" in system
     assert "seeded nothing has given the fuzzer nothing" in system
+
+
+def test_every_role_knows_loopback_is_available():
+    system, _ = prompts.directed("seed", harness_src=HARNESS, target="fuzz", **DIRECTED_KW["seed"])
+    assert "no outward network, but loopback works" in system
+    assert "never an outside host" in system
+
+
+def test_the_harness_author_is_told_to_build_a_hostile_peer():
+    system, _ = prompts.harness(project="p", function="SSL_read", description="a TLS stack")
+    assert "give it a HOSTILE one" in system
+    assert "BIO pair" in system and "127.0.0.1" in system
+    assert "nothing outside the process is involved" in system
