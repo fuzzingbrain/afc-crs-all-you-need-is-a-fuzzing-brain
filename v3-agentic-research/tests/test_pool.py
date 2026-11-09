@@ -176,3 +176,26 @@ def test_an_error_after_real_work_is_returned_as_is():
     res = go(p)
     assert res.status == "error" and res.backend == "codex"
     assert len(FakeSession.calls) == 1
+
+
+def test_time_is_rechecked_after_the_slot_is_granted():
+    """A caller with time when it queued can have none left when a long session ahead
+    of it finishes: a finder once waited out a 657s breaker and then ran 30 seconds."""
+    p, store = pool()
+    clock = p.clock
+    deadline = clock() + 500
+
+    def slow(self):
+        clock.t += 480  # a long session ahead of us burns most of the budget
+        return SessionResult("slow", "poc", "claude", "completed")
+
+    p._make = lambda **kw: type("S", (), {"run": slow})()
+    go(p, role="poc", deadline=deadline)
+    res = go(p, role="finder", deadline=deadline, min_runtime=300)
+    assert res.status == "skipped" and "not enough time" in res.error
+
+
+def test_a_session_with_time_to_spare_still_runs():
+    p, _ = pool()
+    res = go(p, role="finder", deadline=p.clock() + 3600, min_runtime=300)
+    assert res.status == "completed"

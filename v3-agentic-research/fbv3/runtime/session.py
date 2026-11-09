@@ -60,7 +60,8 @@ REFUSAL_MARKERS = (
     "unable to help with", "can't help with that", "cannot help with that",
 )
 
-STATUSES = ("completed", "max_turns", "timeout", "rate_limited", "content_filtered", "auth_error", "error")
+STATUSES = ("completed", "max_turns", "timeout", "rate_limited", "content_filtered", "auth_error",
+            "error", "skipped")
 
 
 @dataclass

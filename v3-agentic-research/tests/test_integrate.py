@@ -36,11 +36,13 @@ $CXX $CXXFLAGS h.o libmylib.a $LIB_FUZZING_ENGINE -o $OUT/mylib_fuzzer
 class FakePool:
     def __init__(self, root: Path):
         self.root, self.files, self.status = root, {}, {}
-        self.calls, self.prompts = [], []
+        self.calls, self.prompts, self.min_runtimes = [], [], []
         self.stopped = __import__("threading").Event()
         self._n = 0
 
-    def run(self, role, *, scope, system, task, tools, ctx, session_root, subject="", deadline=None):
+    def run(self, role, *, scope, system, task, tools, ctx, session_root, subject="", deadline=None,
+            min_runtime=0.0):
+        self.min_runtimes.append((role, min_runtime))
         self._n += 1
         sid = f"{role}-{self._n}"
         self.calls.append(role)

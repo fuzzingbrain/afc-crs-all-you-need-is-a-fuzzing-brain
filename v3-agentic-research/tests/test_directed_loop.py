@@ -31,10 +31,13 @@ class FakePool:
         self.status: dict[str, str] = {}
         self.calls: list[tuple[str, str]] = []
         self.prompts: list[tuple[str, str, str]] = []
+        self.min_runtimes: list[tuple[str, float]] = []
         self.stopped = __import__("threading").Event()
         self._n = 0
 
-    def run(self, role, *, scope, system, task, tools, ctx, session_root, subject="", deadline=None):
+    def run(self, role, *, scope, system, task, tools, ctx, session_root, subject="", deadline=None,
+            min_runtime=0.0):
+        self.min_runtimes.append((role, min_runtime))
         self._n += 1
         sid = f"{role}-{self._n}"
         self.calls.append((role, subject))
@@ -587,3 +590,34 @@ def test_the_summary_says_where_the_function_index_came_from(tmp_path, monkeypat
     monkeypatch.setattr(run, "_schedule", lambda: None)
     out = run.run()
     assert out["function_index"] == {"source": "none", "functions": 0, "error": "no debug info"}
+
+
+def test_the_summary_counts_functions_a_finder_reached_not_queued(tmp_path):
+    """A 900s stage can queue forty functions and reach two; saying 40 is a lie."""
+    run, pool, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    run._fn_rows = [FunctionRow(f"f{i}", "/src/a.c", i, i + 4, 9 - i) for i in range(5)]
+    run._queue_covered()
+    assert len(run._queued_fns) == 5
+    pool.files["finder"] = {"vhs.jsonl": []}
+    run._finder({"name": "f0", "file": "/src/a.c", "start_line": 0, "end_line": 4})
+    report = run._finish()
+    assert report["functions_analysed"] == 1
+    assert report["functions_queued"] == 5
+
+
+def test_a_skipped_finder_is_not_counted_as_analysed(tmp_path):
+    run, pool, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    pool.status["finder"] = "skipped"
+    run._finder({"name": "f0", "file": "/src/a.c", "start_line": 0, "end_line": 4})
+    assert run._finish()["functions_analysed"] == 0
+
+
+def test_each_role_tells_the_pool_how_much_time_it_needs(tmp_path):
+    run, pool, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    pool.files["finder"] = {"vhs.jsonl": []}
+    run._finder({"name": "f", "file": "/src/a.c", "start_line": 1, "end_line": 9})
+    role, bar = pool.min_runtimes[-1]
+    assert role == "finder" and bar == max(150.0, run.task.agents.roles["finder"].timeout_s / 3)

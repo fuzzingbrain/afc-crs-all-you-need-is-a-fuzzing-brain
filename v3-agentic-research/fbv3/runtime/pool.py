@@ -53,8 +53,15 @@ class AgentPool:
         return self._now() >= self._limited_until.get(backend, 0.0)
 
     def run(self, role: str, *, scope: str, system: str, task: str, tools: tuple[str, ...], ctx: dict,
-            session_root: Path, subject: str = "", deadline: float | None = None) -> SessionResult:
-        """Run one session of ``role``; blocks for a free slot first."""
+            session_root: Path, subject: str = "", deadline: float | None = None,
+            min_runtime: float = 0.0) -> SessionResult:
+        """Run one session of ``role``; blocks for a free slot first.
+
+        ``min_runtime`` is re-checked after the slot is granted, not only
+        before: a caller that had time when it queued may have none left by the
+        time a long session ahead of it finishes. A finder once waited out a
+        657s breaker and then ran for 30 seconds.
+        """
         rc = self.cfg.roles[role]
         first = self.backend_for(role)
         order = [first] + ([b for b in BACKENDS if b != first] if self.cfg.fallback else [])
@@ -85,6 +92,11 @@ class AgentPool:
             with self._slots:
                 if self.stopped.is_set():
                     break
+                if min_runtime and deadline is not None and deadline - self._now() < min_runtime:
+                    logger.info("%s: %.0fs left after waiting for a slot, less than the %.0fs this role "
+                                "needs; not starting it", role, deadline - self._now(), min_runtime)
+                    return SessionResult("", role, backend, "skipped",
+                                         error="not enough time left after waiting for a slot")
                 last = session.run()
             self.store.record_session(last, scope, subject)
             if last.status == "rate_limited":

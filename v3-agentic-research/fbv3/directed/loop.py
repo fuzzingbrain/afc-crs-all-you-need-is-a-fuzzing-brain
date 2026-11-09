@@ -121,6 +121,7 @@ class DirectedRun:
         self._afl = False
         self._fn_rows: list[coverage.FunctionRow] = []
         self._queued_fns: set[str] = set()
+        self._analysed_fns: set[str] = set()
         self._bugq: queue.PriorityQueue = queue.PriorityQueue()
         self._seq = 0
         self._lock = threading.Lock()
@@ -136,6 +137,10 @@ class DirectedRun:
             return 0.0
         return self._deadline - time.monotonic()
 
+    def _bar(self, role: str) -> float:
+        """How much time a session of this role needs to be worth starting."""
+        return max(150.0, self.task.agents.roles[role].timeout_s / 3.0)
+
     def _enough_time(self, role: str) -> bool:
         """Is there enough left for a session of this role to be worth starting?
 
@@ -145,8 +150,7 @@ class DirectedRun:
         having submitted nothing, because both roles submit at the end of their
         reasoning. A third of the role's own budget is the bar.
         """
-        rc = self.task.agents.roles[role]
-        return self._left() >= max(150.0, rc.timeout_s / 3.0)
+        return self._left() >= self._bar(role)
 
     def _enqueue(self, priority: int, fn, *args) -> None:
         with self._lock:
@@ -171,7 +175,7 @@ class DirectedRun:
                              tools=prompts.ROLE_TOOLS[role], ctx=self._ctx(**ctx_extra),
                              session_root=self.ws.path("sessions"),
                              subject=f"{self.lg.name}/{subject}" if subject else self.lg.name,
-                             deadline=self._deadline)
+                             deadline=self._deadline, min_runtime=self._bar(role))
 
     def _prompt(self, role: str, **kw) -> tuple[str, str]:
         return prompts.directed(role, harness_src=self._harness_src, target=self.lg.binary, **kw)
@@ -436,6 +440,8 @@ class DirectedRun:
             end=fn.get("end_line", 0), call_path=fn.get("call_path") or "(from coverage)",
             reason=fn.get("reason") or "(covered)")
         res = self._session("finder", system=system, task=task, subject=fn["name"], function=fn)
+        if res.status != "skipped":
+            self._analysed_fns.add(fn["name"])
         for raw in _jsonl(res.out_dir / "vhs.jsonl") if res.session_id else []:
             score = float(raw.get("finder_score", 0.5))
             vh_id = self.store.create_vh(
@@ -714,7 +720,10 @@ class DirectedRun:
         vhs = self.store.vhs(self.lg.name)
         crashes = self.store.crashes(self.lg.name)
         report = {
-            "functions_analysed": len(self._queued_fns),
+            # What a finder actually ran on, not what was queued: a 900s stage
+            # can queue forty functions and reach two.
+            "functions_analysed": len(self._analysed_fns),
+            "functions_queued": len(self._queued_fns),
             "vhs": len(vhs),
             "vhs_by_status": {s: sum(1 for v in vhs if v["status"] == s) for s in {v["status"] for v in vhs}},
             "pocs": sum(1 for v in vhs if v["poc_status"] == "crashed"),
