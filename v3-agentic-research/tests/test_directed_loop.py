@@ -539,3 +539,34 @@ def test_the_engine_decides_whether_seeds_come_before_the_fuzzer(tmp_path, monke
     monkeypatch.setattr(run, "_finish", lambda: {})
     run.run()
     assert order == expected
+
+
+def test_a_session_that_cannot_finish_is_not_started(tmp_path):
+    """Two live runs lost a breaker at 394s and an fp-seed at 161s this way."""
+    run, pool, store = make(tmp_path)
+    roles = run.task.agents.roles
+    run._deadline = time.monotonic() + 300  # less than a third of most budgets
+    assert not run._enough_time("breaker")  # 1200s budget -> needs 400s
+    assert not run._enough_time("verifier")
+    run._breaker()
+    vh = store.create_vh("fuzz", function_name="f")
+    run._verify(vh)
+    run._fp_seed(vh)
+    assert pool.calls == []
+    assert store.get_vh(vh)["status"] == "pending_verify"  # left honestly pending
+    run._deadline = time.monotonic() + 3600
+    assert all(run._enough_time(r) for r in ("breaker", "verifier", "finder", "poc", "fp_seed"))
+    assert roles["breaker"].timeout_s / 3 < 3600
+
+
+def test_the_bar_is_a_third_of_the_role_budget_with_a_floor(tmp_path):
+    run, _, _ = make(tmp_path)
+    run.task.agents.roles["finder"].timeout_s = 90  # a third would be 30s; the floor is 150s
+    run._deadline = time.monotonic() + 140
+    assert not run._enough_time("finder")
+    run._deadline = time.monotonic() + 200
+    assert run._enough_time("finder")
+    run.task.agents.roles["finder"].timeout_s = 1800  # a big budget sets its own bar
+    assert not run._enough_time("finder")
+    run._deadline = time.monotonic() + 700
+    assert run._enough_time("finder")

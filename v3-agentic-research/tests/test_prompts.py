@@ -121,3 +121,12 @@ def test_the_harness_roles_are_told_the_same():
                       prompts.researcher(project="p", function="f", description="d"),
                       prompts.discoverer(project="p", max_targets=2)):
         assert "Submit a first answer" in system
+
+
+def test_the_breaker_seeds_as_it_goes():
+    """A breaker cut off before create_seed has given the fuzzer nothing."""
+    system, _ = prompts.directed("breaker", harness_src=HARNESS, target="fuzz",
+                                 **DIRECTED_KW["breaker"])
+    assert "as soon as it gets closer" in system
+    assert "do not save it for the end" in system
+    assert "seeded nothing has given the fuzzer nothing" in system

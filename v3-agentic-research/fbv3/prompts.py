@@ -440,8 +440,11 @@ How to work (one focused push per session):
    the call: a tag, a magic value, a length field, a parser state.
 3. Write `def generate(n: int) -> bytes` producing an input that satisfies the
    gate and `reach_probe` the target with it. Iterate, reading where it stops.
-4. When it reaches the target (or gets closest), `create_seed` it, so the
-   fuzzer mutates outward from there. Then stop.
+4. `create_seed` the input as soon as it gets closer than what the fuzzer
+   already reaches -- do not save it for the end -- so the fuzzer mutates
+   outward from there while you refine. Then seed the better one too. A
+   session cut off having seeded nothing has given the fuzzer nothing,
+   however far its analysis got.
 
 When done, say FRONTIER PUSHED."""
 

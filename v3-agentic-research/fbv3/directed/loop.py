@@ -135,6 +135,18 @@ class DirectedRun:
             return 0.0
         return self._deadline - time.monotonic()
 
+    def _enough_time(self, role: str) -> bool:
+        """Is there enough left for a session of this role to be worth starting?
+
+        The pool clamps a session's timeout to the time remaining, so starting
+        one too late does not overrun the stage -- it gets killed mid-work. Two
+        live runs lost a breaker at 394s and an fp-seed at 161s that way, each
+        having submitted nothing, because both roles submit at the end of their
+        reasoning. A third of the role's own budget is the bar.
+        """
+        rc = self.task.agents.roles[role]
+        return self._left() >= max(150.0, rc.timeout_s / 3.0)
+
     def _enqueue(self, priority: int, fn, *args) -> None:
         with self._lock:
             self._seq += 1
@@ -414,7 +426,7 @@ class DirectedRun:
     # -- the bug lane ---------------------------------------------------------------------
 
     def _finder(self, fn: dict) -> None:
-        if self._left() < 120:
+        if not self._enough_time("finder"):
             return
         system, task = self._prompt(
             "finder", name=fn["name"], file=fn.get("file", ""), start=fn.get("start_line", 0),
@@ -437,7 +449,7 @@ class DirectedRun:
             self._enqueue(PRIO_VERIFY, self._verify, vh_id)
 
     def _verify(self, vh_id: str) -> None:
-        if self._left() < 120:
+        if not self._enough_time("verifier"):
             return
         vh = self.store.get_vh(vh_id)
         if not self.store.move_vh(vh_id, "verifying", frm=("pending_verify",), reason="verifier started"):
@@ -470,7 +482,7 @@ class DirectedRun:
             self._enqueue(PRIO_FP, self._fp_seed, vh_id)
 
     def _poc(self, vh_id: str, attempt: int) -> None:
-        if self._left() < 150:
+        if not self._enough_time("poc"):
             self.store.move_vh(vh_id, "poc_failed", frm=("pending_poc", "generating_poc"),
                                reason="out of time before the PoC attempt")
             return
@@ -532,7 +544,7 @@ class DirectedRun:
         return None
 
     def _fp_seed(self, vh_id: str) -> None:
-        if self._left() < 120 or self.cfg.mode != "directed":
+        if self.cfg.mode != "directed" or not self._enough_time("fp_seed"):
             return
         vh = self.store.get_vh(vh_id)
         system, task = self._prompt(
@@ -544,7 +556,7 @@ class DirectedRun:
         self._record_seeds(res, "fp_seed")
 
     def _breaker(self) -> None:
-        if self._left() < 200:
+        if not self._enough_time("breaker"):
             return
         system, task = self._prompt("breaker", lg=self.lg.name, targets=self._targets_str(),
                                     description=self.lg.description or "(no description given)")
@@ -585,7 +597,7 @@ class DirectedRun:
                 if breaker_slots and (self.cfg.breaker_max_rounds == 0
                                       or rounds < self.cfg.breaker_max_rounds):
                     if breaker_sem.acquire(blocking=False):
-                        if self._left() > 200:
+                        if self._enough_time("breaker"):
                             fut = pool.submit(self._breaker)
                             fut.add_done_callback(lambda f: done(f, breaker_sem.release))
                             inflight.add(fut)
