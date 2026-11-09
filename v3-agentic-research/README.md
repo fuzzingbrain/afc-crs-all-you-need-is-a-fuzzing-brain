@@ -18,6 +18,8 @@ and *builds and smoke-fuzzes* its own harness through tools, and a reviewer
 runs inputs through the candidate before accepting it.
 
 ```
+integrate   an agent writes build.sh for a plain source tree (or reuses the
+   |        project's own), plus a first harness
 discovery   an agent picks the API entry points worth fuzzing
    |
 harness     research -> write+build+fix -> gate -> review -> fix ... -> final builds
@@ -27,7 +29,19 @@ directed    seed agent -> fuzzers; mapper -> finder -> verifier -> PoC
 
 ## Quick start
 
-Any C/C++ project with an OSS-Fuzz builder image, no task file needed:
+Any C/C++ repository, nothing but the source tree:
+
+```sh
+git clone https://github.com/DaveGamble/cJSON
+fbv3 run --project cJSON --src ./cJSON --function cJSON_ParseWithLength
+```
+
+An agent reads the tree, writes the `build.sh` that builds the library
+instrumented and links a harness against it -- reusing the project's own
+OSS-Fuzz integration when it has one -- and the rest of the run proceeds as
+usual. Nothing else is needed: no image, no task file, no existing fuzz target.
+
+With an OSS-Fuzz builder image, which is faster and surer when one exists:
 
 ```sh
 pip install -e .                       # or: uv pip install -e .
@@ -64,6 +78,30 @@ fbv3 run task.json --duration 3600 --set directed.poc_threshold=0.6
 ```
 
 `fbv3 run --dry-run` prints the task the flags resolved to and starts nothing.
+
+## Making a plain tree buildable
+
+`build.sh` is where a library becomes fuzzable, and it is the only part of an
+OSS-Fuzz project a human has to write. The integrate stage hands that job to
+an agent: it explores the tree in the toolchain image, writes the script and a
+first harness, builds, reads the compiler errors and iterates. `compile` runs
+the script, which is what puts the sanitizer and coverage flags into `$CFLAGS`
+and builds `$LIB_FUZZING_ENGINE` -- so an agent-written script inherits every
+OSS-Fuzz convention, and the same script works in a project image when there
+is one. The tree is mounted read-only and copied inside the container, so each
+build starts clean and nothing it does reaches the host.
+
+The gate has one check beyond the harness gate's, and it decides whether a run
+means anything: **a coverage build must contain the project's own functions.**
+`llvm-cov` reports only the translation units that were instrumented, so a
+script that compiled the library with plain flags -- or linked a system
+package -- leaves them absent. That build succeeds, fuzzes fast and finds
+nothing, which is indistinguishable from a library with no bugs. When it
+happens the agent is sent back with the reason and its own script.
+
+The harness stage then rebuilds through that same `build.sh`, so the API
+research, the principles and the reviewer apply to any repository, not only to
+projects that are already in OSS-Fuzz.
 
 ## What a run leaves behind
 
