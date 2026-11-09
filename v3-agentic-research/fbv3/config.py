@@ -63,11 +63,14 @@ def _default_roles() -> dict[str, RoleConfig]:
     # roles default to Codex. Any role falls back to the other backend on a
     # rate limit or a content flag when ``agents.fallback`` is on.
     #
-    # The seed role is on Claude for the same reason, measured here: codex
-    # refused it in every live run (three for three, before its first turn,
-    # with a service-side gate that is neither a content flag nor a rate
-    # limit), while the mapper, the finder, the discoverer and the researcher
-    # ran on codex in those same runs without trouble.
+    # The seed role is on Claude because codex lost it in three runs for three
+    # to a service-side gate that is neither a content flag nor a rate limit.
+    # That gate turned out NOT to be role-specific, though: a later run lost
+    # its mapper to the same message while the researcher had succeeded on
+    # codex minutes earlier in that very run. It is intermittent, and the
+    # failover in AgentPool -- a session that dies before its first turn moves
+    # to the other backend -- is what actually handles it. This default only
+    # saves the seed role one wasted attempt.
     return {
         "integrator": RoleConfig("claude", timeout_s=3600, max_turns=120),
         "discoverer": RoleConfig("codex", timeout_s=1200, max_turns=60),
