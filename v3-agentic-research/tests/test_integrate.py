@@ -282,3 +282,24 @@ def test_a_vanished_container_is_not_blamed_on_the_harness(tmp_path, monkeypatch
     second = pool.prompts[1][2]
     assert "INFRA:" in second and "Nothing is wrong with your build" in second
     assert "barely covers anything" not in second  # not blamed for reachability either
+
+
+def test_an_integrated_run_takes_its_llvm_tools_from_the_toolchain_image(tmp_path, monkeypatch):
+    """Without them the directed stage silently loses its whole function index."""
+    from fbv3 import run as runmod
+
+    task = Task.from_dict({"name": "t", "project": "p", "stages": ["integrate", "directed"],
+                           "source_dir": str(tmp_path), "output": str(tmp_path / "run")})
+    asked = []
+    monkeypatch.setattr(runmod.Workspace, "layout", lambda self: self)
+    monkeypatch.setattr(runmod.Workspace, "start", lambda self, *a, **k: "c")
+    monkeypatch.setattr(runmod.Workspace, "stop", lambda self: None)
+    monkeypatch.setattr(runmod.Workspace, "extract_llvm_tools",
+                        lambda self, image: asked.append(image))
+    monkeypatch.setattr(runmod.Runner, "_source", lambda self: tmp_path)
+    monkeypatch.setattr(runmod.image, "ensure_image", lambda *a, **k: "ws:test")
+    monkeypatch.setattr(runmod.IntegrateStage, "run",
+                        lambda self, target: integrate.Integration("integrate", "failed"))
+    monkeypatch.setattr(runmod.docker, "kill_run_containers", lambda rid: 0)
+    runmod.Runner(task).run()
+    assert asked == [task.integrate.base_image]

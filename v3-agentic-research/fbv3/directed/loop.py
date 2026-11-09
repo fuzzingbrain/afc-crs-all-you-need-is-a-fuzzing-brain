@@ -114,6 +114,7 @@ class DirectedRun:
         self.ws_image = ws_image
         self.stop_flag = stop or threading.Event()
         self.function_index = self.ws.path("functions/index.json")
+        self.index_source, self.index_error = "coverage", ""
         self._deadline = deadline or (time.monotonic() + self.cfg.duration_seconds)
         self._fuzzers: list[Fuzzer] = []
         self._monitor: CrashMonitor | None = None
@@ -285,6 +286,8 @@ class DirectedRun:
                 logger.warning("%s: symbol index also unavailable: %s", self.lg.name, sym_err)
             self.store.emit("function_index", lg=self.lg.name, source="symbols", functions=len(rows),
                             coverage_error=err, symbol_error=sym_err or None)
+            self.index_source = "symbols" if rows else "none"
+            self.index_error = sym_err or err
         self._fn_rows = rows
         coverage.write_index(rows, self.function_index)
         return coverage.snapshot(rows, self.ws.path("coverage/snapshot_initial.json"))
@@ -638,11 +641,18 @@ class DirectedRun:
 
     def run(self) -> dict:
         summary = {"lg": self.lg.name, "binary": self.lg.binary, "mode": self.cfg.mode,
-                   "root": str(self.ws.root)}
+                   "root": str(self.ws.root), "function_index": {}}
         sampler = None
         try:
             self._prepare()
             summary["coverage_initial"] = self._build_function_index()
+            summary["function_index"] = {"source": self.index_source,
+                                         "functions": len(self._fn_rows),
+                                         "error": self.index_error}
+            if not self._fn_rows:
+                logger.error("%s: there is no function index at all (%s) -- the finder queue will be "
+                             "the mapper's list only and nothing can verify its names",
+                             self.lg.name, self.index_error or "unknown")
             afl = self._detect_engine()
             seeding = self.cfg.mode in ("directed", "legacy")
             # libFuzzer reloads its corpus as it runs (-reload=1), so it starts

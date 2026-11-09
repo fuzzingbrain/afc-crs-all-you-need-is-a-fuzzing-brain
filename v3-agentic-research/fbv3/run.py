@@ -198,8 +198,15 @@ class Runner:
             ws_image = image.ensure_image(self.run_dir / "logs" / "ws_image_build.log")
             self.shared = Workspace(root=self.run_dir / "shared", run_id=self.run_id).layout()
             src = self._source()
-            llvm = (self.shared.extract_llvm_tools(task.builder_image)
-                    if task.builder_image else None)
+            # llvm-cov and llvm-symbolizer must match the clang that built the
+            # targets, and they come out of that image. An integrated tree has
+            # no project image, so they come from the toolchain image instead:
+            # without them the directed stage loses its function index, both
+            # from coverage and from the symbol fallback, and says so only in a
+            # warning while appearing to run normally.
+            tools_image = task.builder_image or (
+                task.integrate.base_image if "integrate" in task.stages else "")
+            llvm = self.shared.extract_llvm_tools(tools_image) if tools_image else None
             harnesses = []
             integration = None
             needs_container = bool({"integrate", "discovery", "harness"} & set(task.stages))

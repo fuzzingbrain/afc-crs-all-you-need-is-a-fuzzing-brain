@@ -570,3 +570,20 @@ def test_the_bar_is_a_third_of_the_role_budget_with_a_floor(tmp_path):
     assert not run._enough_time("finder")
     run._deadline = time.monotonic() + 700
     assert run._enough_time("finder")
+
+
+def test_the_summary_says_where_the_function_index_came_from(tmp_path, monkeypatch):
+    """A run with no index at all must not look like a normal one."""
+    run, _, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    monkeypatch.setattr(run, "_prepare", lambda: None)
+    monkeypatch.setattr(run, "_collect_coverage", lambda timeout_s=600: ([], "llvm-profdata: not found"))
+    monkeypatch.setattr("fbv3.directed.loop.symbols.linked_functions",
+                        lambda ws, **kw: ([], "no debug info"))
+    monkeypatch.setattr(run, "_start_fuzzers", lambda: None)
+    monkeypatch.setattr(run, "_sampler", lambda: None)
+    monkeypatch.setattr(run, "_seed_agent", lambda: None)
+    monkeypatch.setattr(run, "_mapper", lambda: [])
+    monkeypatch.setattr(run, "_schedule", lambda: None)
+    out = run.run()
+    assert out["function_index"] == {"source": "none", "functions": 0, "error": "no debug info"}
