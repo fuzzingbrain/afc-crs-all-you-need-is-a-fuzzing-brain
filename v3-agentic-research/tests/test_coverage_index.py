@@ -241,3 +241,60 @@ def test_losing_the_container_log_does_not_fail_the_shutdown(tmp_path, monkeypat
     ws.stop()  # the logs dir does not exist
     assert ws.container == ""
     assert ["docker", "rm", "-f"] in removed  # it still removed the container
+
+
+def test_mangled_cpp_names_are_turned_back_into_source_names(tmp_path):
+    """llvm-cov only demangles when its -Xdemangler run succeeds; json11's index
+    came out with 141 of 142 names mangled, which no agent reading the source
+    would recognise."""
+    from fbv3.fuzz.coverage import FunctionRow, demangle
+
+    table = {"_ZNK6json1110JsonDouble9int_valueEv": "json11::JsonDouble::int_value() const",
+             "_ZN6json114Json5parseERKNSt3__112basic_stringIcEE": "json11::Json::parse(std::string const&)"}
+
+    class WS:
+        def __init__(self):
+            self.stdin = None
+
+        def exec(self, argv, *, timeout=120, stdin=None, **kw):
+            self.stdin = stdin
+            names = stdin.decode().strip().split("\n")
+            return subprocess.CompletedProcess(
+                argv, 0, ("\n".join(table.get(n, n) for n in names) + "\n").encode(), b"")
+
+    ws = WS()
+    rows = [FunctionRow(m, "/src/json11.cpp", 1, 9, 3) for m in table] + \
+           [FunctionRow("LLVMFuzzerTestOneInput", "/src/h.cc", 1, 9, 1)]
+    out = {r.name for r in demangle(ws, rows)}
+    assert out == set(table.values()) | {"LLVMFuzzerTestOneInput"}
+    assert b"_ZNK6json11" in ws.stdin  # only the mangled ones were sent
+
+
+def test_demangling_is_skipped_when_nothing_is_mangled(tmp_path):
+    from fbv3.fuzz.coverage import FunctionRow, demangle
+
+    class WS:
+        def exec(self, *a, **kw):
+            raise AssertionError("should not be called")
+
+    rows = [FunctionRow("deflate", "/src/a.c", 1, 9, 2)]
+    assert [r.name for r in demangle(WS(), rows)] == ["deflate"]
+
+
+def test_a_demangler_that_loses_lines_keeps_the_mangled_names(tmp_path):
+    from fbv3.fuzz.coverage import FunctionRow, demangle
+
+    class WS:
+        def exec(self, argv, *, timeout=120, stdin=None, **kw):
+            return subprocess.CompletedProcess(argv, 0, b"only-one-line\n", b"")
+
+    rows = [FunctionRow("_ZNK1a", "/src/a.cc", 1, 9, 1), FunctionRow("_ZNK1b", "/src/a.cc", 2, 9, 1)]
+    assert sorted(r.name for r in demangle(WS(), rows)) == ["_ZNK1a", "_ZNK1b"]
+
+
+def test_the_export_script_reports_why_demangling_fell_back():
+    from fbv3.fuzz import coverage as cov
+
+    s = cov.export_script("/cov/fuzz", "/corpus", "/ws/coverage/p")
+    assert "demangling export failed" in s and "export.err" in s
+    assert "2>/dev/null" not in s  # the reason is no longer swallowed

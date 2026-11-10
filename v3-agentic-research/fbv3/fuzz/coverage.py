@@ -14,9 +14,12 @@ returning a CompletedProcess with bytes output).
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 NON_PROJECT = ("/usr/", "/src/llvm-project/", "compiler-rt/", "/root/.cache/", "libfuzzer/",
                "/src/aflplusplus/", "/src/libfuzzer/", "/src/honggfuzz/")
@@ -53,9 +56,12 @@ fi
 LLVM_PROFILE_FILE="{prof_dir}/empty.profraw" timeout 30 "{coverage_binary}" {prof_dir}/empty_input >/dev/null 2>&1 || true
 llvm-profdata merge -sparse {prof_dir}/*.profraw -o {prof_dir}/merged.profdata
 llvm-cov export -instr-profile={prof_dir}/merged.profdata -skip-expansions -Xdemangler=c++filt \\
-  "{coverage_binary}" 2>/dev/null \\
-  || llvm-cov export -instr-profile={prof_dir}/merged.profdata "{coverage_binary}"
+  "{coverage_binary}" 2>{prof_dir}/export.err \\
+  || {{ echo "demangling export failed:" >&2; cat {prof_dir}/export.err >&2; \\
+       llvm-cov export -instr-profile={prof_dir}/merged.profdata "{coverage_binary}"; }}
 """
+
+DEMANGLE = "export PATH=/ws/out/llvm:$PATH; c++filt 2>/dev/null || llvm-cxxfilt 2>/dev/null || cat"
 
 
 # llvm-cov region: [line_start, col_start, line_end, col_end, count, file_id,
@@ -122,7 +128,33 @@ def collect_functions(ws, *, coverage_binary: str, corpus_dir: str, timeout_s: i
         data = json.loads(res.stdout.decode("utf-8", "replace"))
     except ValueError as exc:
         return [], f"llvm-cov export did not produce JSON: {exc}"
-    return parse_export(data), ""
+    rows = parse_export(data)
+    return demangle(ws, rows), ""
+
+
+def demangle(ws, rows: list[FunctionRow], timeout_s: int = 120) -> list[FunctionRow]:
+    """Turn any mangled C++ names into the ones that appear in the source.
+
+    llvm-cov only demangles when its -Xdemangler run succeeds; when that falls
+    back, every C++ name comes out as _ZNK6json11... The agents read the source
+    and the mapper submits what they see there, so a mangled index disagrees
+    with them -- json11's came out 141 names of 142 mangled.
+    """
+    mangled = sorted({r.name for r in rows if r.name.startswith("_Z")})
+    if not mangled:
+        return rows
+    res = ws.exec(["bash", "-lc", DEMANGLE], timeout=timeout_s,
+                  stdin=("\n".join(mangled) + "\n").encode())
+    out = res.stdout.decode("utf-8", "replace").splitlines()
+    if len(out) != len(mangled):
+        logger.warning("demangling returned %d names for %d symbols; keeping the mangled ones",
+                       len(out), len(mangled))
+        return rows
+    table = {m: d.strip() for m, d in zip(mangled, out) if d.strip() and d.strip() != m}
+    for r in rows:
+        if r.name in table:
+            r.name = table[r.name]
+    return rows
 
 
 def write_index(rows: list[FunctionRow], path: Path) -> None:
