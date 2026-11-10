@@ -32,7 +32,10 @@ from typing import List, Optional, Sequence
 # (WARNING, not ERROR) -- under MSAN_OPTIONS=halt_on_error=1 (what the verifier
 # uses) that still aborts the process, so it IS a crash. The old ERROR-only
 # regex discarded every MSan finding as NOT A CRASH; accept WARNING too.
-_ASAN_ERROR = re.compile(r"(?:ERROR|WARNING): \w*Sanitizer: ([a-zA-Z0-9_-]+)")
+# The SUMMARY line carries the same class as the ERROR line, and it is the one
+# that survives: a deep stack trace pushes the ERROR line out of any bounded
+# capture, and a crash with no class is not counted as a crash at all.
+_ASAN_ERROR = re.compile(r"(?:ERROR|WARNING|SUMMARY): \w*Sanitizer: ([a-zA-Z0-9_-]+)")
 _UBSAN_LINE = re.compile(r"runtime error: (.+?)(?:\s*\(|$)", re.MULTILINE)
 _LSAN_LEAK = re.compile(r"(?:ERROR: LeakSanitizer|SUMMARY: .*LeakSanitizer)")
 # libFuzzer prints "==N== ERROR: libFuzzer: deadly signal" (and a matching

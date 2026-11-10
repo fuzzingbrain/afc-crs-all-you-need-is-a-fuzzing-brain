@@ -14,9 +14,15 @@ from typing import Callable
 from fbv3.fuzz import signature as sigmod
 from fbv3.harness.principles import classify_reachability
 
-SAN_MARKERS = ("ERROR: AddressSanitizer", "ERROR: MemorySanitizer", "WARNING: MemorySanitizer",
-               "ERROR: LeakSanitizer", "runtime error:", "ERROR: libFuzzer: deadly signal",
-               "SUMMARY: UndefinedBehaviorSanitizer", "ERROR: libFuzzer: out-of-memory")
+# Both spellings: a deep stack trace can be tens of thousands of characters, so
+# the ERROR line scrolls out of any bounded tail and only the SUMMARY survives.
+# toml11's 256-frame recursion did exactly that, and the crash went unnoticed.
+SAN_MARKERS = ("ERROR: AddressSanitizer", "SUMMARY: AddressSanitizer",
+               "ERROR: MemorySanitizer", "WARNING: MemorySanitizer", "SUMMARY: MemorySanitizer",
+               "ERROR: LeakSanitizer", "SUMMARY: LeakSanitizer",
+               "runtime error:", "SUMMARY: UndefinedBehaviorSanitizer",
+               "ERROR: libFuzzer: deadly signal", "SUMMARY: libFuzzer: deadly signal",
+               "ERROR: libFuzzer: out-of-memory")
 # Fork mode prints "exec/s 14244" (no colon) and some lines carry no rate at all,
 # so edges/features and the rate are read separately.
 COV = re.compile(r"\bcov:\s*(\d+)\s+ft:\s*(\d+)")
@@ -70,10 +76,23 @@ def judge(text: str, *, seconds: int, min_edges: int, min_exec_s: int, harness_n
     return {**verdict.to_dict(), "stats": stats, "signature": sig_short}
 
 
+TAIL_MARK = "==FBV3-SMOKE-TAIL=="
+
+
 def script(binary: str, corpus: str, seconds: int) -> str:
-    return (f"mkdir -p {corpus} && timeout {seconds + 30} {binary} {corpus} -max_total_time={seconds} "
-            f"-timeout=10 -rss_limit_mb=2048 -detect_leaks=0 -print_final_stats=1 -artifact_prefix={corpus}/ "
-            f"2>&1 | tail -c 60000")
+    """Fuzz briefly, and make sure the coverage lines survive the trace.
+
+    A bounded tail of the raw output is not enough: one deep stack trace fills
+    it and the "cov: N ft: M" lines are gone, which reads as a harness that
+    covered nothing. The counters are grepped out separately first.
+    """
+    log = f"{corpus}.log"
+    return (f"mkdir -p {corpus}; timeout {seconds + 30} {binary} {corpus} -max_total_time={seconds} "
+            f"-timeout=10 -rss_limit_mb=2048 -detect_leaks=0 -print_final_stats=1 "
+            f"-artifact_prefix={corpus}/ > {log} 2>&1; "
+            f"grep -aE '\\bcov: [0-9]+' {log} | tail -3; "
+            f"grep -aE 'ERROR: |SUMMARY: ' {log} | head -4; "
+            f"echo '{TAIL_MARK}'; tail -c 30000 {log}")
 
 
 def infra_failure(text: str) -> str:

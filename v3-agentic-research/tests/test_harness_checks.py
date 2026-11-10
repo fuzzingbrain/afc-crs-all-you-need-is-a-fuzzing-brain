@@ -173,3 +173,39 @@ def test_p4_covers_the_peer_a_protocol_library_needs():
     assert "in-process transport" in text and "127.0.0.1" in text
     assert "Never an outside host" in text
     assert "could not be reproduced" in text
+
+
+DEEP_TRACE_TAIL = """\
+#254 0x1 in skip_array_like /src/toml11/skip.hpp:187:13
+#255 0x1 in skip_array_like /src/toml11/skip.hpp:187:13
+#256 0x1 in skip_array_like /src/toml11/skip.hpp:187:13
+
+SUMMARY: AddressSanitizer: stack-overflow /src/toml11/location_fwd.hpp:40:5 in location
+==211==ABORTING
+stat::number_of_executed_units: 53797
+"""
+
+
+def test_a_crash_is_recognised_from_the_summary_line_alone():
+    """A 256-frame trace pushes the ERROR line out of any bounded tail; toml11's
+    recursion did that and a real crash was read as a harness that covered nothing."""
+    out = smoke.judge(DEEP_TRACE_TAIL, seconds=30, min_edges=20, min_exec_s=10,
+                      harness_names=["parse_fuzzer"])
+    assert out["verdict"] == "crash"
+    assert "stack-overflow" in out["detail"]
+
+
+def test_the_smoke_script_keeps_the_counters_out_of_the_trail():
+    s = smoke.script("/out/fuzz", "/ws/logs/smoke-a", 30)
+    assert "cov: [0-9]+" in s and "grep -a" in s      # counters first, whatever follows
+    assert "grep -aE 'ERROR: |SUMMARY: '" in s        # and the report lines
+    assert smoke.TAIL_MARK in s and "tail -c 30000" in s
+
+
+def test_counters_grepped_ahead_of_a_trace_are_still_parsed():
+    text = ("#512 NEW cov: 318 ft: 402 corp: 9/23b exec/s: 4138 rss: 35Mb\n"
+            "SUMMARY: AddressSanitizer: stack-overflow /src/a.hpp:40:5 in location\n"
+            + smoke.TAIL_MARK + "\n" + DEEP_TRACE_TAIL)
+    out = smoke.judge(text, seconds=30, min_edges=20, min_exec_s=10, harness_names=["fuzz"])
+    assert out["stats"]["edges"] == 318 and out["stats"]["exec_s"] == 4138
+    assert out["verdict"] == "crash"  # a crash, not "dead"

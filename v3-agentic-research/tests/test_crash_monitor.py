@@ -258,3 +258,15 @@ def test_unrelated_crashes_are_not_merged(tmp_path):
     m.handle("global", artifact(tmp_path, "b"), output=ASAN)  # a heap overflow, no cycle
     s = report.summarize(store, elapsed_s=1)
     assert s["distinct_bugs"] == 2 and s["recursion_groups"] == []
+
+
+def test_a_class_is_read_from_the_summary_line_too():
+    """A deep trace pushes the ERROR line out of a bounded capture; without the
+    class the monitor would drop a real crash as "no sanitizer report"."""
+    from fbv3.fuzz import signature as sigmod
+
+    only_summary = ("    #256 0x1 in skip_array_like /src/toml11/skip.hpp:187:13\n"
+                    "SUMMARY: AddressSanitizer: stack-overflow /src/toml11/location_fwd.hpp:40:5\n")
+    assert sigmod.extract_class(only_summary) == "stack-overflow"
+    assert sigmod.extract_class("SUMMARY: AddressSanitizer: heap-buffer-overflow /a.c:1") \
+        == "heap-buffer-overflow"
