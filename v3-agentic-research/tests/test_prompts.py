@@ -143,3 +143,11 @@ def test_the_harness_author_is_told_to_build_a_hostile_peer():
     assert "give it a HOSTILE one" in system
     assert "BIO pair" in system and "127.0.0.1" in system
     assert "nothing outside the process is involved" in system
+
+
+def test_the_integrator_knows_the_principles_its_harness_is_judged_by():
+    """It writes the first harness, and the same gate applies to it."""
+    system, _ = prompts.integrator(project="p", function="f")
+    assert all(p in system for p in ("P1", "P2", "P3", "P4")) and "P5" not in system
+    msan, _ = prompts.integrator(project="p", function="f", sanitizers=("address", "memory"))
+    assert "__msan_check_mem_is_initialized" in msan

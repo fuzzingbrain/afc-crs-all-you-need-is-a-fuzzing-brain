@@ -347,3 +347,46 @@ def test_a_container_without_network_still_says_so(tmp_path, monkeypatch):
     seen.clear()
     ws.start("busybox", memory_mb=512, cpus=1.0, pids=64, network=True)
     assert "--network" not in seen[0]
+
+
+def test_the_integrate_stage_builds_every_sanitizer_the_task_wants(tmp_path, monkeypatch):
+    """A run of integrate + directed never reaches the harness stage's finalise,
+    so without this the bug hunt quietly falls back to the address build."""
+    stage, pool, store, ws, built = make(tmp_path, monkeypatch, functions=9)
+    stage.task.harness.sanitizers = ("address", "undefined")
+    pool.files["integrator"] = submission(tmp_path)
+    out = stage.run(Target("mylib_parse"))
+    assert out.status == "integrated"
+    assert set(out.builds) == {"address", "coverage", "undefined"}
+    assert [k["sanitizer"] for k in built] == ["coverage", "undefined"]
+
+
+def test_a_failed_extra_sanitizer_build_does_not_fail_the_integration(tmp_path, monkeypatch):
+    stage, pool, store, ws, built = make(tmp_path, monkeypatch, functions=9)
+    # UBSan, not MSan: asking for memory would (correctly) fail the P5 check,
+    # since this harness does not check its outputs for initialisation.
+    stage.task.harness.sanitizers = ("address", "undefined")
+
+    real = integrate.build_workspace
+
+    def flaky(**kw):
+        if kw["sanitizer"] == "undefined":
+            return workspace_build.BuildResult(False, "undefined", "", error="no ubsan runtime here")
+        return real(**kw)
+
+    monkeypatch.setattr(integrate, "build_workspace", flaky)
+    pool.files["integrator"] = submission(tmp_path)
+    out = stage.run(Target("mylib_parse"))
+    assert out.status == "integrated" and "undefined" not in out.builds
+    assert "sanitizer_build_failed" in (tmp_path / "run" / "events.jsonl").read_text()
+
+
+def test_asking_for_msan_makes_the_gate_require_the_output_checks(tmp_path, monkeypatch):
+    """P5: an MSan build is pointless if the harness never checks what the library
+    wrote, so the gate refuses a harness that does not."""
+    stage, pool, store, ws, _ = make(tmp_path, monkeypatch, functions=9, max_rounds=1)
+    stage.task.harness.sanitizers = ("address", "memory")
+    pool.files["integrator"] = submission(tmp_path)
+    out = stage.run(Target("mylib_parse"))
+    assert out.status == "failed"
+    assert "__msan_check_mem_is_initialized" in pool.prompts[0][1]  # P5 is in the prompt too

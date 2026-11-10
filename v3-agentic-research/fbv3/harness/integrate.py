@@ -196,7 +196,8 @@ class IntegrateStage:
                 project=self.task.project, function=target.function if target else "",
                 entries=target.entries if target else (),
                 description=target.description if target else "",
-                allow_network=self.cfg.allow_network)
+                allow_network=self.cfg.allow_network,
+                sanitizers=self.task.harness.sanitizers)
             res = self._session(system, task + previous, slug)
             sub = _read_json(res.out_dir / "build.json") if res.session_id else {}
             if not sub:
@@ -226,6 +227,29 @@ class IntegrateStage:
                 out.source_dir = self.task.source_dir
                 out.builds = {"address": str(Path(sub["build_dir"]) / "out"),
                               "coverage": record["coverage_out"]}
+                # Any other sanitizer the task wants fuzzed, built here too: the
+                # harness stage builds these in its own finalise, but a run of
+                # integrate + directed alone never reaches that, and the bug hunt
+                # would quietly fall back to the address build.
+                for san in self.task.harness.sanitizers:
+                    if san in ("address", "coverage") or san in out.builds:
+                        continue
+                    extra = build_workspace(
+                        base_image=self.cfg.base_image, source_dir=Path(self.task.source_dir),
+                        build_sh=sub["build_sh"],
+                        harness_files={sub["harness_path"]: sub["harness_code"]},
+                        build_dir=self.ws.path(f"builds/{slug}/{san}"), sanitizer=san,
+                        engine="libfuzzer", language=self.task.language, run_id=self.run_id,
+                        timeout_s=self.cfg.build_timeout_s, memory_mb=self.cfg.build_memory_mb,
+                        cpus=self.cfg.build_cpus, allow_network=self.cfg.allow_network,
+                        expected_binary=sub["binary"])
+                    if extra.ok:
+                        out.builds[san] = extra.out_dir
+                    else:
+                        logger.warning("%s: the %s build failed: %s", self.task.project, san,
+                                       extra.error)
+                        self.store.emit("sanitizer_build_failed", project=self.task.project,
+                                        sanitizer=san, error=extra.error)
                 self.store.set_harness(slug, out.status, binary=out.binary, overlay=out.harness_path,
                                        source_path=out.source_path, builds=out.builds,
                                        rounds=round_no, notes=out.notes)

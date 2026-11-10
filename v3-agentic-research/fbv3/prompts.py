@@ -121,7 +121,11 @@ library, and disable shared libraries where the build system allows it.
    image the build runs in, so what works there works in build.sh.
 3. Write a small first harness for the entry point you were given (or the most
    obvious parser entry point if you were given none). It only has to exercise
-   that entry point from the fuzz input.
+   that entry point from the fuzz input -- a later agent will improve it -- but
+   the same gate applies to it as to that one:
+
+{principles}
+
 4. Call ``build_project`` with build.sh, the harness path and its code. You get
    the compiler errors back; fix and call it again until it builds.
 5. ``submit_build`` once it builds, with notes: how the library is built, where
@@ -608,8 +612,9 @@ def _entries_line(entries) -> str:
 
 
 def integrator(*, project: str, function: str = "", entries=(), description: str = "",
-               allow_network: bool = False) -> tuple[str, str]:
-    system = INTEGRATOR_SYSTEM.format(ws=ws_text(), network=NETWORK_ON if allow_network else NETWORK_OFF)
+               allow_network: bool = False, sanitizers=("address",)) -> tuple[str, str]:
+    system = INTEGRATOR_SYSTEM.format(ws=ws_text(), principles=principles_text(sanitizers),
+                                      network=NETWORK_ON if allow_network else NETWORK_OFF)
     task = INTEGRATOR_TASK.format(
         project=project, entries_line=_entries_line(entries),
         target_line=(f"Entry point to exercise: {function}" if function else
