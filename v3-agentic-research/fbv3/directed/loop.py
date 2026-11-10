@@ -6,6 +6,9 @@
     breaker (frontier) -> global corpus
     coverage refresh -> newly covered functions -> finder
 
+* The seed agent and the mapper run at the same time (libFuzzer reloads its
+  corpus live, so seeds arriving later still land): serially they would push
+  the first finder back by both their durations.
 * Two fuzzers run for the whole stage: the global one (fed by the seed agent,
   the breaker and the fp seeds) and one shared PoC fuzzer (fed by every PoC
   candidate, so it mutates around all of them). A crash monitor reproduces,
@@ -371,6 +374,13 @@ class DirectedRun:
 
     # -- phase A: seeds, then the map --------------------------------------------------------
 
+    def _seed_in_background(self) -> None:
+        """Run the seed agent off the main thread, swallowing nothing silently."""
+        try:
+            self._seed_agent()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("%s: the seed agent failed: %s", self.lg.name, exc)
+
     def _seed_agent(self) -> None:
         system, task = self._prompt("seed", lg=self.lg.name, targets=self._targets_str(),
                                     description=self.lg.description or "(no description given)")
@@ -657,6 +667,7 @@ class DirectedRun:
         summary = {"lg": self.lg.name, "binary": self.lg.binary, "mode": self.cfg.mode,
                    "root": str(self.ws.root), "function_index": {}}
         sampler = None
+        seeder = None
         try:
             self._prepare()
             summary["coverage_initial"] = self._build_function_index()
@@ -679,7 +690,18 @@ class DirectedRun:
             self._start_fuzzers()
             sampler = threading.Thread(target=self._sampler, daemon=True, name=f"sample-{self.lg.name}")
             sampler.start()
-            if seeding and not afl:
+            seeder = None
+            if seeding and not afl and self.cfg.mode == "directed":
+                # The seed agent and the mapper want the same minutes and need
+                # nothing from each other: one writes inputs into a corpus the
+                # fuzzer is already reloading, the other reads code to rank
+                # functions. Run serially they push the bug lane back by both
+                # their durations -- on a 33 min ImageMagick stage that was
+                # 900s + 390s, and exactly one function was ever analysed.
+                seeder = threading.Thread(target=self._seed_in_background, daemon=True,
+                                          name=f"seed-{self.lg.name}")
+                seeder.start()
+            elif seeding and not afl:
                 self._seed_agent()
             if self.cfg.mode == "directed":
                 self._fill_queue(self._mapper())
@@ -689,6 +711,13 @@ class DirectedRun:
                 while self._left() > 5:  # baseline / legacy: just let the fuzzer work
                     time.sleep(min(30.0, max(1.0, self._left())))
         finally:
+            # The seed agent writes into the live corpus, so it has to be done
+            # before _finish() stops the workspace it writes through.
+            if seeder is not None:
+                seeder.join(timeout=max(5.0, self._left() + 60.0))
+                if seeder.is_alive():
+                    logger.warning("%s: the seed agent is still running at the end of the stage; "
+                                   "its remaining inputs are lost", self.lg.name)
             summary.update(self._finish())
         return summary
 

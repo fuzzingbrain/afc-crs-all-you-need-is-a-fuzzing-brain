@@ -10,6 +10,8 @@ itself turns a VH into a PoC.
 from __future__ import annotations
 
 import json
+import logging
+import threading
 import time
 from pathlib import Path
 
@@ -754,3 +756,80 @@ def test_a_task_enqueued_during_the_drain_is_still_taken(tmp_path, monkeypatch):
     pool, sem, role_of, inflight = _drain_harness(run, monkeypatch)
     run._drain(pool, sem, role_of, inflight)
     assert order == ["verify", "poc"]
+
+
+def _stub_stage(run, monkeypatch, *, afl=False):
+    """Everything run() does except the seed/mapper ordering under test."""
+    monkeypatch.setattr(run, "_prepare", lambda: None)
+    monkeypatch.setattr(run, "_build_function_index", lambda: {})
+    monkeypatch.setattr(run, "_detect_engine", lambda: afl)
+    monkeypatch.setattr(run, "_start_fuzzers", lambda: None)
+    monkeypatch.setattr(run, "_sampler", lambda: None)
+    monkeypatch.setattr(run, "_fill_queue", lambda rows: None)
+    monkeypatch.setattr(run, "_schedule", lambda: None)
+    monkeypatch.setattr(run, "_finish", lambda: {})
+
+
+def test_the_seed_agent_and_the_mapper_run_together(tmp_path, monkeypatch):
+    """ImageMagick's directed stage analysed one function: 900s of seed agent
+    and 390s of mapper ran one after the other before the first finder could
+    start. Neither needs the other's output."""
+    run, _pool, _store = make(tmp_path)
+    _stub_stage(run, monkeypatch)
+    log: list[str] = []
+    done = threading.Event()
+
+    def seed():
+        log.append("seed-start")
+        assert done.wait(2.0), "the mapper never ran while the seed agent was working"
+        log.append("seed-end")
+
+    def mapper():
+        log.append("mapper")
+        done.set()
+        return []
+
+    monkeypatch.setattr(run, "_seed_agent", seed)
+    monkeypatch.setattr(run, "_mapper", mapper)
+    run.run()
+    assert log == ["seed-start", "mapper", "seed-end"]
+
+
+def test_the_stage_waits_for_the_seed_agent_before_tearing_down(tmp_path, monkeypatch):
+    """The seed agent writes into the live corpus through the workspace _finish
+    stops, so its thread has to be joined first."""
+    run, _pool, _store = make(tmp_path)
+    _stub_stage(run, monkeypatch)
+    order: list[str] = []
+    monkeypatch.setattr(run, "_mapper", lambda: [])
+    monkeypatch.setattr(run, "_finish", lambda: order.append("finish") or {})
+
+    def seed():
+        time.sleep(0.2)
+        order.append("seed")
+
+    monkeypatch.setattr(run, "_seed_agent", seed)
+    run.run()
+    assert order == ["seed", "finish"]
+
+
+def test_an_afl_build_still_seeds_before_the_fuzzer_starts(tmp_path, monkeypatch):
+    """AFL copies its inputs once at startup and syncs nothing back in."""
+    run, _pool, _store = make(tmp_path)
+    _stub_stage(run, monkeypatch, afl=True)
+    order: list[str] = []
+    monkeypatch.setattr(run, "_seed_agent", lambda: order.append("seed"))
+    monkeypatch.setattr(run, "_start_fuzzers", lambda: order.append("fuzzers"))
+    monkeypatch.setattr(run, "_mapper", lambda: order.append("mapper") or [])
+    run.run()
+    assert order == ["seed", "fuzzers", "mapper"]
+
+
+def test_a_failing_seed_agent_does_not_take_the_stage_down(tmp_path, monkeypatch, caplog):
+    run, _pool, _store = make(tmp_path)
+    _stub_stage(run, monkeypatch)
+    monkeypatch.setattr(run, "_seed_agent", lambda: (_ for _ in ()).throw(RuntimeError("no backend")))
+    monkeypatch.setattr(run, "_mapper", lambda: [])
+    with caplog.at_level(logging.WARNING):
+        run.run()
+    assert "the seed agent failed: no backend" in caplog.text
