@@ -234,3 +234,32 @@ def test_the_directed_stage_needs_a_target(tmp_path, stub, monkeypatch):
 def test_viewing_a_directory_with_no_run_creates_nothing(tmp_path):
     assert report.load(tmp_path) == {}
     assert list(tmp_path.iterdir()) == []
+
+
+def test_the_logic_group_fuzzes_the_sanitizer_that_was_asked_for(tmp_path, stub):
+    from fbv3.harness.pipeline import HarnessOutcome
+
+    t = Task.from_dict({"name": "t", "project": "p", "stages": ["harness", "directed"],
+                        "builder_image": "img", "runner_image": "runner",
+                        "targets": [{"function": "f"}],
+                        "harness": {"sanitizers": ["address", "undefined"]},
+                        "directed": {"sanitizer": "undefined"}})
+    runner = runmod.Runner(t, out_dir=tmp_path / "run")
+    h = HarnessOutcome("t1", "accepted", binary="fuzz", source_path="/s.c",
+                       builds={"address": "/a", "undefined": "/u", "coverage": "/c"})
+    lg = runner._logic_groups([h])[0]
+    assert lg.sanitizer == "undefined" and str(lg.asan_out) == "/u"
+    assert str(lg.coverage_out) == "/c"  # the index still comes from the coverage build
+
+
+def test_a_missing_sanitizer_build_falls_back_and_says_so(tmp_path, stub, caplog):
+    from fbv3.harness.pipeline import HarnessOutcome
+
+    t = Task.from_dict({"name": "t", "project": "p", "stages": ["directed"],
+                        "prebuilt": [{"name": "f", "binary": "f", "asan_out": str(tmp_path)}],
+                        "directed": {"sanitizer": "memory"}})
+    runner = runmod.Runner(t, out_dir=tmp_path / "run2")
+    h = HarnessOutcome("t1", "accepted", binary="fuzz", builds={"address": "/a"})
+    with caplog.at_level("WARNING"):
+        lg = runner._logic_groups([h])[0]
+    assert lg.sanitizer == "address" and "fuzzes the address one" in caplog.text

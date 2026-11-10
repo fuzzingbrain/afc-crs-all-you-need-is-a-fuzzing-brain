@@ -88,6 +88,9 @@ def _add_task_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--duration", type=int, metavar="SECONDS", help="directed stage budget per target")
     g.add_argument("--rounds", type=int, metavar="N", help="harness generate/review rounds per target")
     g.add_argument("--sessions", type=int, metavar="N", help="agent sessions in flight (default 1)")
+    g.add_argument("--sanitizer", choices=("address", "memory", "undefined"),
+                   help="which build the bug hunt fuzzes (default address); the build is added to the "
+                        "harness's sanitizers so it gets made")
     g.add_argument("--mode", choices=("directed", "legacy", "baseline"),
                    help="directed (default), legacy (seed agent + fuzzer), baseline (fuzzer only)")
     g.add_argument("--backend", choices=("claude", "codex"), help="send every role to this backend")
@@ -181,6 +184,12 @@ def task_from_args(args) -> Task:
             data["stages"] = ["discovery", *data["stages"]]
     if args.duration:
         data.setdefault("directed", {})["duration_seconds"] = args.duration
+    if args.sanitizer:
+        data.setdefault("directed", {})["sanitizer"] = args.sanitizer
+        sans = list(data.setdefault("harness", {}).get("sanitizers") or ["address"])
+        if args.sanitizer not in sans:
+            sans.append(args.sanitizer)
+        data["harness"]["sanitizers"] = sans
     if args.mode:
         data.setdefault("directed", {})["mode"] = args.mode
     if args.no_breaker:

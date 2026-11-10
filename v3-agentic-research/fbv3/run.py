@@ -170,14 +170,19 @@ class Runner:
 
     def _logic_groups(self, harnesses) -> list[LogicGroup]:
         groups: list[LogicGroup] = []
+        want = self.task.directed.sanitizer
         for h in harnesses:
             if not h.usable:
                 continue
+            san = want if want in h.builds else "address"
+            if san != want:
+                logger.warning("%s has no %s build, so the directed stage fuzzes the address one",
+                               h.target, want)
             groups.append(LogicGroup(
-                name=h.target, binary=h.binary, asan_out=Path(h.builds["address"]),
+                name=h.target, binary=h.binary, asan_out=Path(h.builds[san]),
                 coverage_out=Path(h.builds["coverage"]) if "coverage" in h.builds else None,
                 harness_sources=[Path(h.source_path)] if h.source_path else [],
-                description=h.notes, sanitizer="address"))
+                description=h.notes, sanitizer=san))
         for p in self.task.prebuilt:
             groups.append(LogicGroup(
                 name=p.name, binary=p.binary, asan_out=Path(p.asan_out),

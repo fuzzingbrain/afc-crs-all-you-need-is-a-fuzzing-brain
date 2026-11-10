@@ -175,6 +175,10 @@ class HarnessConfig:
 class DirectedConfig:
     duration_seconds: int = 1800
     mode: str = "directed"  # directed | legacy (seed agent + fuzz) | baseline (fuzz only)
+    # Which of the harness's builds to fuzz. The others are still produced (the
+    # coverage one is needed for the function index), but only this one is run,
+    # so asking for "undefined" here is what makes a UBSan run a UBSan run.
+    sanitizer: str = "address"
     phase1_max_functions: int = 12
     max_functions: int = 200
     coverage_interval_s: int = 180
@@ -284,6 +288,13 @@ class Task:
         for s in self.harness.sanitizers:
             if s not in SANITIZERS:
                 raise ConfigError(f"harness.sanitizers: {s!r} not in {SANITIZERS}")
+        if self.directed.sanitizer not in SANITIZERS:
+            raise ConfigError(f"directed.sanitizer must be one of {SANITIZERS}")
+        if "harness" in self.stages or "integrate" in self.stages:
+            if self.directed.sanitizer not in self.harness.sanitizers:
+                raise ConfigError(
+                    f"directed.sanitizer is {self.directed.sanitizer!r} but harness.sanitizers is "
+                    f"{list(self.harness.sanitizers)}, so that build is never made; add it there")
         if self.directed.mode not in ("directed", "legacy", "baseline"):
             raise ConfigError("directed.mode must be directed, legacy or baseline")
         if self.directed.duration_seconds <= 0:

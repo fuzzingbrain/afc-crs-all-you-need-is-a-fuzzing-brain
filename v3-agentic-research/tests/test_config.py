@@ -96,3 +96,22 @@ def test_round_trips_through_json(tmp_path):
     task = Task.load(path)
     assert task.directed.duration_seconds == 60
     assert Task.from_dict(task.to_dict()).to_dict() == task.to_dict()
+
+
+def test_the_directed_stage_can_be_pointed_at_another_sanitizer():
+    task = Task.from_dict(base(harness={"sanitizers": ["address", "undefined"]},
+                               directed={"sanitizer": "undefined"}))
+    assert task.directed.sanitizer == "undefined"
+
+
+def test_asking_to_fuzz_a_build_that_is_never_made_is_an_error():
+    """The extra sanitizer builds were produced and then never fuzzed; asking for
+    one the harness stage does not build would have been silently ignored."""
+    with pytest.raises(ConfigError, match="never made"):
+        Task.from_dict(base(directed={"sanitizer": "undefined"}))
+    with pytest.raises(ConfigError, match="directed.sanitizer"):
+        Task.from_dict(base(directed={"sanitizer": "thread"}))
+    # a prebuilt task has no harness stage, so it may name whatever it built
+    Task.from_dict({"name": "t", "project": "p", "stages": ["directed"],
+                    "prebuilt": [{"name": "f", "binary": "f", "asan_out": "/tmp/o"}],
+                    "directed": {"sanitizer": "undefined"}})
