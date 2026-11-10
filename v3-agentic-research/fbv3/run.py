@@ -211,8 +211,12 @@ class Runner:
             integration = None
             needs_container = bool({"integrate", "discovery", "harness"} & set(task.stages))
             if needs_container:
+                # The exploration container matches the build: an agent told the
+                # build may fetch must be able to try that while exploring.
                 self.shared.start(self._ws_image_for(ws_image), memory_mb=task.limits.ws_memory_mb,
-                                  cpus=task.limits.ws_cpus, pids=task.limits.ws_pids)
+                                  cpus=task.limits.ws_cpus, pids=task.limits.ws_pids,
+                                  network=("integrate" in task.stages
+                                           and task.integrate.allow_network))
                 targets = list(task.targets)
                 if "integrate" in task.stages and not self.stop.is_set():
                     self._stages.append("integrate")

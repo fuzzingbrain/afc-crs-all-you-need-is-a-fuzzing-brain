@@ -143,8 +143,10 @@ notes rather than trying to download it.
 """
 
 NETWORK_ON = """
-The build may use the network, so fetching a dependency is allowed. Prefer a
-pinned version, and list in your notes everything the build downloads.
+The build may use the network, so fetching a dependency is allowed, and your
+`exec` can reach it too -- what works while you explore will work in build.sh.
+Prefer a pinned version, and list in your notes everything the build
+downloads.
 """
 
 

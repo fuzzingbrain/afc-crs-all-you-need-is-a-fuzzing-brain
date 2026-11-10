@@ -305,3 +305,45 @@ def test_an_integrated_run_takes_its_llvm_tools_from_the_toolchain_image(tmp_pat
     monkeypatch.setattr(runmod.docker, "kill_run_containers", lambda rid: 0)
     runmod.Runner(task).run()
     assert asked == [task.integrate.base_image]
+
+
+@pytest.mark.parametrize("allow,expect_network", [(False, False), (True, True)])
+def test_exploration_gets_the_network_the_build_gets(tmp_path, monkeypatch, allow, expect_network):
+    """An agent told the build may fetch must be able to try that while exploring,
+    or it writes build.sh around a failure that only existed offline."""
+    from fbv3 import run as runmod
+
+    task = Task.from_dict({"name": "t", "project": "p", "stages": ["integrate", "directed"],
+                           "source_dir": str(tmp_path), "output": str(tmp_path / "run"),
+                           "integrate": {"allow_network": allow}})
+    started = {}
+    monkeypatch.setattr(runmod.Workspace, "layout", lambda self: self)
+    monkeypatch.setattr(runmod.Workspace, "start",
+                        lambda self, image, **kw: started.update(kw) or "c")
+    monkeypatch.setattr(runmod.Workspace, "stop", lambda self: None)
+    monkeypatch.setattr(runmod.Workspace, "extract_llvm_tools", lambda self, image: None)
+    monkeypatch.setattr(runmod.Runner, "_source", lambda self: tmp_path)
+    monkeypatch.setattr(runmod.image, "ensure_image", lambda *a, **k: "ws:test")
+    monkeypatch.setattr(runmod.IntegrateStage, "run",
+                        lambda self, target: integrate.Integration("integrate", "failed"))
+    monkeypatch.setattr(runmod.docker, "kill_run_containers", lambda rid: 0)
+    runmod.Runner(task).run()
+    assert started["network"] is expect_network
+
+
+def test_a_container_without_network_still_says_so(tmp_path, monkeypatch):
+    """The default stays closed; only an explicit allow_network opens it."""
+    import subprocess
+
+    from fbv3.sandbox import docker as dockermod
+    from fbv3.sandbox.workspace import Workspace
+
+    seen = []
+    monkeypatch.setattr(dockermod, "run", lambda argv, **kw: seen.append(argv) or
+                        subprocess.CompletedProcess(argv, 0, b"cid", b""))
+    ws = Workspace(root=tmp_path, run_id="r1").layout()
+    ws.start("busybox", memory_mb=512, cpus=1.0, pids=64)
+    assert "--network" in seen[0] and "none" in seen[0]
+    seen.clear()
+    ws.start("busybox", memory_mb=512, cpus=1.0, pids=64, network=True)
+    assert "--network" not in seen[0]

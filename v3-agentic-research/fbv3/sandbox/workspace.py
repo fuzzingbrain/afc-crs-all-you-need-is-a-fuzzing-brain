@@ -130,7 +130,16 @@ class Workspace:
 
     # -- container ---------------------------------------------------------------------
 
-    def start(self, image: str, *, memory_mb: int, cpus: float, pids: int) -> str:
+    def start(self, image: str, *, memory_mb: int, cpus: float, pids: int,
+              network: bool = False) -> str:
+        """Start the container the agents' commands run in.
+
+        ``network`` exists for one case: when the build is allowed to fetch
+        dependencies, the container the agent *explores* in must be able to as
+        well, or it tries the build steps offline, concludes they fail, and
+        writes a build.sh around a problem that does not exist. Fuzzers and
+        crash reproduction never get it.
+        """
         self.image = image
         name = f"fbv3-ws-{uuid.uuid4().hex[:10]}"
         r = str(self.root)
@@ -140,7 +149,7 @@ class Workspace:
             "--user", docker.uid_gid(), "-e", "HOME=/tmp",
             *docker.resource_args(memory_mb, cpus, pids),
             "--cap-add", "SYS_PTRACE", "--security-opt", "seccomp=unconfined",  # gdb
-            "--network", "none",
+            *([] if network else ["--network", "none"]),
             "-v", f"{r}:/ws",
             "-v", f"{r}/src:/ws/src:ro", "-v", f"{r}/src:/src:ro",
             "-v", f"{r}/out:/ws/out:ro",
