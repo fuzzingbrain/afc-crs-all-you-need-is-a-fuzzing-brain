@@ -110,6 +110,30 @@ def _contains(path: Path, needle: bytes) -> bool:
         return False
 
 
+def choose_binary(marked: list[str], overlay: str, expected_binary: str = "") -> tuple[str, str]:
+    """Which built target is *the* one for this harness, and what to say about it.
+
+    One overlay can compile into many targets: ImageMagick builds 150
+    encoder_<format>_fuzzer binaries from a single encoder_fuzzer.cc with a
+    per-format macro, so the marker is in all of them. Taking the first by
+    name silently hands back encoder_aai_fuzzer while the agent believes it is
+    fuzzing the generic decoder. The name is used when it identifies one, and
+    otherwise the ambiguity is reported rather than resolved by luck.
+    """
+    if expected_binary and expected_binary in marked:
+        return expected_binary, ""
+    stem = Path(overlay).stem
+    if stem in marked:
+        return stem, ""
+    if len(marked) == 1:
+        return marked[0], ""
+    shown = ", ".join(sorted(marked)[:8]) + (" ..." if len(marked) > 8 else "")
+    return "", (f"{overlay} is compiled into {len(marked)} fuzz targets ({shown}), so which one is "
+                "this harness cannot be told from the build. That happens when build.sh compiles one "
+                "source many times with different macros. Pick a source that produces a single target, "
+                "or name the one you mean.")
+
+
 def build_harness(
     *,
     builder_image: str,
@@ -168,10 +192,10 @@ def build_harness(
                      f"{overlay} is not compiled by build.sh into any target (targets: {targets})")
         res.log_excerpt = excerpt(log, 2000)
         return res
-    if expected_binary and expected_binary in marked:
-        res.binary = expected_binary
-    else:
-        stem = Path(overlay).stem
-        res.binary = stem if stem in marked else marked[0]
+    res.binary, ambiguity = choose_binary(marked, overlay, expected_binary)
+    if ambiguity:
+        res.error = ambiguity
+        res.binaries = sorted(marked)
+        return res
     res.ok = True
     return res

@@ -29,7 +29,8 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fbv3.build.builder import BuildResult, classify_infra, excerpt, fuzz_targets, inject_marker
+from fbv3.build.builder import (BuildResult, choose_binary, classify_infra, excerpt, fuzz_targets,
+                                inject_marker)
 from fbv3.sandbox import docker
 
 # The script that runs inside the builder image. The source tree is read-only
@@ -137,7 +138,11 @@ def build_workspace(
                      "compile the file(s) it was given")
         res.log_excerpt = excerpt(log, 2500)
         return res
-    res.binary = expected_binary if expected_binary in marked else marked[0]
+    res.binary, ambiguity = choose_binary(marked, list(harness_files)[0], expected_binary)
+    if ambiguity:
+        res.error = ambiguity
+        res.binaries = sorted(marked)
+        return res
     res.ok = True
     return res
 

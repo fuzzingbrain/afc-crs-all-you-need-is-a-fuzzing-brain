@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+import subprocess
 
 from fbv3.build import builder
 
@@ -75,3 +76,48 @@ def test_a_build_result_reports_its_failure_to_the_agent():
 def test_an_overlay_must_be_a_src_path(tmp_path):
     res = builder.build_harness(builder_image="img", overlay="harness.c", source="", build_dir=tmp_path)
     assert not res.ok and "must be a path under /src/" in res.error
+
+
+def test_one_built_target_is_taken_without_fuss():
+    from fbv3.build.builder import choose_binary
+
+    assert choose_binary(["profile_fuzzer"], "/src/oss-fuzz/profile_fuzzer.cc") == ("profile_fuzzer", "")
+
+
+def test_the_overlay_name_identifies_its_target():
+    from fbv3.build.builder import choose_binary
+
+    got, why = choose_binary(["other", "profile_fuzzer"], "/src/oss-fuzz/profile_fuzzer.cc")
+    assert got == "profile_fuzzer" and why == ""
+    assert choose_binary(["a", "b"], "/src/x.cc", "b") == ("b", "")
+
+
+def test_an_overlay_built_into_many_targets_is_reported_not_guessed():
+    """ImageMagick compiles one encoder_fuzzer.cc into 150 encoder_<format>_fuzzer
+    binaries, so the marker is in all of them; taking the first by name hands back
+    encoder_aai_fuzzer while the agent believes it fuzzes the generic decoder."""
+    from fbv3.build.builder import choose_binary
+
+    marked = [f"encoder_{f}_fuzzer" for f in ("aai", "png", "tif", "dcm")]
+    got, why = choose_binary(marked, "/src/imagemagick/oss-fuzz/encoder_fuzzer.cc")
+    assert got == ""
+    assert "compiled into 4 fuzz targets" in why
+    assert "encoder_aai_fuzzer" in why and "name the one you mean" in why
+    # naming it resolves the ambiguity
+    assert choose_binary(marked, "/src/imagemagick/oss-fuzz/encoder_fuzzer.cc",
+                         "encoder_png_fuzzer") == ("encoder_png_fuzzer", "")
+
+
+def test_the_ambiguity_fails_the_build_and_lists_the_candidates(tmp_path, monkeypatch):
+    from fbv3.build import builder
+
+    marked = ["encoder_aai_fuzzer", "encoder_png_fuzzer"]
+    monkeypatch.setattr(builder, "fuzz_targets", lambda out: marked)
+    monkeypatch.setattr(builder, "_contains", lambda path, needle: True)
+    monkeypatch.setattr(builder.docker, "run", lambda argv, **kw: subprocess.CompletedProcess(
+        argv, 0, b"", b""))
+    res = builder.build_harness(builder_image="img", overlay="/src/encoder_fuzzer.cc",
+                                source="int LLVMFuzzerTestOneInput(void){return 0;}",
+                                build_dir=tmp_path / "b")
+    assert not res.ok and "compiled into 2 fuzz targets" in res.error
+    assert res.binaries == sorted(marked)
