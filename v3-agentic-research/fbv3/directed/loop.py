@@ -129,6 +129,7 @@ class DirectedRun:
         self._t0 = time.monotonic()
         self._harness_src: dict[str, str] = {}
         self._last_fn_sample = 0.0
+        self._grace_used = False
 
     # -- time and bookkeeping ----------------------------------------------------------
 
@@ -343,6 +344,7 @@ class DirectedRun:
         One bad sample must not end the timeline, so every round is guarded.
         """
         self._last_fn_sample = 0.0
+        self._grace_used = False
         while not self._stop_threads.wait(SAMPLE_S):
             try:
                 self._sample_once()
@@ -644,12 +646,7 @@ class DirectedRun:
                 breaker_futures &= inflight
                 if not progressed:
                     time.sleep(2.0)
-            self._stop_threads.set()
-            for fut in list(inflight):  # let what is in flight finish its current step
-                try:
-                    fut.result(timeout=max(1.0, self._left() + 300))
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("%s: task failed while draining: %s", self.lg.name, exc)
+            self._drain(pool, sem, role_of, inflight)
         finally:
             self._stop_threads.set()
             pool.shutdown(wait=False, cancel_futures=True)
@@ -712,6 +709,55 @@ class DirectedRun:
                 closed += self.store.move_vh(vh["id"], "poc_failed", frm=("generating_poc",),
                                              reason="the stage ended before the PoC attempt finished")
         return closed
+
+    def _drain(self, pool, sem, role_of, inflight) -> None:
+        """Finish what the stage already has, once the window for new work shuts.
+
+        A task completing here hands over a hypothesis, and dropping that wastes
+        the analysis that found it. No new finders start -- the point is to close
+        what is known -- and a hypothesis in hand earns one explicit extension,
+        because the budget bounds how much to explore, not whether to finish. A
+        run ended with a VH unverified at 259s left against a 400s bar and then
+        sat 450s waiting for other tasks anyway.
+        """
+        self._stop_threads.set()
+        while True:
+            for fut in list(inflight):
+                try:
+                    fut.result(timeout=max(1.0, self._left() + 300))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("%s: task failed while draining: %s", self.lg.name, exc)
+            inflight = {f for f in inflight if not f.done()}
+            started, deferred = False, []
+            while True:
+                try:
+                    item = self._bugq.get_nowait()
+                except queue.Empty:
+                    break
+                _, _, fn, args = item
+                role = role_of.get(fn, "finder")
+                if role == "finder":
+                    continue
+                if not self._enough_time(role):
+                    if self._grace_used:
+                        deferred.append(item)
+                        continue
+                    self._grace_used = True
+                    # A little headroom, so the next item does not miss the bar
+                    # by the milliseconds this took.
+                    self._deadline = time.monotonic() + self._bar(role) + 30
+                    logger.info("%s: extending the stage by %.0fs to finish the %s it already has",
+                                self.lg.name, self._bar(role) + 30, role)
+                sem[role].acquire(blocking=False)
+                fut = pool.submit(fn, *args)
+                fut.add_done_callback(lambda f, r=role: sem[r].release())
+                inflight.add(fut)
+                started = True
+            if deferred:
+                logger.info("%s: %d queued task(s) left unfinished, out of time",
+                            self.lg.name, len(deferred))
+            if not started and not inflight:
+                return
 
     def _finish(self) -> dict:
         self._stop_threads.set()

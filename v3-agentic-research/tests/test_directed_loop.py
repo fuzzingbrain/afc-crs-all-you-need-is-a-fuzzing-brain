@@ -662,3 +662,82 @@ def test_the_breaker_runs_when_nothing_else_needs_the_slot(tmp_path, monkeypatch
     run._deadline = time.monotonic() + 3600  # the breaker needs a third of its budget
     run._schedule()
     assert ran == ["breaker"]
+
+
+def _drain_harness(run, monkeypatch):
+    """The pieces _schedule hands the drain, without running the main loop."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    sem = {r: threading.Semaphore(1) for r in ("finder", "verifier", "poc", "fp_seed")}
+    role_of = {run._finder: "finder", run._verify: "verifier", run._poc: "poc",
+               run._fp_seed: "fp_seed"}
+    return ThreadPoolExecutor(max_workers=4), sem, role_of, set()
+
+
+def test_a_hypothesis_in_hand_earns_time_to_finish(tmp_path, monkeypatch):
+    """A run ended with a VH unverified at 259s left against a 400s bar, and then
+    sat 450s waiting for other tasks. The budget bounds exploration, not
+    finishing what was already found."""
+    run, pool_, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    verified = []
+    monkeypatch.setattr(run, "_verify", lambda vh_id: verified.append(vh_id))
+    vh = store.create_vh("fuzz", function_name="late", finder_score=0.75)
+    run._enqueue(0, run._verify, vh)
+    run._deadline = time.monotonic() + 200  # past the 400s bar, time still on the clock
+    pool, sem, role_of, inflight = _drain_harness(run, monkeypatch)
+    run._drain(pool, sem, role_of, inflight)
+    assert verified == [vh]
+    assert run._grace_used
+
+
+def test_the_grace_is_granted_once_and_the_rest_are_reported(tmp_path, monkeypatch, caplog):
+    """One extension fits one verifier at a time; the others are honestly left
+    unfinished rather than started and cut short."""
+    run, pool_, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    seen = []
+    monkeypatch.setattr(run, "_verify", lambda vh_id: seen.append(vh_id))
+    for i in range(6):
+        run._enqueue(0, run._verify, store.create_vh("fuzz", function_name=f"f{i}"))
+    run._deadline = time.monotonic() + 200
+    pool, sem, role_of, inflight = _drain_harness(run, monkeypatch)
+    with caplog.at_level("INFO"):
+        run._drain(pool, sem, role_of, inflight)
+    assert run._grace_used and seen  # at least the first was finished
+    assert len(seen) < 6             # and the rest were not silently dropped
+    assert "left unfinished, out of time" in caplog.text
+
+
+def test_the_drain_starts_no_new_finders(tmp_path, monkeypatch):
+    run, pool_, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    ran = []
+    monkeypatch.setattr(run, "_finder", lambda fn: ran.append(fn["name"]))
+    for i in range(4):
+        run._enqueue(1, run._finder, {"name": f"f{i}"})
+    run._deadline = time.monotonic() + 3600
+    pool, sem, role_of, inflight = _drain_harness(run, monkeypatch)
+    run._drain(pool, sem, role_of, inflight)
+    assert ran == []  # closing time is for finishing, not for new analysis
+
+
+def test_a_task_enqueued_during_the_drain_is_still_taken(tmp_path, monkeypatch):
+    run, pool_, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    order = []
+    vh = store.create_vh("fuzz", function_name="a")
+
+    def verify(vh_id):
+        order.append("verify")
+        if len(order) == 1:  # the verifier hands over a PoC, as the real one does
+            run._enqueue(0, run._poc, vh_id, 0)
+
+    monkeypatch.setattr(run, "_verify", verify)
+    monkeypatch.setattr(run, "_poc", lambda vh_id, attempt: order.append("poc"))
+    run._enqueue(0, run._verify, vh)
+    run._deadline = time.monotonic() + 3600
+    pool, sem, role_of, inflight = _drain_harness(run, monkeypatch)
+    run._drain(pool, sem, role_of, inflight)
+    assert order == ["verify", "poc"]
