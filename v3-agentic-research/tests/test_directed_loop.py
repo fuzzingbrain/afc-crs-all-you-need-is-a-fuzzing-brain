@@ -692,9 +692,9 @@ def test_a_hypothesis_in_hand_earns_time_to_finish(tmp_path, monkeypatch):
     assert run._grace_used
 
 
-def test_the_grace_is_granted_once_and_the_rest_are_reported(tmp_path, monkeypatch, caplog):
-    """One extension fits one verifier at a time; the others are honestly left
-    unfinished rather than started and cut short."""
+def test_the_grace_covers_the_hypotheses_already_queued(tmp_path, monkeypatch):
+    """The extension is granted once; everything already in hand is then taken,
+    and the pool's own slot limit decides which of them actually get to run."""
     run, pool_, store = make(tmp_path)
     run._monitor = FakeMonitor()
     seen = []
@@ -703,10 +703,23 @@ def test_the_grace_is_granted_once_and_the_rest_are_reported(tmp_path, monkeypat
         run._enqueue(0, run._verify, store.create_vh("fuzz", function_name=f"f{i}"))
     run._deadline = time.monotonic() + 200
     pool, sem, role_of, inflight = _drain_harness(run, monkeypatch)
+    run._drain(pool, sem, role_of, inflight)
+    assert run._grace_used
+    assert len(seen) == 6  # none of them was silently dropped
+
+
+def test_what_does_not_fit_is_reported_not_dropped(tmp_path, monkeypatch, caplog):
+    run, pool_, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    seen = []
+    monkeypatch.setattr(run, "_verify", lambda vh_id: seen.append(vh_id))
+    run._enqueue(0, run._verify, store.create_vh("fuzz", function_name="a"))
+    run._grace_used = True            # the stage already spent its extension
+    run._deadline = time.monotonic() + 200  # under the verifier's 400s bar
+    pool, sem, role_of, inflight = _drain_harness(run, monkeypatch)
     with caplog.at_level("INFO"):
         run._drain(pool, sem, role_of, inflight)
-    assert run._grace_used and seen  # at least the first was finished
-    assert len(seen) < 6             # and the rest were not silently dropped
+    assert seen == []
     assert "left unfinished, out of time" in caplog.text
 
 
