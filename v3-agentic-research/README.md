@@ -81,7 +81,7 @@ environment is reported as an error, not used.
 
 ```sh
 fbv3 run --project libyaml --image gcr.io/oss-fuzz/libyaml --language c \
-    --discover 1 --duration 900 -o runs/libyaml
+    --discover 1 --duration 900 --sessions 3 -o runs/libyaml
 ```
 
 That is the whole run: an agent picks an API entry point worth fuzzing, writes
@@ -90,10 +90,26 @@ runs inputs through the candidate, and then the directed stage hunts bugs
 through it for 15 minutes. libyaml builds in 30 seconds, so the run is about
 25 minutes end to end.
 
+`--sessions` is how many agent sessions may be in flight at once, over the
+whole run; it defaults to **1**, which makes everything strictly serial.
+
 `--duration` is the bug hunt's budget and it is a ceiling: the stage sizes its
-own agent sessions to fit inside it and never extends itself. Ten minutes
-(`--duration 600`) buys the map and a finder or two; a hypothesis has to be
-raised *and* verified to reach a PoC, and that chain wants 15 minutes.
+own agent sessions to fit inside it and never extends itself. What fits is a
+question about the critical path rather than about parallelism, because each
+link waits on the one before it -- a verifier has nothing to verify until some
+finder submits a hypothesis, and a PoC agent does not know whether to write one
+until the verifier has scored it:
+
+```
+mapper --> finder --> verifier --> PoC agent
+```
+
+Sessions in flight shorten the *total*, by letting a finder read function B
+while a verifier works on function A's hypothesis, but they cannot start a link
+early. On ImageMagick (144k functions) that path measured 390s + 140s + 190s,
+so ten minutes closes no chain; on a library of a few thousand lines the same
+path is a fraction of that and ten minutes is enough. `fbv3 view --report`
+prints each session's duration, which is how you size the next run.
 
 When it finishes:
 
