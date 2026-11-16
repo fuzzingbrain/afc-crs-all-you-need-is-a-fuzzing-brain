@@ -54,15 +54,19 @@ class AgentPool:
 
     def run(self, role: str, *, scope: str, system: str, task: str, tools: tuple[str, ...], ctx: dict,
             session_root: Path, subject: str = "", deadline: float | None = None,
-            min_runtime: float = 0.0) -> SessionResult:
+            min_runtime: float = 0.0, budget_s: float = 0.0) -> SessionResult:
         """Run one session of ``role``; blocks for a free slot first.
 
         ``min_runtime`` is re-checked after the slot is granted, not only
         before: a caller that had time when it queued may have none left by the
         time a long session ahead of it finishes. A finder once waited out a
         657s breaker and then ran for 30 seconds.
+
+        ``budget_s`` overrides the role's configured timeout, for a caller whose
+        stage is shorter than that timeout was written for.
         """
         rc = self.cfg.roles[role]
+        limit = int(budget_s) if budget_s else rc.timeout_s
         first = self.backend_for(role)
         order = [first] + ([b for b in BACKENDS if b != first] if self.cfg.fallback else [])
         backoff = float(self.cfg.rate_limit_backoff_s)
@@ -87,7 +91,7 @@ class AgentPool:
                 role=role, backend=backend, session_root=session_root, system_prompt=system,
                 task_prompt=task, tools=tools, ctx=ctx, tool_python=self.tool_python,
                 model=rc.model if backend == rc.backend else "",
-                timeout_s=self._timeout(rc.timeout_s, deadline), max_turns=rc.max_turns,
+                timeout_s=self._timeout(limit, deadline), max_turns=rc.max_turns,
             )
             with self._slots:
                 if self.stopped.is_set():

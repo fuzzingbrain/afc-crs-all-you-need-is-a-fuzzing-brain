@@ -51,6 +51,11 @@ from fbv3.sandbox.workspace import Workspace, copy_runtime_bundle
 logger = logging.getLogger(__name__)
 
 PRIO_VERIFY, PRIO_POC, PRIO_FINDER, PRIO_FP = 0, 0, 1, 2
+
+# The largest share of a directed stage one agent session may take. Four tenths
+# leaves room for the chain that follows it: a mapper, then a finder, then the
+# verifier that closes the hypothesis it raised.
+SESSION_SHARE = 0.4
 SAMPLE_S = 15.0
 FN_SAMPLE_S = 120.0
 
@@ -141,9 +146,22 @@ class DirectedRun:
             return 0.0
         return self._deadline - time.monotonic()
 
+    def _budget(self, role: str) -> float:
+        """How long one session of this role may run in a stage this long.
+
+        A role's configured timeout is written for a full-length stage. In a
+        short one it is a promise the stage cannot keep: the mapper's 1200s puts
+        its bar at 400s, so a 600s stage spends everything on the map and starts
+        no finder at all -- the user asked for ten minutes and got ten minutes
+        of plain fuzzing. No single session may take more than this share of the
+        stage, which is also what stopped the seed agent from eating half of it.
+        """
+        configured = float(self.task.agents.roles[role].timeout_s)
+        return min(configured, max(150.0, self.cfg.duration_seconds * SESSION_SHARE))
+
     def _bar(self, role: str) -> float:
         """How much time a session of this role needs to be worth starting."""
-        return max(150.0, self.task.agents.roles[role].timeout_s / 3.0)
+        return max(150.0, self._budget(role) / 3.0)
 
     def _enough_time(self, role: str) -> bool:
         """Is there enough left for a session of this role to be worth starting?
@@ -179,7 +197,8 @@ class DirectedRun:
                              tools=prompts.ROLE_TOOLS[role], ctx=self._ctx(**ctx_extra),
                              session_root=self.ws.path("sessions"),
                              subject=f"{self.lg.name}/{subject}" if subject else self.lg.name,
-                             deadline=self._deadline, min_runtime=self._bar(role))
+                             deadline=self._deadline, min_runtime=self._bar(role),
+                             budget_s=self._budget(role))
 
     def _prompt(self, role: str, **kw) -> tuple[str, str]:
         return prompts.directed(role, harness_src=self._harness_src, target=self.lg.binary, **kw)
@@ -768,15 +787,18 @@ class DirectedRun:
                 if role == "finder":
                     continue
                 if not self._enough_time(role):
-                    if self._grace_used:
+                    grace = float(self.cfg.grace_seconds)
+                    if self._grace_used or grace <= 0:
+                        # The duration the user asked for is a ceiling, not an
+                        # opening bid: what does not fit is reported, not
+                        # financed by overrunning it.
                         deferred.append(item)
                         continue
                     self._grace_used = True
-                    # A little headroom, so the next item does not miss the bar
-                    # by the milliseconds this took.
-                    self._deadline = time.monotonic() + self._bar(role) + 30
-                    logger.info("%s: extending the stage by %.0fs to finish the %s it already has",
-                                self.lg.name, self._bar(role) + 30, role)
+                    extra = min(grace, self._bar(role) + 30)
+                    self._deadline = time.monotonic() + extra
+                    logger.info("%s: extending the stage by %.0fs (directed.grace_seconds) to finish "
+                                "the %s it already has", self.lg.name, extra, role)
                 sem[role].acquire(blocking=False)
                 fut = pool.submit(fn, *args)
                 fut.add_done_callback(lambda f, r=role: sem[r].release())

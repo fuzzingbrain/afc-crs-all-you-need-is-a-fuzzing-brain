@@ -35,11 +35,13 @@ class FakePool:
         self.prompts: list[tuple[str, str, str]] = []
         self.min_runtimes: list[tuple[str, float]] = []
         self.stopped = __import__("threading").Event()
+        self.budgets = []
         self._n = 0
 
     def run(self, role, *, scope, system, task, tools, ctx, session_root, subject="", deadline=None,
-            min_runtime=0.0):
+            min_runtime=0.0, budget_s=0.0):
         self.min_runtimes.append((role, min_runtime))
+        self.budgets.append((role, budget_s))
         self._n += 1
         sid = f"{role}-{self._n}"
         self.calls.append((role, subject))
@@ -677,11 +679,26 @@ def _drain_harness(run, monkeypatch):
     return ThreadPoolExecutor(max_workers=4), sem, role_of, set()
 
 
-def test_a_hypothesis_in_hand_earns_time_to_finish(tmp_path, monkeypatch):
-    """A run ended with a VH unverified at 259s left against a 400s bar, and then
-    sat 450s waiting for other tasks. The budget bounds exploration, not
-    finishing what was already found."""
+def test_the_duration_is_a_ceiling_not_an_opening_bid(tmp_path, monkeypatch):
+    """A 30 min stage extended itself twice, by 330s and 430s, to finish work it
+    had started. The number the user gave is the number: what does not fit is
+    reported, not financed by overrunning it."""
     run, pool_, store = make(tmp_path)
+    run._monitor = FakeMonitor()
+    verified = []
+    monkeypatch.setattr(run, "_verify", lambda vh_id: verified.append(vh_id))
+    run._enqueue(0, run._verify, store.create_vh("fuzz", function_name="late", finder_score=0.75))
+    deadline = run._deadline = time.monotonic() + 200  # past the 400s verifier bar
+    pool, sem, role_of, inflight = _drain_harness(run, monkeypatch)
+    run._drain(pool, sem, role_of, inflight)
+    assert verified == []
+    assert run._deadline == deadline and not run._grace_used
+
+
+def test_a_hypothesis_in_hand_earns_time_to_finish(tmp_path, monkeypatch):
+    """With directed.grace_seconds set, and only then, the stage may overrun to
+    close a hypothesis it already raised -- and by no more than that."""
+    run, pool_, store = make(tmp_path, grace_seconds=600)
     run._monitor = FakeMonitor()
     verified = []
     monkeypatch.setattr(run, "_verify", lambda vh_id: verified.append(vh_id))
@@ -697,7 +714,7 @@ def test_a_hypothesis_in_hand_earns_time_to_finish(tmp_path, monkeypatch):
 def test_the_grace_covers_the_hypotheses_already_queued(tmp_path, monkeypatch):
     """The extension is granted once; everything already in hand is then taken,
     and the pool's own slot limit decides which of them actually get to run."""
-    run, pool_, store = make(tmp_path)
+    run, pool_, store = make(tmp_path, grace_seconds=600)
     run._monitor = FakeMonitor()
     seen = []
     monkeypatch.setattr(run, "_verify", lambda vh_id: seen.append(vh_id))
@@ -833,3 +850,31 @@ def test_a_failing_seed_agent_does_not_take_the_stage_down(tmp_path, monkeypatch
     with caplog.at_level(logging.WARNING):
         run.run()
     assert "the seed agent failed: no backend" in caplog.text
+
+
+def test_the_stage_length_bounds_each_session_in_it(tmp_path):
+    """A role's configured timeout is written for a full-length stage. The
+    mapper's 1200s puts its bar at 400s, so a 600s stage spends everything on
+    the map and starts no finder at all: ten minutes of plain fuzzing."""
+    long_ = make(tmp_path / "a", duration_seconds=3600)[0]
+    assert long_._budget("mapper") == 1200  # the configured timeout still stands
+    assert long_._bar("finder") == 300
+
+    short = make(tmp_path / "b", duration_seconds=600)[0]
+    assert short._budget("mapper") == 240  # 0.4 of the stage
+    assert short._bar("mapper") == 150  # so a finder can follow it
+    assert short._bar("verifier") == 150  # and a verifier can follow that
+
+
+def test_no_session_may_take_more_than_its_share_of_the_stage(tmp_path):
+    """The seed agent ran 900s of a 1800s stage. Nothing gets 40%+ of a stage."""
+    run = make(tmp_path, duration_seconds=1800)[0]
+    for role in ("seed", "mapper", "finder", "verifier", "poc"):
+        assert run._budget(role) <= 1800 * 0.4
+
+
+def test_the_budget_reaches_the_pool_not_just_the_bar(tmp_path, monkeypatch):
+    run, pool, _store = make(tmp_path, duration_seconds=600)
+    monkeypatch.setattr(run, "_prompt", lambda role, **kw: ("s", "t"))
+    run._session("finder", system="s", task="t")
+    assert pool.budgets == [("finder", 240.0)]

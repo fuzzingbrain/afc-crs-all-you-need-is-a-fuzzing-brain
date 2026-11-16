@@ -182,6 +182,10 @@ class DirectedConfig:
     phase1_max_functions: int = 12
     max_functions: int = 200
     coverage_interval_s: int = 180
+    # Seconds the stage may overrun its duration to finish a hypothesis it has
+    # already raised. Zero, because the duration is the user's number: a 30 min
+    # stage once extended itself twice, by 330s and 430s, without being asked.
+    grace_seconds: int = 0
     verify_threshold: float = 0.3
     poc_threshold: float = 0.5
     max_poc_attempts: int = 2
