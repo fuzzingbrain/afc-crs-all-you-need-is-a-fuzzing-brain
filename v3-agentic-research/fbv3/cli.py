@@ -279,14 +279,30 @@ def cmd_init(args) -> int:
 
 
 def cmd_view(args) -> int:
-    summary = report.load(Path(args.run_dir))
+    run_dir = Path(args.run_dir)
+    summary = report.load(run_dir)
     if not summary:
         print(f"no run found in {args.run_dir}", file=sys.stderr)
         return 2
     if args.json:
         print(json.dumps(summary, indent=2, default=str))
-    else:
-        print(report.render(summary))
+        return 0
+    if args.report or args.write:
+        from fbv3.store import Store
+
+        store = Store(run_dir)
+        try:
+            if args.write:
+                print(f"wrote {report.write_markdown(store, summary, run_dir)}")
+            else:
+                print(report.markdown(store, summary, run_dir))
+        finally:
+            store.close()
+        return 0
+    print(report.render(summary))
+    md = run_dir / "report.md"
+    if md.is_file():
+        print(f"\nfull report: {md}   (fbv3 view {args.run_dir} --report to print it)")
     return 0
 
 
@@ -330,6 +346,10 @@ def build_parser() -> argparse.ArgumentParser:
     view = sub.add_parser("view", help="summarize a run directory")
     view.add_argument("run_dir")
     view.add_argument("--json", action="store_true")
+    view.add_argument("--report", action="store_true",
+                      help="print the full report: every hypothesis with its verdict, every crash")
+    view.add_argument("--write", action="store_true",
+                      help="(re)write that report to <run>/report.md")
     view.set_defaults(func=cmd_view)
 
     clean = sub.add_parser("clean", help="remove the containers of a run (after a hard crash)")

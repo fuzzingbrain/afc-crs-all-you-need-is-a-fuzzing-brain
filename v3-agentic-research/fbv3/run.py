@@ -291,5 +291,9 @@ class Runner:
         summary["packaged"] = pocs
         summary["run_dir"] = str(self.run_dir)
         report.write_result(summary, self.run_dir)
+        try:
+            summary["report"] = str(report.write_markdown(self.store, summary, self.run_dir))
+        except Exception as exc:  # noqa: BLE001 -- a report is not worth losing a run over
+            logger.warning("the report could not be written: %s", exc)
         self.store.close()
         return summary

@@ -263,3 +263,56 @@ def test_a_missing_sanitizer_build_falls_back_and_says_so(tmp_path, stub, caplog
     with caplog.at_level("WARNING"):
         lg = runner._logic_groups([h])[0]
     assert lg.sanitizer == "address" and "fuzzes the address one" in caplog.text
+
+
+def test_the_report_carries_the_reasoning_not_just_the_counts(tmp_path):
+    """``render`` answers "did it find anything" and nothing else. The reasoning
+    is the product -- a rejected hypothesis is a finding about the code too --
+    and it was reachable only by opening the SQLite file by hand."""
+    store, vh = filled_store(tmp_path)
+    store.add_harness_round("compress2", 1, verdict="reject", build_ok=1, binary="fuzz",
+                            gate={"smoke": {"verdict": "ok", "edges": 812, "exec_s": 5141},
+                                  "findings": [{"principle": "P2", "severity": "high", "line": 7,
+                                                "message": "the length is not derived from the input"}]},
+                            review={"violations": [{"principle": "P1", "blocking": True,
+                                                    "lines": "42-50", "description": "NUL truncation",
+                                                    "consequence": "half the input space is dead"}]})
+    rejected = store.create_vh("compress2", function_name="late", finder_score=0.5,
+                               description="missing bound on ImgNum")
+    store.update_vh(rejected, score=0.12, verifier_session="v1",
+                    verification_notes="the IsStealth throw at fx.c:2427 aborts translation first")
+    store.move_vh(rejected, "rejected", reason="verifier score 0.12 below the PoC threshold")
+
+    summary = report.summarize(store, status="completed", stages=["harness", "directed"],
+                               logic_groups=[{"lg": "compress2", "seeds": 12, "functions_analysed": 7,
+                                              "functions_queued": 40,
+                                              "coverage_initial": {"functions_covered": 169,
+                                                                   "functions_total": 1000},
+                                              "coverage_final": {"functions_covered": 441}}],
+                               elapsed_s=600)
+    md = report.markdown(store, summary, tmp_path)
+
+    assert "1 crash(es) reproduced" in md
+    # the harness, round by round, with the gate and the reviewer in their own words
+    assert "**round 1**, reject, build ok, smoke ok, 812 edges" in md
+    assert "P2 [high] line 7: the length is not derived from the input" in md
+    assert "P1 [blocking] lines 42-50: NUL truncation" in md
+    assert "half the input space is dead" in md
+    # every hypothesis, including the one nothing crashed for
+    assert "### late — rejected" in md
+    assert "missing bound on ImgNum" in md
+    assert "the IsStealth throw at fx.c:2427 aborts translation first" in md
+    assert "verifier score 0.12 below the PoC threshold" in md
+    # the crash, with the input a human can replay
+    assert "heap-buffer-overflow" in md and "crash.bin" in md
+    assert "AddressSanitizer" in md
+    # and what it cost
+    assert "coverage: 169 -> 441 of 1000 functions" in md
+    assert "| finder | 1 | codex | 0 | 1.0 |" in md
+
+
+def test_the_report_is_written_next_to_the_run(tmp_path):
+    store, _vh = filled_store(tmp_path)
+    summary = report.summarize(store, status="completed", stages=["directed"], elapsed_s=1)
+    path = report.write_markdown(store, summary, tmp_path)
+    assert path == tmp_path / "report.md" and path.read_text().startswith("# zlib")

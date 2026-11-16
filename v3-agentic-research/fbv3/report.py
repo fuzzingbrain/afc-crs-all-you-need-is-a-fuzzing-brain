@@ -161,6 +161,215 @@ def render(summary: dict) -> str:
     return "\n".join(lines)
 
 
+
+
+def _as_dict(value) -> dict:
+    """A column the store wrote as JSON comes back as text through sqlite3."""
+    if isinstance(value, dict):
+        return value
+    try:
+        out = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return out if isinstance(out, dict) else {}
+
+
+def _finding(v: dict) -> str:
+    """One reviewer finding on one line, with its own words kept."""
+    if not isinstance(v, dict):
+        return str(v)
+    head = " ".join(x for x in (
+        v.get("principle") or "reviewer",
+        "[blocking]" if v.get("blocking") else "[non-blocking]",
+        f"lines {v['lines']}" if v.get("lines") else "",
+    ) if x)
+    body = str(v.get("description") or v.get("message") or "")
+    if v.get("consequence"):
+        body += f" *Consequence:* {v['consequence']}"
+    return f"{head}: {body}".strip()
+
+
+def _as_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    try:
+        out = json.loads(value or "[]")
+    except (TypeError, ValueError):
+        return []
+    return out if isinstance(out, list) else []
+
+
+def markdown(store, summary: dict, run_dir: Path) -> str:
+    """The run as a human reads it: what was built, what was claimed, what held.
+
+    ``render`` gives counts, which answer "did it find anything" and nothing
+    else. The reasoning is the product -- a rejected hypothesis is a finding
+    about the code too -- and it was reachable only by opening the SQLite file
+    by hand. This writes it out: every hypothesis with its verdict, every
+    crash with the input that causes it, and the timeline.
+    """
+    run = store.run()
+    L: list[str] = []
+    name = summary.get("name") or run.get("name") or "run"
+    L.append(f"# {name}")
+    L.append("")
+    L.append(f"- run `{summary.get('run_id', '')}`  ·  **{summary.get('status', '')}**"
+             + (f" ({summary['end_reason']})" if summary.get("end_reason") else ""))
+    L.append(f"- {summary.get('elapsed_minutes', 0):.1f} min  ·  stages: "
+             + ", ".join(summary.get("stages", [])))
+    L.append(f"- run directory: `{run_dir}`")
+    L.append("")
+
+    crashes = store.crashes()
+    L.append("## Verdict")
+    L.append("")
+    if crashes:
+        L.append(f"**{len(crashes)} crash(es) reproduced.** Each was replayed by the orchestrator in "
+                 "the runner image; an agent cannot promote its own finding.")
+    else:
+        L.append("**No crash was reproduced.** The hypotheses below say what was examined and why "
+                 "each was set aside, which is the part worth reading when nothing crashed.")
+    L.append("")
+
+    L.append("## Harnesses")
+    L.append("")
+    for h in store.harnesses():
+        L.append(f"### {h['target']} — {h['status']}")
+        L.append("")
+        L.append(f"- binary `{h.get('binary') or '?'}`, {h.get('rounds') or 0} round(s)")
+        if h.get("overlay"):
+            L.append(f"- overlay: `{h['overlay']}`")
+        if h.get("source_path"):
+            L.append(f"- harness source: `{h['source_path']}`")
+        for san, path in sorted(_as_dict(h.get("builds")).items()):
+            L.append(f"- {san} build: `{path}`")
+        L.append("")
+        for r in store.harness_rounds(h["target"]):
+            gate = _as_dict(r.get("gate"))
+            smoke = gate.get("smoke") or {}
+            bits = [f"**round {r.get('round')}**", str(r.get("verdict") or "no verdict"),
+                    "build ok" if r.get("build_ok") else "build failed"]
+            if smoke.get("verdict"):
+                bits.append(f"smoke {smoke['verdict']}")
+            if smoke.get("edges"):
+                bits.append(f"{smoke['edges']} edges")
+            if smoke.get("exec_s"):
+                bits.append(f"{smoke['exec_s']} exec/s")
+            L.append("- " + ", ".join(bits))
+            for f in gate.get("findings") or []:
+                L.append(f"  - {f.get('principle')} [{f.get('severity')}] line {f.get('line')}: "
+                         f"{f.get('message')}")
+            review = _as_dict(r.get("review"))
+            for v in review.get("violations") or []:
+                L.append("  - " + _finding(v))
+        L.append("")
+        if h.get("notes"):
+            L.append("<details><summary>What the generator says the harness does</summary>")
+            L.append("")
+            L.append(str(h["notes"]))
+            L.append("")
+            L.append("</details>")
+            L.append("")
+
+    for lg in summary.get("logic_groups", []):
+        L.append(f"## Bug hunt: {lg['lg']}")
+        L.append("")
+        ci, cf = lg.get("coverage_initial") or {}, lg.get("coverage_final") or {}
+        if ci or cf:
+            L.append(f"- coverage: {ci.get('functions_covered', '?')} -> "
+                     f"{cf.get('functions_covered', '?')} of {ci.get('functions_total', '?')} functions")
+        L.append(f"- {lg.get('seeds', 0)} agent seeds, {lg.get('functions_analysed', 0)} function(s) "
+                 f"analysed of {lg.get('functions_queued', 0)} queued")
+        if lg.get("artifacts_skipped"):
+            L.append(f"- artifacts that were not bugs: {lg['artifacts_skipped']}")
+        L.append("")
+
+        vhs = store.vhs(lg["lg"])
+        if not vhs:
+            L.append("No hypothesis was raised.")
+            L.append("")
+        for v in vhs:
+            L.append(f"### {v['function_name']} — {v['status']}")
+            L.append("")
+            where = v.get("function_file") or ""
+            if where:
+                L.append(f"`{where}`" + (f":{v['sink_line']}" if v.get("sink_line") else ""))
+                L.append("")
+            L.append(f"**Claimed** (finder score {v.get('finder_score')}): "
+                     + (v.get("description") or "(nothing recorded)"))
+            L.append("")
+            if v.get("sink_code"):
+                L.append(f"Sink: `{v['sink_code']}`")
+                L.append("")
+            if v.get("score") is not None and v.get("verifier_session"):
+                L.append(f"**Verified** (score {v['score']}): "
+                         + (v.get("verification_notes") or "(no reasoning recorded)"))
+                L.append("")
+            if v.get("evidence"):
+                L.append(f"Evidence: {v['evidence']}")
+                L.append("")
+            if v.get("poc_status") and v["poc_status"] != "none":
+                L.append(f"PoC: {v['poc_status']}")
+                L.append("")
+            hist = [f"{e['to_status']} ({e['reason']})" for e in store.vh_events(v["id"])]
+            if hist:
+                L.append("History: " + " -> ".join(hist))
+                L.append("")
+
+    if crashes:
+        L.append("## Crashes")
+        L.append("")
+        for group in merge_recursions(crashes):
+            c = group[0]
+            frames = _as_list(c.get("top_frames"))
+            where = frames[0] if frames else "?"
+            L.append(f"### {c.get('crash_class') or 'crash'} at {where}")
+            L.append("")
+            L.append(f"- signature `{c.get('signature_short')}`"
+                     + (f", also seen as {len(group) - 1} more signature(s) of the same recursion"
+                        if len(group) > 1 else ""))
+            if len(frames) > 1:
+                L.append("- stack: " + " <- ".join(frames[:6]))
+            cycle = _as_list(c.get("cycle"))
+            if cycle:
+                L.append("- recursion cycle: " + " -> ".join(cycle))
+            if c.get("artifact"):
+                L.append(f"- input: `{c['artifact']}`")
+            if c.get("source"):
+                L.append(f"- found by: {c['source']}")
+            L.append("")
+            if c.get("output_tail"):
+                L.append("```")
+                L.append(str(c["output_tail"])[:2000])
+                L.append("```")
+                L.append("")
+
+    L.append("## Agent sessions")
+    L.append("")
+    sessions = store.sessions()
+    by_role: dict[str, list[dict]] = {}
+    for x in sessions:
+        by_role.setdefault(x["role"], []).append(x)
+    L.append("| role | sessions | backends | failures | minutes |")
+    L.append("| --- | --- | --- | --- | --- |")
+    for role, xs in sorted(by_role.items()):
+        backends = ", ".join(sorted({x["backend"] for x in xs}))
+        bad = sum(1 for x in xs if x["status"] not in ("completed", "skipped"))
+        mins = sum(float(x.get("duration_s") or 0) for x in xs) / 60.0
+        L.append(f"| {role} | {len(xs)} | {backends} | {bad} | {mins:.1f} |")
+    L.append("")
+    L.append("Every session is on disk in full under `lg/<target>/sessions/` and `shared/sessions/`: "
+             "the prompts it was given, its streamed trajectory, every tool call with its result, "
+             "and what it submitted.")
+    L.append("")
+    return "\n".join(L)
+
+
+def write_markdown(store, summary: dict, run_dir: Path) -> Path:
+    path = Path(run_dir) / "report.md"
+    path.write_text(markdown(store, summary, run_dir))
+    return path
+
 def load(run_dir: Path) -> dict:
     """The summary of a finished (or running) run directory."""
     path = Path(run_dir) / "result.json"
