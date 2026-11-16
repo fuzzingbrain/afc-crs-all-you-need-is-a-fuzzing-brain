@@ -14,6 +14,7 @@ numbers of the file the agent wrote.
 
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 import uuid
@@ -21,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from fbv3.sandbox import docker
+
+logger = logging.getLogger(__name__)
 
 INFRA_PATTERNS = (
     ("docker_daemon", r"Cannot connect to the Docker daemon"),
@@ -110,6 +113,35 @@ def _contains(path: Path, needle: bytes) -> bool:
         return False
 
 
+def prune_out(out_dir: Path, keep: str) -> int:
+    """Delete the fuzz targets this run will never fuzz. Returns bytes freed.
+
+    A project's build.sh builds *all* of its targets. ImageMagick's builds 154,
+    each 110 MB of statically linked ASan, and a run keeps that whole directory
+    twice over (address and coverage) for every round of every target: 96 GB
+    for a two-target run whose four binaries come to 440 MB. Nothing reads the
+    others -- the fuzzers, the coverage export and the symbol dump all name one
+    binary -- and everything that is not a fuzz target weighs 7 MB, so only the
+    executables are pruned.
+    """
+    freed = 0
+    for name in fuzz_targets(out_dir):
+        if name == keep:
+            continue
+        path = out_dir / name
+        try:
+            size = path.stat().st_size
+            path.unlink()
+        except OSError as exc:  # a build output we cannot tidy is not a build failure
+            logger.debug("pruning %s: %s", path, exc)
+            continue
+        freed += size
+    if freed:
+        logger.info("pruned %.1f GB of fuzz targets %s does not use from %s",
+                    freed / 1e9, keep, out_dir)
+    return freed
+
+
 def choose_binary(marked: list[str], overlay: str, expected_binary: str = "") -> tuple[str, str]:
     """Which built target is *the* one for this harness, and what to say about it.
 
@@ -148,8 +180,12 @@ def build_harness(
     memory_mb: int = 8192,
     cpus: float = 4.0,
     expected_binary: str = "",
+    prune: bool = True,
 ) -> BuildResult:
-    """Compile ``source`` as ``overlay`` in ``builder_image`` into ``build_dir/out``."""
+    """Compile ``source`` as ``overlay`` in ``builder_image`` into ``build_dir/out``.
+
+    ``prune`` deletes the other fuzz targets build.sh produced; see ``prune_out``.
+    """
     if not overlay.startswith("/src/"):
         return BuildResult(False, sanitizer, "", error=f"overlay {overlay!r} must be a path under /src/")
     build_dir = Path(build_dir).resolve()
@@ -197,5 +233,7 @@ def build_harness(
         res.error = ambiguity
         res.binaries = sorted(marked)
         return res
+    if prune:
+        prune_out(out_dir, res.binary)
     res.ok = True
     return res

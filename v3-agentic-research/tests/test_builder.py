@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import struct
 import subprocess
+from pathlib import Path
 
 from fbv3.build import builder
 
@@ -121,3 +122,55 @@ def test_the_ambiguity_fails_the_build_and_lists_the_candidates(tmp_path, monkey
                                 build_dir=tmp_path / "b")
     assert not res.ok and "compiled into 2 fuzz targets" in res.error
     assert res.binaries == sorted(marked)
+
+
+def test_the_targets_this_run_will_never_fuzz_are_pruned(tmp_path):
+    """ImageMagick's build.sh builds 154 fuzz targets at 110 MB each. A run that
+    fuzzes four binaries kept 96 GB; nothing reads the other 150."""
+    for name in ("profile_fuzzer", "encoder_aai_fuzzer", "encoder_png_fuzzer"):
+        elf(tmp_path, name, b"..LLVMFuzzerTestOneInput.." + b"\x00" * 500)
+    (tmp_path / "profile_fuzzer.dict").write_text('"x"\n')
+    (tmp_path / "encoder_png_fuzzer_seed_corpus.zip").write_bytes(b"PK\x03\x04")
+    elf(tmp_path, "llvm-symbolizer", b"....main....")
+
+    freed = builder.prune_out(tmp_path, "profile_fuzzer")
+
+    assert freed > 500  # the two other targets' bytes
+    assert (tmp_path / "profile_fuzzer").is_file()
+    assert not (tmp_path / "encoder_aai_fuzzer").exists()
+    assert not (tmp_path / "encoder_png_fuzzer").exists()
+    # everything that is not a fuzz target weighs 7 MB in total: it stays
+    assert (tmp_path / "profile_fuzzer.dict").is_file()
+    assert (tmp_path / "encoder_png_fuzzer_seed_corpus.zip").is_file()
+    assert (tmp_path / "llvm-symbolizer").is_file()
+
+
+def test_pruning_what_is_already_gone_is_not_an_error(tmp_path, monkeypatch):
+    elf(tmp_path, "keep", b"..LLVMFuzzerTestOneInput..")
+    monkeypatch.setattr(builder, "fuzz_targets", lambda out: ["keep", "vanished"])
+    assert builder.prune_out(tmp_path, "keep") == 0
+    assert (tmp_path / "keep").is_file()
+
+
+def test_a_successful_build_prunes_and_can_be_told_not_to(tmp_path, monkeypatch):
+    def fake_build(out):
+        for name in ("harness", "other"):
+            elf(out, name, b"..LLVMFuzzerTestOneInput..")
+
+    def run(argv, **kw):
+        out = Path([argv[i + 1].split(":")[0] for i, a in enumerate(argv)
+                    if a == "-v" and argv[i + 1].endswith(":/out")][0])
+        fake_build(out)
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(builder.docker, "run", run)
+    monkeypatch.setattr(builder, "_contains", lambda path, needle: path.name == "harness")
+
+    res = builder.build_harness(builder_image="img", overlay="/src/harness.c", source="int x;",
+                                build_dir=tmp_path / "a")
+    assert res.ok and res.binary == "harness"
+    assert not (Path(res.out_dir) / "other").exists()
+
+    res = builder.build_harness(builder_image="img", overlay="/src/harness.c", source="int x;",
+                                build_dir=tmp_path / "b", prune=False)
+    assert res.ok and (Path(res.out_dir) / "other").is_file()

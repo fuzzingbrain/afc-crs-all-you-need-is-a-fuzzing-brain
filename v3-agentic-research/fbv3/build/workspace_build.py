@@ -30,7 +30,7 @@ import uuid
 from pathlib import Path
 
 from fbv3.build.builder import (BuildResult, choose_binary, classify_infra, excerpt, fuzz_targets,
-                                inject_marker)
+                                inject_marker, prune_out)
 from fbv3.sandbox import docker
 
 # The script that runs inside the builder image. The source tree is read-only
@@ -63,6 +63,7 @@ def build_workspace(
     cpus: float = 4.0,
     allow_network: bool = False,
     expected_binary: str = "",
+    prune: bool = True,
 ) -> BuildResult:
     """Run an agent-written ``build.sh`` over ``source_dir`` in ``base_image``.
 
@@ -143,6 +144,8 @@ def build_workspace(
         res.error = ambiguity
         res.binaries = sorted(marked)
         return res
+    if prune:
+        prune_out(out_dir, res.binary)
     res.ok = True
     return res
 
