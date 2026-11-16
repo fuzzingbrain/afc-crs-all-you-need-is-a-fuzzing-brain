@@ -193,8 +193,13 @@ class Fuzzer:
 
 
 def reproduce(*, image: str, build_out: Path, binary: str, artifact: Path, afl: bool = False,
-              run_id: str = "", timeout_s: int = 120) -> str:
-    """Run the target once on an input; the combined output (the sanitizer report)."""
+              run_id: str = "", timeout_s: int = 120) -> tuple[str, int]:
+    """Run the target once on an input; its combined output and its exit code.
+
+    The exit code is returned because the output alone can be silent: a crash
+    that outruns its own signal handler prints nothing, and then how the
+    process died is the only evidence there is.
+    """
     argv = ["docker", "run", "--rm", "--entrypoint", "", *docker.label_args(run_id, "repro"),
             "--user", docker.uid_gid(), "-e", "HOME=/tmp", "--network", "none",
             "-e", f"ASAN_OPTIONS={ASAN_OPTIONS}", "-e", f"UBSAN_OPTIONS={UBSAN_OPTIONS}",
@@ -202,7 +207,7 @@ def reproduce(*, image: str, build_out: Path, binary: str, artifact: Path, afl: 
             "-v", f"{build_out.resolve()}:/out:ro", "-v", f"{artifact.resolve()}:/input:ro", image]
     argv += [f"/out/{binary}", "/input"] if afl else [f"/out/{binary}", "-runs=1", "-timeout=30", "/input"]
     proc = docker.run(argv, timeout=timeout_s)
-    return (proc.stderr + proc.stdout).decode("utf-8", "replace")
+    return (proc.stderr + proc.stdout).decode("utf-8", "replace"), proc.returncode
 
 
 class CrashMonitor:
@@ -260,18 +265,21 @@ class CrashMonitor:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("crash handling failed for %s: %s", art, exc)
 
-    def handle(self, source: str, art: Path, vh_id: str | None = None, output: str | None = None) -> dict | None:
-        output = output if output is not None else reproduce(
-            image=self.image, build_out=self.build_out, binary=self.binary, artifact=art,
-            afl=self.afl, run_id=self.run_id)
-        sig = sigmod.compute_signature(output, harness_names=self.harness_names)
+    def handle(self, source: str, art: Path, vh_id: str | None = None, output: str | None = None,
+               exit_code: int | None = None) -> dict | None:
+        if output is None:
+            output, exit_code = reproduce(
+                image=self.image, build_out=self.build_out, binary=self.binary, artifact=art,
+                afl=self.afl, run_id=self.run_id)
+        sig = sigmod.compute_signature(output, harness_names=self.harness_names, exit_code=exit_code)
         # A timeout or an out-of-memory prints a stack too, so frames alone do not
         # make a bug: without a sanitizer class this artifact is a slow or greedy
         # input, worth knowing about but not a crash.
         if not sig or not sig.crash_class or sig.crash_class in NOT_A_BUG_CLASSES:
             why = ("timeout" if "libFuzzer: timeout" in output else
                    sig.crash_class if sig and sig.crash_class in NOT_A_BUG_CLASSES else
-                   "out-of-memory" if "out-of-memory" in output else "no sanitizer report")
+                   "out-of-memory" if "out-of-memory" in output else
+                   f"clean exit {exit_code}" if exit_code else "no sanitizer report")
             self.skipped[why] = self.skipped.get(why, 0) + 1
             self.store.emit("artifact_skipped", lg=self.lg, source=source, reason=why,
                             artifact=str(art), vh_id=vh_id)

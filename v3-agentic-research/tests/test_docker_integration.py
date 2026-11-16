@@ -137,7 +137,8 @@ def test_the_runtime_bundle_runs_the_built_target(tmp_path):
     out = copy_runtime_bundle(tmp_path / "build" / "out", tmp_path / "bundle", res.binary)
     assert out.is_file() and out.stat().st_mode & 0o111
     (tmp_path / "input.bin").write_bytes(b"\x05hello hello hello")
-    report = reproduce(image=IMAGE, build_out=tmp_path / "bundle", binary=res.binary,
-                       artifact=tmp_path / "input.bin", run_id=RUN_ID, timeout_s=300)
+    report, exit_code = reproduce(image=IMAGE, build_out=tmp_path / "bundle", binary=res.binary,
+                                  artifact=tmp_path / "input.bin", run_id=RUN_ID, timeout_s=300)
     assert "Running 1 inputs" in report or "Executed" in report
     assert "AddressSanitizer" not in report  # a correct harness on a valid input
+    assert exit_code == 0

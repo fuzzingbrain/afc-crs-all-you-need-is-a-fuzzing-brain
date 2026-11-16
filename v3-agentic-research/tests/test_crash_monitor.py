@@ -270,3 +270,68 @@ def test_a_class_is_read_from_the_summary_line_too():
     assert sigmod.extract_class(only_summary) == "stack-overflow"
     assert sigmod.extract_class("SUMMARY: AddressSanitizer: heap-buffer-overflow /a.c:1") \
         == "heap-buffer-overflow"
+
+
+# What libyaml's recursive composer actually printed on 200k '[': exit 139 and
+# a banner. Both agents verified the bug (0.90 and 0.95) and the text-only gate
+# threw every PoC away as "no sanitizer report, not a crash".
+SILENT_SEGV = """\
+INFO: Seed: 3957160885
+INFO: Loaded 1 modules   (2531 inline 8-bit counters): 2531 [0x8d2d30, 0x8d3713),
+INFO: Loaded 1 PC tables (2531 PCs): 2531 [0x66bb50,0x675980),
+/out/libyaml_fuzzer: Running 1 inputs 1 time(s) each.
+Running: /input
+"""
+
+
+def test_a_fatal_signal_is_a_crash_even_with_nothing_printed(tmp_path):
+    m, store = monitor(tmp_path)
+    rec = m.handle("poc_agent", artifact(tmp_path), output=SILENT_SEGV, exit_code=139)
+    assert rec and rec["new"] and rec["crash_class"] == "segv"
+    assert store.crashes("assimp_fuzzer")
+    assert Path(rec["artifact"]).is_file()
+
+
+def test_the_same_banner_without_a_signal_is_not_a_crash(tmp_path):
+    m, _ = monitor(tmp_path)
+    assert m.handle("poc_agent", artifact(tmp_path), output=SILENT_SEGV, exit_code=0) is None
+    assert m.handle("poc_agent", artifact(tmp_path, "crash-b"), output=SILENT_SEGV, exit_code=1) is None
+    assert m.skipped == {"clean exit 1": 1, "no sanitizer report": 1}
+
+
+def test_the_memory_cap_killing_the_process_is_not_a_crash(tmp_path):
+    # 137 is SIGKILL: the cgroup limit or the OOM killer, i.e. the environment.
+    m, _ = monitor(tmp_path)
+    assert m.handle("global", artifact(tmp_path), output=SILENT_SEGV, exit_code=137) is None
+    assert m.handle("global", artifact(tmp_path, "crash-b"), output=SILENT_SEGV, exit_code=-9) is None
+
+
+def test_a_printed_report_outranks_the_exit_code(tmp_path):
+    # ASan exits 1 by default; the class must come from what it said.
+    m, _ = monitor(tmp_path)
+    rec = m.handle("global", artifact(tmp_path), output=ASAN, exit_code=1)
+    assert rec and rec["crash_class"] == "heap-buffer-overflow"
+
+
+def test_the_exit_code_decides_only_what_the_output_leaves_open():
+    from fbv3.fuzz import signature as sigmod
+
+    assert sigmod.signal_class(None) == ""
+    assert sigmod.signal_class(0) == ""
+    assert sigmod.signal_class(1) == ""        # a target that returns 1 has not crashed
+    assert sigmod.signal_class(139) == "segv"  # SIGSEGV through docker
+    assert sigmod.signal_class(-11) == "segv"  # SIGSEGV from a direct subprocess
+    assert sigmod.signal_class(134) == "deadly-signal"  # SIGABRT: assert(), _FORTIFY_SOURCE
+    assert sigmod.signal_class(137) == ""      # SIGKILL: the memory cap, not the code
+    assert sigmod.signal_class(124) == ""      # timeout(1)
+    # A timeout prints frames, and libFuzzer may end it by aborting. What it
+    # said it was outranks how it ended, or every slow input becomes a bug.
+    assert sigmod.compute_signature(TIMEOUT, exit_code=134).crash_class == ""
+    assert sigmod.compute_signature(OOM, exit_code=134).crash_class == ""
+
+
+def test_an_aborting_timeout_is_still_a_timeout(tmp_path):
+    m, _ = monitor(tmp_path)
+    assert m.handle("global", artifact(tmp_path), output=TIMEOUT, exit_code=134) is None
+    assert m.handle("global", artifact(tmp_path, "crash-b"), output=OOM, exit_code=134) is None
+    assert m.skipped == {"timeout": 1, "out-of-memory": 1}

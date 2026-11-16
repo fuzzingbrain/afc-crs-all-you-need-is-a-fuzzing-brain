@@ -45,10 +45,35 @@ _LSAN_LEAK = re.compile(r"(?:ERROR: LeakSanitizer|SUMMARY: .*LeakSanitizer)")
 # never matched it and every such crash was discarded as NOT A CRASH (binutils'
 # disassemblers abort() heavily). "fuzz target exited" is deliberately NOT here:
 # a target calling exit() on its own is not a fault.
+# libFuzzer says so itself before it ends the process, and it may end it by
+# aborting; these are resource verdicts about the environment, not faults.
+_NOT_A_FAULT = re.compile(r"libFuzzer: (?:timeout|out-of-memory)|ERROR: libFuzzer: deadly signal \(timeout\)")
+
 _LIBFUZZER_DEADLY = re.compile(
     r"(?:DEADLYSIGNAL|SEGV on unknown address|libFuzzer:\s*deadly signal)",
     re.IGNORECASE,
 )
+
+# How the process died, for a process that printed nothing at all. A fatal
+# signal IS a crash: a sanitizer report is evidence of one, not the definition
+# of one. A stack overflow deep enough to fault *inside* the sanitizer's own
+# interceptor kills the process before any handler can print -- libyaml's
+# recursive composer does that on 200k '[' and exits 139 under a four-line
+# libFuzzer banner, which a text-only gate discarded as "not a crash" after
+# two agents had verified the bug at 0.90 and 0.95.
+#
+# SIGKILL is deliberately absent: that is the memory cap or the OOM killer,
+# which is the environment and not the code. So are SIGTERM and SIGXCPU (the
+# timeout), and so is any ordinary non-zero exit -- a target that returns 1
+# has not crashed.
+FATAL_SIGNALS = {
+    4: "deadly-signal",   # SIGILL
+    6: "deadly-signal",   # SIGABRT: assert(), abort(), _FORTIFY_SOURCE
+    7: "segv",            # SIGBUS
+    8: "deadly-signal",   # SIGFPE
+    11: "segv",           # SIGSEGV
+    31: "deadly-signal",  # SIGSYS
+}
 
 # "#3 0x55f0 in mg_vxprintf /src/mongoose/mongoose.c:1234:9"
 # The function is everything between "in " and the path, because a demangled
@@ -164,8 +189,20 @@ def recursion_cycle(output: str, harness_names: Optional[Sequence[str]] = None) 
     return sorted(f for f, n in seen.items() if n > 1)
 
 
-def extract_class(output: str) -> str:
-    """The sanitizer's name for what went wrong."""
+def signal_class(exit_code: Optional[int]) -> str:
+    """The crash class implied by how the process died, or "" if it did not die.
+
+    Both spellings of a signal death are accepted: docker and the shell report
+    128+N, a directly-killed subprocess reports -N.
+    """
+    if exit_code is None:
+        return ""
+    sig = -exit_code if exit_code < 0 else (exit_code - 128 if exit_code > 128 else 0)
+    return FATAL_SIGNALS.get(sig, "")
+
+
+def extract_class(output: str, exit_code: Optional[int] = None) -> str:
+    """The sanitizer's name for what went wrong, or the signal that ended it."""
     m = _ASAN_ERROR.search(output)
     if m:
         return _canonical_class(m.group(1))
@@ -176,13 +213,18 @@ def extract_class(output: str) -> str:
         return f"undefined-behavior: {m.group(1).strip()[:60]}"
     if _LIBFUZZER_DEADLY.search(output):
         return "segv"
-    return ""
+    if _NOT_A_FAULT.search(output):
+        # libFuzzer can end a timeout or an out-of-memory by aborting, and an
+        # abort is a fatal signal. What it said it was outranks how it ended.
+        return ""
+    return signal_class(exit_code)
 
 
 def compute_signature(
     output: str,
     harness_names: Optional[Sequence[str]] = None,
     frame_depth: int = 3,
+    exit_code: Optional[int] = None,
 ) -> CrashSignature:
     """The signature of the crash described by `output`.
 
@@ -190,6 +232,12 @@ def compute_signature(
         output: the sanitizer's report, as printed.
         harness_names: harnesses whose frames are not part of the identity.
         frame_depth: how many project frames make up the identity.
+        exit_code: how the process ended, when that is known. It decides the
+            class for a crash that printed nothing (see ``FATAL_SIGNALS``).
+            Such a crash has no frames either, so its identity is the class
+            alone and every silent fault in a run collapses into one record --
+            an undercount, which is the safe direction, and the ``vh_id`` on
+            the record still says which hypothesis it came from.
     """
     harness_names = list(harness_names or [])
     frames: List[tuple] = []
@@ -200,4 +248,4 @@ def compute_signature(
         frames.append((func, path.rsplit("/", 1)[-1], int(line) if line else -1))
         if len(frames) >= max(1, frame_depth):
             break
-    return CrashSignature(crash_class=extract_class(output), frames=tuple(frames))
+    return CrashSignature(crash_class=extract_class(output, exit_code), frames=tuple(frames))

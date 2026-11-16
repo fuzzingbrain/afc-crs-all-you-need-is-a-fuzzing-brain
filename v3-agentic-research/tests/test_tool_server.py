@@ -142,6 +142,24 @@ def test_run_target_signs_a_crash(ctx):
     assert res["top_frames"][0][0] == "wpng_byte"  # the harness frame is not the top one
 
 
+def test_run_target_reports_a_crash_that_printed_nothing(ctx):
+    # libyaml's recursive composer on 200k '[': exit 139, four lines of banner,
+    # no report at all -- the fault lands inside the sanitizer's own interceptor
+    # with the stack gone, so no handler gets to write anything. Calling that
+    # "did not crash" sent the agents back to look for a bug they had hit.
+    banner = "INFO: Seed: 1\n/out/libyaml_fuzzer: Running 1 inputs 1 time(s) each.\nRunning: /input\n"
+    ctx["state"].update(run_code=139, run_output=banner)
+    res = server.run_target(generator_code="def generate(n):\n    return b'[' * 200000\n")
+    assert res["crashed"] and res["crash_class"] == "segv" and res["exit_code"] == 139
+    assert "fatal signal" in res["note"] and not res["top_frames"]
+
+
+def test_run_target_does_not_call_the_memory_cap_a_crash(ctx):
+    ctx["state"].update(run_code=137, run_output="INFO: Seed: 1\n")
+    res = server.run_target(generator_code="def generate(n):\n    return b'A'\n")
+    assert res["crashed"] is False and "note" not in res
+
+
 def test_run_target_needs_an_input(ctx):
     res = server.run_target()
     assert not res["ok"] and "input_path" in res["error"]

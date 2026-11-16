@@ -271,6 +271,7 @@ def markdown(store, summary: dict, run_dir: Path) -> str:
             L.append("</details>")
             L.append("")
 
+    vh_where: dict = {}
     for lg in summary.get("logic_groups", []):
         L.append(f"## Bug hunt: {lg['lg']}")
         L.append("")
@@ -285,6 +286,9 @@ def markdown(store, summary: dict, run_dir: Path) -> str:
         L.append("")
 
         vhs = store.vhs(lg["lg"])
+        for v in vhs:
+            vh_where[v["id"]] = (v.get("function_name") or "?", (v.get("function_file") or "")
+                                 + (f":{v['sink_line']}" if v.get("sink_line") else ""))
         if not vhs:
             L.append("No hypothesis was raised.")
             L.append("")
@@ -322,9 +326,19 @@ def markdown(store, summary: dict, run_dir: Path) -> str:
         for group in merge_recursions(crashes):
             c = group[0]
             frames = _as_list(c.get("top_frames"))
-            where = frames[0] if frames else "?"
+            named, where_file = vh_where.get(c.get("vh_id") or "", ("", ""))
+            # A crash that printed nothing has no frames to name it. The
+            # hypothesis it came from does, and saying "at ?" instead throws
+            # away the one thing that locates it.
+            where = frames[0] if frames else (named or "?")
             L.append(f"### {c.get('crash_class') or 'crash'} at {where}")
             L.append("")
+            if not frames:
+                L.append("- the process died on a fatal signal without printing a report, so there is no "
+                         "stack trace. That is what a stack overflow does when the fault lands inside the "
+                         "sanitizer's own code."
+                         + (f" The hypothesis it was generated for is **{named}**"
+                            + (f" (`{where_file}`)" if where_file else "") + "." if named else ""))
             L.append(f"- signature `{c.get('signature_short')}`"
                      + (f", also seen as {len(group) - 1} more signature(s) of the same recursion"
                         if len(group) > 1 else ""))

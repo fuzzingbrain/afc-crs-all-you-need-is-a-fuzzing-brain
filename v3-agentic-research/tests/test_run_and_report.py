@@ -316,3 +316,28 @@ def test_the_report_is_written_next_to_the_run(tmp_path):
     summary = report.summarize(store, status="completed", stages=["directed"], elapsed_s=1)
     path = report.write_markdown(store, summary, tmp_path)
     assert path == tmp_path / "report.md" and path.read_text().startswith("# zlib")
+
+
+def test_a_crash_with_no_stack_trace_still_says_where_it_came_from(tmp_path):
+    """libyaml's stack overflow prints nothing: the fault lands inside ASan's
+    own interceptor with the stack gone, so there are no frames to name it.
+    "segv at ?" throws away the one thing that locates it -- the hypothesis the
+    input was generated for."""
+    store = Store(tmp_path)
+    store.start_run("libyaml", {"project": "libyaml"})
+    store.set_harness("yaml_parser_load", "accepted", binary="libyaml_fuzzer")
+    vh = store.create_vh("yaml_parser_load", function_name="yaml_parser_load_sequence",
+                         function_file="/src/libyaml/src/loader.c", sink_line=360,
+                         finder_score=0.5, description="unbounded recursion")
+    art = tmp_path / "crash-deep"
+    art.write_bytes(b"[" * 1000)
+    store.add_crash("yaml_parser_load", "segv", "sig9", crash_class="segv", source="poc_agent",
+                    vh_id=vh, artifact=str(art), top_frames=[],
+                    output_tail="Running: /input\n")
+    summary = report.summarize(store, status="completed", stages=["directed"],
+                               logic_groups=[{"lg": "yaml_parser_load"}], elapsed_s=600)
+    md = report.markdown(store, summary, tmp_path)
+
+    assert "### segv at yaml_parser_load_sequence" in md
+    assert "died on a fatal signal without printing a report" in md
+    assert "**yaml_parser_load_sequence**" in md and "loader.c:360" in md

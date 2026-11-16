@@ -156,11 +156,21 @@ def _run_input(cinput: str, binary: str | None = None, timeout: int = 0) -> dict
     res = _dexec([binary or _target_bin(), "-runs=1", f"-timeout={max(5, timeout - 10)}", cinput],
                  timeout=timeout, env=_env_run())
     output = res["stderr"] + res["stdout"]
-    crashed = res["exit_code"] != 0 and any(m in output for m in SAN_MARKERS)
+    # A fatal signal counts even with nothing printed: a stack overflow that
+    # faults inside the sanitizer runtime kills the process before any handler
+    # can write a report, and reporting that input as "did not crash" sends the
+    # agent looking for a bug it has already triggered.
+    signal_only = "" if any(m in output for m in SAN_MARKERS) else sigmod.signal_class(res["exit_code"])
+    crashed = bool(signal_only) or (res["exit_code"] != 0 and any(m in output for m in SAN_MARKERS))
     out = {"crashed": crashed, "exit_code": res["exit_code"], "timed_out": res["timed_out"],
            "output_tail": _tail(output, 6000)}
+    if signal_only:
+        out["note"] = (f"the process died on a fatal signal (exit {res['exit_code']}) without printing a "
+                       "sanitizer report, which is what a stack overflow does when the fault lands inside "
+                       "the sanitizer's own code. It is a crash; there is no stack trace to read.")
     if crashed:
-        sig = sigmod.compute_signature(output, harness_names=CTX.get("harness_names") or [])
+        sig = sigmod.compute_signature(output, harness_names=CTX.get("harness_names") or [],
+                                       exit_code=res["exit_code"])
         out.update(crash_class=sig.crash_class, signature=sig.short, where=sig.describe(),
                    top_frames=[list(f) for f in sig.frames[:5]])
         _keep_crashing_input(cinput, sig.short)
