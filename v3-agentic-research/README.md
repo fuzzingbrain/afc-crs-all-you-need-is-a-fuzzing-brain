@@ -27,29 +27,99 @@ harness     research -> write+build+fix -> gate -> review -> fix ... -> final bu
 directed    seed agent -> fuzzers; mapper -> finder -> verifier -> PoC
 ```
 
-## Quick start
+## Install
 
-Any C/C++ repository, nothing but the source tree:
+FBv3 drives two agent CLIs that you install and log in yourself. It never
+handles a credential: it runs `claude` and `codex` as you, on the subscription
+each one is already logged in with, and strips every API-key variable out of a
+session's environment so neither can quietly fall back to metered billing.
+
+**1. The two agent CLIs.** Follow their own instructions -- they change, and
+theirs is the version that is right:
+
+| | install | log in | docs |
+| --- | --- | --- | --- |
+| Claude Code | `npm i -g @anthropic-ai/claude-code` | `claude` then `/login` | <https://docs.claude.com/en/docs/claude-code/overview> |
+| Codex CLI | `npm i -g @openai/codex` | `codex login` | <https://developers.openai.com/codex/cli> |
+
+A Claude.ai (Pro/Max) and a ChatGPT (Plus/Pro) plan respectively. You can run
+on one of them alone -- set every role's backend to it -- but with both, a role
+that one backend refuses or rate-limits is retried on the other.
+
+**2. Docker**, with your user able to run it (`docker ps` must work without
+`sudo`). Builds and fuzzers run in containers, each memory- and CPU-capped.
+
+**3. FBv3 itself.** Python 3.11+:
+
+```sh
+git clone <this repo> && cd v3-agentic-research
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e .
+```
+
+**4. Check it.** This runs no agent and starts nothing -- it only verifies the
+logins, the images and the paths:
+
+```sh
+fbv3 check --project libyaml --image gcr.io/oss-fuzz/libyaml
+```
+
+```
+task libyaml: project libyaml, stages discovery, harness, directed
+  [ok ] docker: server 20.10.24+dfsg1
+  [ok ] builder image: gcr.io/oss-fuzz/libyaml present
+  [ok ] runner image: gcr.io/oss-fuzz/libyaml present
+  [ok ] workspace image: fbv3-ws:33a5fef2e2cf
+  [ok ] claude login: claude: claude.ai, max plan
+  [ok ] codex login: codex: Logged in using ChatGPT
+```
+
+If a login line fails, FBv3 stops before spending anything: an API key in the
+environment is reported as an error, not used.
+
+## One command
+
+```sh
+fbv3 run --project libyaml --image gcr.io/oss-fuzz/libyaml --language c \
+    --discover 1 --duration 900 -o runs/libyaml
+```
+
+That is the whole run: an agent picks an API entry point worth fuzzing, writes
+a harness for it, builds and smoke-fuzzes it through its own tools, a reviewer
+runs inputs through the candidate, and then the directed stage hunts bugs
+through it for 15 minutes. libyaml builds in 30 seconds, so the run is about
+25 minutes end to end.
+
+`--duration` is the bug hunt's budget and it is a ceiling: the stage sizes its
+own agent sessions to fit inside it and never extends itself. Ten minutes
+(`--duration 600`) buys the map and a finder or two; a hypothesis has to be
+raised *and* verified to reach a PoC, and that chain wants 15 minutes.
+
+When it finishes:
+
+```sh
+cat runs/libyaml/report.md        # written by every run
+fbv3 view runs/libyaml            # the counts
+fbv3 view runs/libyaml --report   # the same report on stdout
+```
+
+The report is the point. It names the harness it wrote and where the source
+is, then every hypothesis the finder raised with the verifier's answer to it --
+including the ones that were rejected, which say what was examined and which
+guard upstream makes it unreachable -- and every crash with the input that
+causes it.
+
+## Other ways to start it
+
+Any C/C++ repository, nothing but the source tree -- no image, no task file,
+no existing fuzz target. An agent writes the `build.sh` too:
 
 ```sh
 git clone https://github.com/DaveGamble/cJSON
 fbv3 run --project cJSON --src ./cJSON --function cJSON_ParseWithLength
 ```
 
-An agent reads the tree, writes the `build.sh` that builds the library
-instrumented and links a harness against it -- reusing the project's own
-OSS-Fuzz integration when it has one -- and the rest of the run proceeds as
-usual. Nothing else is needed: no image, no task file, no existing fuzz target.
-
-With an OSS-Fuzz builder image, which is faster and surer when one exists:
-
-```sh
-pip install -e .                       # or: uv pip install -e .
-fbv3 check  --project libpng --image gcr.io/oss-fuzz/libpng     # logins, images, paths
-fbv3 run    --project libpng --image gcr.io/oss-fuzz/libpng     # discover, write, hunt
-```
-
-One target you name, and a shorter budget:
+A function you name, in a project that is already in OSS-Fuzz:
 
 ```sh
 fbv3 run --project zlib --image gcr.io/oss-fuzz/zlib \
@@ -67,17 +137,15 @@ fbv3 run --project binutils \
     --image     gcr.io/oss-fuzz-base/base-builder@sha256:...   # for llvm-cov/symbolizer
 ```
 
-Then:
+And the rest:
 
 ```sh
-fbv3 view runs/<run>          # the summary, again
 fbv3 view runs/<run> --json
 fbv3 clean <run id>           # containers a hard crash left behind
 fbv3 init ... -f task.json    # the task file those flags describe, to edit
 fbv3 run task.json --duration 3600 --set directed.poc_threshold=0.6
+fbv3 run --dry-run ...        # print the resolved task and start nothing
 ```
-
-`fbv3 run --dry-run` prints the task the flags resolved to and starts nothing.
 
 ## Making a plain tree buildable
 
@@ -107,6 +175,8 @@ projects that are already in OSS-Fuzz.
 
 ```
 runs/<name>-<stamp>/
+  report.md              the run as a human reads it: harness, every
+                         hypothesis with its verdict, every crash
   result.json            the summary (always written: success, crash, Ctrl-C)
   fbv3.sqlite            sessions, harness rounds, VHs, crashes, seeds, coverage
   events.jsonl           the same history as a stream (tail -f it)
