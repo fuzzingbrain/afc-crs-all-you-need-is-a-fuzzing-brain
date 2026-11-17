@@ -61,14 +61,7 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install -e .
 ```
 
-**3. Check** — verifies the logins, images and paths, and builds the small
-workspace image once. It starts no agent and no run:
-
-```bash
-fbv3 check --project libyaml --image gcr.io/oss-fuzz/libyaml
-```
-
-**4. Run it** on a repository nothing has ever fuzzed. No image, no task file,
+**3. Run it** on a repository nothing has ever fuzzed. No image, no task file,
 no existing fuzz target: an agent writes the `build.sh` and the harness, a
 reviewer runs inputs through the candidate, and then the bug hunt goes through
 it. This is the run that found microtar's stack-buffer-overflow, about 27
@@ -81,6 +74,11 @@ fbv3 run --project microtar --src ./microtar --function mtar_read_header \
 
 cat runs/microtar/report.md
 ```
+
+It checks the logins, the images and the paths first -- and builds the small
+workspace image the agents' tools run in, once -- then refuses to start if
+anything is missing, so a run never spends on a setup that was going to fail.
+(`fbv3 check` is that preflight on its own, without the run.)
 
 On an OSS-Fuzz project instead (`docker pull gcr.io/oss-fuzz/libyaml` first):
 
