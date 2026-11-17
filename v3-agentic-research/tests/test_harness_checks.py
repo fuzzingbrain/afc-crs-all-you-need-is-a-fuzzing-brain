@@ -126,11 +126,13 @@ def test_a_bound_that_is_not_an_early_return_is_not_a_filter():
     assert of(static_findings(src), "P6") == []
 
 
-def test_a_filter_in_the_projects_own_harness_is_reported_but_does_not_block():
-    # Integrate mode: assimp's upstream harness drops every input over 1MB
-    # "to prevent OOMs and timeouts". Worth knowing, not the agent's to fix.
-    f = of(static_findings(FILTERING, authored=False), "P6")
-    assert f and not of(f, severity="error")
+def test_a_filter_copied_from_the_project_is_still_the_agents_to_remove():
+    # In integrate mode the agent writes build.sh plus a first harness, and it
+    # may copy the project's own -- assimp's drops every input over 1MB "to
+    # prevent OOMs and timeouts". Copied or written, it submitted the file and
+    # the gate's feedback round is where it deletes the guard.
+    upstream = "// Limit input size to 1MB to prevent OOMs and timeouts\n" + GOOD
+    assert of(static_findings(upstream), "P6", "error")
 
 
 def test_the_prompt_text_matches_the_task_sanitizers():

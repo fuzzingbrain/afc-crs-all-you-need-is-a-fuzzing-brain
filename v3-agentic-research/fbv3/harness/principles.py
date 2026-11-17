@@ -122,15 +122,7 @@ def _line_of(source: str, pos: int) -> int:
 
 
 def static_findings(source: str, sanitizers: tuple[str, ...] | list[str] = ("address",),
-                    language: str = "c", authored: bool = True) -> list[Finding]:
-    """The findings a checker can reach without an agent.
-
-    ``authored`` is False when the harness is the project's own (integrate
-    mode). A P6 filter there is still worth saying out loud -- assimp's
-    upstream harness drops every input over 1MB "to prevent OOMs and
-    timeouts" -- but it is not a defect the agent introduced or was asked to
-    fix, so it does not fail the gate and send it into a revision round.
-    """
+                    language: str = "c") -> list[Finding]:
     out: list[Finding] = []
     if not re.search(r"\bLLVMFuzzerTestOneInput\s*\(", source):
         out.append(Finding("P1", "error", "the harness does not define LLVMFuzzerTestOneInput"))
@@ -156,8 +148,7 @@ def static_findings(source: str, sanitizers: tuple[str, ...] | list[str] = ("add
     for m in _COMMENT.finditer(source):
         a = _AVOIDING.search(m.group(0))
         if a:
-            out.append(Finding("P6", "error" if authored else "warning",
-                               f"the harness says it keeps {a.group(1).lower()} out "
+            out.append(Finding("P6", "error", f"the harness says it keeps {a.group(1).lower()} out "
                                f"({m.group(0).strip()[:90]!r}); that fault is what the run is looking for, "
                                "and screening its inputs makes it unreachable for the whole run",
                                _line_of(source, m.start())))
