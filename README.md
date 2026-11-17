@@ -43,9 +43,11 @@ in with. FBv3 never handles a credential: it runs `claude` and `codex` as you,
 and strips every API-key variable out of a session's environment so neither can
 fall back to metered billing.
 
-**1. The agent CLIs**, logged in as yourself. Both is the default (analysis
-roles go to `codex`, bug-touching roles to `claude`, and a role one backend
-refuses is retried on the other); one alone works too:
+**1. The agent CLIs**, logged in as yourself. **One of the two is enough** --
+the preflight moves every role to whichever is logged in. With both, the
+analysis roles go to `codex` and the roles that reproduce a bug go to `claude`
+(ChatGPT's filter refuses those), each half draws on a different plan's quota,
+and a role one backend rate-limits is retried on the other:
 
 ```bash
 npm i -g @anthropic-ai/claude-code && claude      # then /login  (Claude Pro/Max)

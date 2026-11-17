@@ -67,10 +67,39 @@ def test_preflight_fails_on_a_missing_image(tmp_path, stub):
     assert not pre.ok and "docker pull nope" in pre.text()
 
 
-def test_preflight_fails_when_a_backend_is_not_logged_in(tmp_path, stub):
+def test_one_subscription_is_enough_and_moves_every_role_to_it(tmp_path, stub):
+    # Two backends is a default, not a requirement. A reader with one plan was
+    # being told to fix an error that was only ever an opportunity.
     stub["logins"].pop("codex")
+    t = task(tmp_path, builder_image="img", runner_image="runner")
+    assert any(rc.backend == "codex" for rc in t.agents.roles.values())
+    pre = runmod.preflight(t)
+    assert pre.ok, pre.text()
+    assert "every role runs on claude" in pre.text()
+    assert {rc.backend for rc in t.agents.roles.values()} == {"claude"}
+    assert t.agents.fallback is False  # nothing left to fail over to
+
+
+def test_the_roles_that_moved_are_named(tmp_path, stub):
+    stub["logins"].pop("claude")
+    pre = runmod.preflight(task(tmp_path, builder_image="img", runner_image="runner"))
+    assert pre.ok and "every role runs on codex" in pre.text()
+    assert "verifier" in pre.text() and "finder" not in pre.text()
+
+
+def test_no_subscription_at_all_still_fails(tmp_path, stub):
+    stub["logins"].clear()
     pre = runmod.preflight(task(tmp_path))
-    assert not pre.ok and "codex is not logged in" in pre.text()
+    assert not pre.ok
+    assert "claude is not logged in" in pre.text() and "codex is not logged in" in pre.text()
+
+
+def test_both_logins_are_left_alone(tmp_path, stub):
+    t = task(tmp_path, builder_image="img", runner_image="runner")
+    before = {r: rc.backend for r, rc in t.agents.roles.items()}
+    assert runmod.preflight(t).ok
+    assert {r: rc.backend for r, rc in t.agents.roles.items()} == before
+    assert t.agents.fallback is True
 
 
 def test_preflight_fails_without_docker(tmp_path, stub):

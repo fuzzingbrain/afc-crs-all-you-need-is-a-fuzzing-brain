@@ -86,8 +86,8 @@ def preflight(task: Task, *, build_image: bool = True) -> Preflight:
               else (_ for _ in ()).throw(PreflightError(f"{t} is not pulled: docker pull {t}")))
     if build_image:
         check("workspace image", lambda: image.ensure_image())
-    for backend, line in sorted(_logins(task).items()):
-        checks.append((f"{backend} login", line[0], line[1]))
+    for backend, good, detail in _backends(task):
+        checks.append((f"{backend} login", good, detail))
     for p in task.prebuilt:
         check(f"prebuilt {p.name}", lambda p=p: _check_prebuilt(p))
     return Preflight(all(good for _, good, _ in checks), checks)
@@ -101,6 +101,36 @@ def _logins(task: Task) -> dict[str, tuple[bool, str]]:
         except Exception as exc:  # noqa: BLE001
             out[backend] = (False, str(exc))
     return out
+
+
+def _backends(task: Task) -> list[tuple[str, bool, str]]:
+    """Check the logins, and make one subscription enough.
+
+    Two backends is a default, not a requirement: the analysis roles go to
+    codex and the roles that reproduce a bug go to claude because ChatGPT's
+    filter refuses those, and with both the run can retry a role one of them
+    rate-limits or flags. Needing both *logins* to start was an accident of
+    that default -- ``backends_used`` reports both whenever fallback is on, so
+    a reader with one subscription was told to go and fix an error that was
+    only ever an opportunity. Here the roles move to the backend that is
+    actually logged in, which is what the user with one plan would have had
+    to write out by hand (``--backend claude --set agents.fallback=false``).
+    """
+    logins = _logins(task)
+    out = [(b, good, detail) for b, (good, detail) in sorted(logins.items())]
+    working = [b for b, (good, _) in logins.items() if good]
+    if len(working) != 1 or all(good for _, good, _ in out):
+        return out  # both there, or none: nothing to decide
+    only = working[0]
+    moved = sorted({r for r, rc in task.agents.roles.items() if rc.backend != only})
+    for rc in task.agents.roles.values():
+        rc.backend = only
+    task.agents.fallback = False
+    task.agents.alternate = ()
+    note = f"not logged in, so every role runs on {only}"
+    if moved:
+        note += f" ({len(moved)} role(s) moved: {', '.join(moved)})"
+    return [(b, True, detail if good else note) for b, good, detail in out]
 
 
 def _check_prebuilt(p: Prebuilt) -> str:

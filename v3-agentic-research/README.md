@@ -148,8 +148,11 @@ hypothesis the finder raised with the verifier's answer to it -- including the
 rejected ones, which say what was examined and why it was set aside -- and
 every crash with the input that causes it.
 
-**On one subscription only.** Send every role to the backend you have and turn
-the cross-backend retry off, so `check` stops asking for the other login:
+**On one subscription.** Nothing to do: the preflight sees which CLI is logged
+in and moves every role to it, saying which ones moved. Two is a default, not
+a requirement -- with both, a role that one backend rate-limits or refuses is
+retried on the other, and the analysis half runs on a separate plan's quota
+from the bug-hunting half. To pin the split by hand anyway:
 
 ```sh
 fbv3 run --backend claude --set agents.fallback=false --project libyaml ...

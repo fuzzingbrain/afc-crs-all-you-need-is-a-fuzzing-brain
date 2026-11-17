@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from fbv3.build import builder
+from fbv3.sandbox import docker
 
 
 def test_the_marker_keeps_the_agents_line_numbers():
@@ -174,3 +175,34 @@ def test_a_successful_build_prunes_and_can_be_told_not_to(tmp_path, monkeypatch)
     res = builder.build_harness(builder_image="img", overlay="/src/harness.c", source="int x;",
                                 build_dir=tmp_path / "b", prune=False)
     assert res.ok and (Path(res.out_dir) / "other").is_file()
+
+
+# -- the cgroup caps ---------------------------------------------------------------------------
+
+
+def test_the_cpu_cap_never_asks_for_more_cores_than_the_machine_has(monkeypatch):
+    # docker refuses the container outright -- "Range of CPUs is from 0.01 to
+    # 2.00, as there are only 2 CPUs available" -- so a default chosen on a
+    # 32-core host would stop every build on a laptop, not slow it down.
+    monkeypatch.setattr(docker.os, "cpu_count", lambda: 2)
+    assert "--cpus=2" in docker.resource_args(8192, 4.0)
+    monkeypatch.setattr(docker.os, "cpu_count", lambda: 32)
+    assert "--cpus=4" in docker.resource_args(8192, 4.0)
+
+
+def test_a_machine_that_reports_no_cores_still_gets_a_container(monkeypatch):
+    # An unknown core count is treated as one, not as a reason to fail.
+    monkeypatch.setattr(docker.os, "cpu_count", lambda: None)
+    assert "--cpus=1" in docker.resource_args(8192, 4.0)
+
+
+def test_the_environment_override_is_clamped_too(monkeypatch):
+    monkeypatch.setattr(docker.os, "cpu_count", lambda: 4)
+    monkeypatch.setenv("FBV3_DOCKER_CPUS", "64")
+    assert "--cpus=4" in docker.resource_args(8192, 2.0)
+
+
+def test_memory_is_not_clamped_because_a_cap_above_ram_is_never_reached(monkeypatch):
+    monkeypatch.setattr(docker.os, "cpu_count", lambda: 1)
+    args = docker.resource_args(8192, 1.0)
+    assert "--memory=8192m" in args and "--memory-swap=8192m" in args

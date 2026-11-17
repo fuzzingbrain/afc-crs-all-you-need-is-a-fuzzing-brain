@@ -24,8 +24,20 @@ def uid_gid() -> str:
 
 
 def resource_args(memory_mb: int, cpus: float, pids: int = 1024) -> list[str]:
+    """The cgroup caps for one container, clamped to a machine that has less.
+
+    The defaults were chosen on a 32-core host. ``--cpus`` is the one cap
+    docker validates against the hardware -- "Range of CPUs is from 0.01 to
+    2.00, as there are only 2 CPUs available" -- so a build asking for 4 on a
+    two-core laptop does not run slowly, it fails to create the container at
+    all, and every stage that builds anything dies with it. The cap is a
+    ceiling on what one container may take, so lowering it to what exists is
+    what the caller meant. Memory needs no clamp: a cap above physical RAM is
+    simply not reached.
+    """
     memory_mb = int(os.environ.get("FBV3_DOCKER_MEMORY_MB", memory_mb))
     cpus = float(os.environ.get("FBV3_DOCKER_CPUS", cpus))
+    cpus = max(0.5, min(cpus, float(os.cpu_count() or 1)))
     return [f"--memory={memory_mb}m", f"--memory-swap={memory_mb}m", f"--cpus={cpus:g}",
             f"--pids-limit={pids}"]
 
