@@ -277,8 +277,11 @@ class Store:
         rows = self._rows("SELECT * FROM crashes" + (" WHERE lg=?" if lg else "") + " ORDER BY created_at",
                           (lg,) if lg else ())
         for r in rows:
-            r["top_frames"] = json.loads(r["top_frames"] or "[]")
-            r["cycle"] = json.loads(r["cycle"] or "[]")
+            # A run recorded before a column existed still has to be readable:
+            # the report is how a finished run is read, and it must not
+            # traceback on one that predates a schema change.
+            r["top_frames"] = json.loads(r.get("top_frames") or "[]")
+            r["cycle"] = json.loads(r.get("cycle") or "[]")
         return rows
 
     # -- seeds and coverage ---------------------------------------------------------------------

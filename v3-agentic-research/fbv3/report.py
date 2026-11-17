@@ -174,6 +174,17 @@ def _as_dict(value) -> dict:
     return out if isinstance(out, dict) else {}
 
 
+def _frame(f) -> str:
+    """One stack frame as a human reads it: the function, then where it is."""
+    if isinstance(f, str):
+        return f
+    parts = list(f) + ["", ""]
+    func, where, line = str(parts[0]), str(parts[1]), str(parts[2])
+    if where and line not in ("", "-1", "None"):
+        return f"{func} ({where}:{line})"
+    return f"{func} ({where})" if where else func
+
+
 def _finding(v: dict) -> str:
     """One reviewer finding on one line, with its own words kept."""
     if not isinstance(v, dict):
@@ -325,7 +336,7 @@ def markdown(store, summary: dict, run_dir: Path) -> str:
         L.append("")
         for group in merge_recursions(crashes):
             c = group[0]
-            frames = _as_list(c.get("top_frames"))
+            frames = [_frame(f) for f in _as_list(c.get("top_frames"))]
             named, where_file = vh_where.get(c.get("vh_id") or "", ("", ""))
             # A crash that printed nothing has no frames to name it. The
             # hypothesis it came from does, and saying "at ?" instead throws

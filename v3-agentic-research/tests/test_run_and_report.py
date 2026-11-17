@@ -341,3 +341,29 @@ def test_a_crash_with_no_stack_trace_still_says_where_it_came_from(tmp_path):
     assert "### segv at yaml_parser_load_sequence" in md
     assert "died on a fatal signal without printing a report" in md
     assert "**yaml_parser_load_sequence**" in md and "loader.c:360" in md
+
+
+def test_a_crash_report_names_its_frames_the_way_a_human_reads_them(tmp_path):
+    """A frame is (function, file, line). Joining them as if they were strings
+    is a TypeError, and the only run that had crashes was recorded before the
+    markdown report existed, so nothing caught it until the report was
+    regenerated for that run."""
+    store, vh = filled_store(tmp_path)
+    summary = report.summarize(store, status="completed", stages=["directed"],
+                               logic_groups=[{"lg": "compress2"}], elapsed_s=600)
+    md = report.markdown(store, summary, tmp_path)
+    assert "### heap-buffer-overflow at deflate (deflate.c:40)" in md
+
+
+def test_a_run_recorded_before_a_column_existed_is_still_readable(tmp_path):
+    """The report is how a finished run is read. A run whose SQLite predates a
+    schema change must not take it down -- `fbv3 view --write` on the only run
+    with a PoC died on the missing `cycle` column."""
+    store = Store(tmp_path)
+    store.start_run("old", {})
+    store.add_crash("lg", "key", "sig1", crash_class="segv", source="global",
+                    top_frames=[["f", "f.c", "1"]])
+    store._db.execute("ALTER TABLE crashes DROP COLUMN cycle")
+    store._db.commit()
+    rows = store.crashes()
+    assert len(rows) == 1 and rows[0]["cycle"] == [] and rows[0]["top_frames"] == [["f", "f.c", "1"]]
