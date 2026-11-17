@@ -66,6 +66,8 @@ fbv3 check --project libyaml --image gcr.io/oss-fuzz/libyaml
 
 ```
 task libyaml: project libyaml, stages discovery, harness, directed
+  targets: (discovery)
+  prebuilt: (none)
   [ok ] docker: server 20.10.24+dfsg1
   [ok ] builder image: gcr.io/oss-fuzz/libyaml present
   [ok ] runner image: gcr.io/oss-fuzz/libyaml present
