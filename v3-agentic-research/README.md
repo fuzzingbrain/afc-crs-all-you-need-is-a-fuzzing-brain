@@ -27,6 +27,145 @@ harness     research -> write+build+fix -> gate -> review -> fix ... -> final bu
 directed    seed agent -> fuzzers; mapper -> finder -> verifier -> PoC
 ```
 
+## Quick start (agent mode)
+
+Zero to a bug report on a library FBv3 has never seen. Nothing here is metered:
+every reasoning step is a session on a subscription CLI you are already logged
+in with. Each step says what it costs you in time.
+
+**1. FBv3** (Python 3.11+, half a minute):
+
+```sh
+git clone <this repo> && cd afc-crs-all-you-need-is-a-fuzzing-brain/v3-agentic-research
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e .
+```
+
+**2. The agent CLIs**, installed and logged in as yourself. FBv3 never handles
+a credential -- it runs these as you and strips every API-key variable out of a
+session's environment, so neither can fall back to metered billing:
+
+```sh
+npm i -g @anthropic-ai/claude-code && claude      # then /login  (Claude Pro/Max)
+npm i -g @openai/codex            && codex login  #             (ChatGPT Plus/Pro)
+```
+
+Both is the default: analysis roles go to `codex`, bug-touching roles to
+`claude` (ChatGPT's content filter refuses them), and a role one backend
+rate-limits or refuses is retried on the other. One alone works too -- see the
+bottom of this section.
+
+**3. Docker**, usable without `sudo` (`docker ps` must work). Builds and
+fuzzers run in containers, each memory- and CPU-capped. For an OSS-Fuzz
+project you also need its image; FBv3 does not pull for you, it prints the
+command you need (for a plain source tree, skip this):
+
+```sh
+docker pull gcr.io/oss-fuzz/libyaml
+```
+
+**4. Check.** This starts no agent and no run -- it verifies the logins, the
+images and the paths, and the first time it also builds the small workspace
+image the agents' tools run in (a minute or two, once):
+
+```sh
+fbv3 check --project libyaml --image gcr.io/oss-fuzz/libyaml
+```
+
+```
+task libyaml: project libyaml, stages discovery, harness, directed
+  targets: (discovery)
+  prebuilt: (none)
+  [ok ] docker: server 20.10.24+dfsg1
+  [ok ] builder image: gcr.io/oss-fuzz/libyaml present
+  [ok ] runner image: gcr.io/oss-fuzz/libyaml present
+  [ok ] workspace image: fbv3-ws:33a5fef2e2cf
+  [ok ] claude login: claude: claude.ai, max plan
+  [ok ] codex login: codex: Logged in using ChatGPT
+```
+
+Every line must say `ok` before you spend anything. An API key found in the
+environment is reported as an error, not used.
+
+**5. Run it.** One command. An OSS-Fuzz project, about 25 minutes for libyaml:
+
+```sh
+fbv3 run --project libyaml --image gcr.io/oss-fuzz/libyaml --language c \
+    --discover 1 --duration 900 --sessions 3 -o runs/libyaml
+```
+
+Or any C/C++ repository, with no image and no OSS-Fuzz integration at all --
+an agent writes the `build.sh` first, so step 3's `docker pull` is not needed.
+This is the run that found microtar's stack-buffer-overflow (about 27 minutes,
+one session at a time):
+
+```sh
+git clone https://github.com/rxi/microtar
+fbv3 run --project microtar --src ./microtar --function mtar_read_header \
+    --duration 900 -o runs/microtar
+```
+
+Either way: an agent picks an API entry point worth fuzzing, writes a harness
+for it, builds and smoke-fuzzes it through its own tools, a reviewer runs
+inputs through the candidate, and then the bug hunt runs through it. Each
+agent's verdict reaches the log as it lands, with a heartbeat once a minute
+(the lines below are the message column; each is prefixed with a timestamp and
+the module):
+
+```
+yaml_parser_load: 0/164 functions, 0 VH (0 open), 0 PoC, 0 crash, 9m00s left
+yaml_parser_load: finder yaml_emitter_analyze_scalar -> no bug  (27s, 8 turns, 1/164 functions)
+yaml_parser_load: finder yaml_emitter_write_block_scalar_hints -> no bug  (19s, 6 turns, 2/164 functions)
+yaml_parser_load: finder yaml_emitter_write_folded_scalar -> 1 hypothesis(es) at 0.25  (29s, 7 turns, 10/164 functions)
+```
+
+and when a hypothesis survives, through to the crash:
+
+```
+assimp_fuzzer: verifier Assimp::FBX::MeshGeometry::MeshGeometry -> score 1.00, PoC next  (144s, 31 turns)
+assimp_fuzzer: poc Assimp::FBX::MeshGeometry::MeshGeometry attempt 1 -> reproduced segv in Assimp::FBX::MeshGeometry::MeshGeometry(...)  (32s, 7 turns)
+```
+
+The last line of the hunt says what it spent against what you gave it, which
+is how you size the next run:
+
+```
+yaml_parser_load: stage done in 473s of the 600s asked (79%); 23/164 functions, 1 VH, 0 PoC, 0 crash
+```
+
+Those lines are this format rendering the recorded sessions of two real runs
+(libyaml and assimp; the runs themselves predate the format), not a
+hand-written example.
+
+**6. Read the report.** It is written by every run, crash or no crash:
+
+```sh
+cat runs/libyaml/report.md
+```
+
+It names the harness the agent wrote and where its source is, then every
+hypothesis the finder raised with the verifier's answer to it -- including the
+rejected ones, which say what was examined and why it was set aside -- and
+every crash with the input that causes it.
+
+**On one subscription only.** Send every role to the backend you have and turn
+the cross-backend retry off, so `check` stops asking for the other login:
+
+```sh
+fbv3 run --backend claude --set agents.fallback=false --project libyaml ...
+```
+
+**The knobs you will reach for first.** Without them you get one entry point, a
+30-minute hunt, and strictly serial sessions:
+
+| flag | default | what it does |
+| --- | --- | --- |
+| `--duration SECONDS` | 1800 | the bug hunt's budget, a ceiling it sizes its sessions to fit |
+| `--sessions N` | 1 | agent sessions in flight at once, over the whole run |
+| `--discover N` | 1 | how many API entry points to find and write harnesses for |
+| `--function FN` | (discover) | fuzz this entry point instead of letting an agent choose |
+| `--dry-run` | | print the resolved task and start nothing |
+
 ## Install
 
 FBv3 drives two agent CLIs that you install and log in yourself. It never
