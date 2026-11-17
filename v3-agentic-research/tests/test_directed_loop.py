@@ -36,6 +36,8 @@ class FakePool:
         self.min_runtimes: list[tuple[str, float]] = []
         self.stopped = __import__("threading").Event()
         self.budgets = []
+        self.durations: dict[str, float] = {}  # what a session of this role "took"
+        self.turns: dict[str, int] = {}
         self._n = 0
 
     def run(self, role, *, scope, system, task, tools, ctx, session_root, subject="", deadline=None,
@@ -57,7 +59,8 @@ class FakePool:
                 path.write_text("".join(json.dumps(r) + "\n" for r in content))
             else:
                 path.write_text(json.dumps(content))
-        return SessionResult(sid, role, "claude", self.status.get(role, "completed"), session_dir=str(d))
+        return SessionResult(sid, role, "claude", self.status.get(role, "completed"), session_dir=str(d),
+                             duration_s=self.durations.get(role, 0.0), turns=self.turns.get(role, 0))
 
 
 class FakeMonitor:
@@ -878,3 +881,108 @@ def test_the_budget_reaches_the_pool_not_just_the_bar(tmp_path, monkeypatch):
     monkeypatch.setattr(run, "_prompt", lambda role, **kw: ("s", "t"))
     run._session("finder", system="s", task="t")
     assert pool.budgets == [("finder", 240.0)]
+
+
+# -- the bar a role has to clear ---------------------------------------------------------------
+
+
+def test_the_bar_is_a_guess_until_the_role_has_run(tmp_path):
+    run, pool, _ = make(tmp_path, duration_seconds=600)
+    # 600s stage -> 240s session budget -> a 150s bar, the configured guess.
+    assert run._bar("finder") == 150.0
+
+
+def test_a_role_that_proves_it_is_fast_stops_being_charged_for_slow(tmp_path):
+    """On libyaml every finder finished in 9-29s and the flat 150s bar shut the
+    hunt down at 450s of a 600s stage. Two measurements are enough to stop
+    paying 150s of wall-clock to protect twenty seconds of tokens."""
+    run, pool, _ = make(tmp_path, duration_seconds=600)
+    pool.durations["finder"] = 20.0
+    run._finder(dict(FN))
+    assert run._bar("finder") == 150.0, "one session is an anecdote"
+    run._finder(dict(FN, name="inflate"))
+    assert run._bar("finder") == 40.0, "20s * 1.5 = 30, floored at BAR_FLOOR"
+    pool.durations["finder"] = 120.0
+    run._finder(dict(FN, name="crc32"))
+    run._finder(dict(FN, name="adler32"))
+    # 120s * 1.5 = 180 > the 150s guess, so the bar goes back to the guess and
+    # no further: the measurement is allowed to earn time, not to demand it.
+    assert run._bar("finder") == 150.0
+
+
+def test_measurement_can_lower_the_bar_but_never_raise_it(tmp_path):
+    run, pool, _ = make(tmp_path, duration_seconds=600)
+    pool.durations["finder"] = 9000.0  # a role far slower than its own budget
+    for name in ("a", "b", "c"):
+        run._finder(dict(FN, name=name))
+    assert run._bar("finder") == 150.0, "a slow role keeps the guess, it does not exceed it"
+
+
+def test_only_a_session_that_ran_to_its_own_end_measures_the_role(tmp_path):
+    """A session the stage cut off measures the stage, not the role."""
+    run, pool, _ = make(tmp_path, duration_seconds=600)
+    pool.durations["finder"] = 20.0
+    pool.status["finder"] = "timeout"
+    run._finder(dict(FN))
+    run._finder(dict(FN, name="inflate"))
+    assert run._bar("finder") == 150.0
+    assert run._cost.get("finder") is None
+
+
+def test_the_work_loop_keeps_dispatching_while_any_role_can_start(tmp_path):
+    run, pool, _ = make(tmp_path, duration_seconds=600)
+    assert run._dispatch_bar() == 150.0
+    pool.durations["finder"] = 20.0
+    run._finder(dict(FN))
+    run._finder(dict(FN, name="inflate"))
+    # The cheapest role sets the floor: the loop stays open 110s longer.
+    assert run._dispatch_bar() == 40.0
+
+
+# -- what the run tells the person watching it -------------------------------------------------
+
+
+def test_every_function_the_finder_judged_reaches_the_log(tmp_path, caplog):
+    """Thirteen minutes of work printed six lines, four of them in the first
+    minute. The per-function verdict is the stage's output, so it is its log."""
+    run, pool, _ = make(tmp_path)
+    pool.durations["finder"], pool.turns["finder"] = 17.0, 7
+    run._queued_fns = {"deflate", "inflate", "crc32"}
+    with caplog.at_level(logging.INFO, logger="fbv3.directed.loop"):
+        run._finder(dict(FN))
+        pool.files["finder"] = {"vhs.jsonl": [VH_ROW]}
+        run._finder(dict(FN, name="inflate"))
+    text = caplog.text
+    assert "finder deflate -> no bug  (17s, 7 turns, 1/3 functions)" in text
+    assert "finder inflate -> 1 hypothesis(es) at 0.75  (17s, 7 turns, 2/3 functions)" in text
+
+
+def test_the_verifier_and_the_poc_agent_say_what_they_concluded(tmp_path, caplog):
+    run, pool, store = make(tmp_path)
+    pool.durations["verifier"], pool.turns["verifier"] = 78.0, 12
+    vh = store.create_vh("fuzz", **VH_ROW)
+    pool.files["verifier"] = {"verdict.json": {"score": 0.9, "verification_notes": "n"}}
+    with caplog.at_level(logging.INFO, logger="fbv3.directed.loop"):
+        run._verify(vh)
+    assert "verifier deflate -> score 0.90, PoC next  (78s, 12 turns)" in caplog.text
+
+
+def test_a_rejected_hypothesis_says_so_in_the_log(tmp_path, caplog):
+    run, pool, store = make(tmp_path)
+    vh = store.create_vh("fuzz", **VH_ROW)
+    pool.files["verifier"] = {"verdict.json": {"score": 0.3}}
+    with caplog.at_level(logging.INFO, logger="fbv3.directed.loop"):
+        run._verify(vh)
+    assert "verifier deflate -> score 0.30, rejected" in caplog.text
+
+
+def test_the_heartbeat_says_where_the_stage_is(tmp_path, caplog):
+    run, pool, store = make(tmp_path)
+    store.create_vh("fuzz", **VH_ROW)
+    run._analysed_fns = {"deflate"}
+    run._queued_fns = {"deflate", "inflate", "crc32"}
+    run._deadline = time.monotonic() + 185
+    with caplog.at_level(logging.INFO, logger="fbv3.directed.loop"):
+        run._progress()
+        run._progress()  # once a minute, not once a sample
+    assert caplog.text.count("1/3 functions, 1 VH (1 open), 0 PoC, 0 crash, 3m0") == 1

@@ -58,6 +58,15 @@ PRIO_VERIFY, PRIO_POC, PRIO_FINDER, PRIO_FP = 0, 0, 1, 2
 SESSION_SHARE = 0.4
 SAMPLE_S = 15.0
 FN_SAMPLE_S = 120.0
+PROGRESS_S = 60.0
+# A role's bar is how much time it needs to be worth starting. Guessed from a
+# configured timeout it is not a measurement: on libyaml every finder finished
+# in 9 to 29 seconds and a flat 150s bar shut the hunt down at 450s of a 600s
+# stage -- 127s of the user's budget spent idle to avoid wasting twenty seconds
+# of tokens. Once a role has actually run here, its own cost sets its bar.
+BAR_FLOOR = 40.0       # below this a session cannot reach its first submit
+BAR_SAFETY = 1.5       # start one when the time left covers its measured cost
+BAR_SAMPLES = 2        # one session is an anecdote
 
 
 @dataclass
@@ -137,6 +146,8 @@ class DirectedRun:
         self._t0 = time.monotonic()
         self._harness_src: dict[str, str] = {}
         self._last_fn_sample = 0.0
+        self._last_progress = 0.0
+        self._cost: dict[str, list[float]] = {}
         self._grace_used = False
 
     # -- time and bookkeeping ----------------------------------------------------------
@@ -160,8 +171,36 @@ class DirectedRun:
         return min(configured, max(150.0, self.cfg.duration_seconds * SESSION_SHARE))
 
     def _bar(self, role: str) -> float:
-        """How much time a session of this role needs to be worth starting."""
-        return max(150.0, self._budget(role) / 3.0)
+        """How much time a session of this role needs to be worth starting.
+
+        The configured bar is a guess, and before the role has run it is the
+        only thing available. After that this run's own measurements replace
+        it: the 75th percentile of what sessions of this role actually took
+        here, with a margin. Measurement can only lower the bar, never raise
+        it, so a role that really is slow keeps its protection.
+        """
+        guess = max(150.0, self._budget(role) / 3.0)
+        with self._lock:
+            seen = sorted(self._cost.get(role, ()))
+        if len(seen) < BAR_SAMPLES:
+            return guess
+        p75 = seen[min(len(seen) - 1, int(len(seen) * 0.75))]
+        return min(guess, max(BAR_FLOOR, p75 * BAR_SAFETY))
+
+    def _observe(self, role: str, res) -> None:
+        """Record what a session of this role cost, for ``_bar``.
+
+        Only a session that ran to its own end measures the role: one the stage
+        cut off measures the stage.
+        """
+        if res.status != "completed" or not res.duration_s:
+            return
+        with self._lock:
+            self._cost.setdefault(role, []).append(float(res.duration_s))
+
+    def _dispatch_bar(self) -> float:
+        """The work loop keeps dispatching while *some* role can still start."""
+        return min(self._bar(r) for r in ("finder", "verifier", "poc", "fp_seed"))
 
     def _enough_time(self, role: str) -> bool:
         """Is there enough left for a session of this role to be worth starting?
@@ -193,12 +232,14 @@ class DirectedRun:
         }
 
     def _session(self, role: str, *, system: str, task: str, subject: str = "", **ctx_extra):
-        return self.pool.run(role, scope="directed", system=system, task=task,
-                             tools=prompts.ROLE_TOOLS[role], ctx=self._ctx(**ctx_extra),
-                             session_root=self.ws.path("sessions"),
-                             subject=f"{self.lg.name}/{subject}" if subject else self.lg.name,
-                             deadline=self._deadline, min_runtime=self._bar(role),
-                             budget_s=self._budget(role))
+        res = self.pool.run(role, scope="directed", system=system, task=task,
+                            tools=prompts.ROLE_TOOLS[role], ctx=self._ctx(**ctx_extra),
+                            session_root=self.ws.path("sessions"),
+                            subject=f"{self.lg.name}/{subject}" if subject else self.lg.name,
+                            deadline=self._deadline, min_runtime=self._bar(role),
+                            budget_s=self._budget(role))
+        self._observe(role, res)
+        return res
 
     def _prompt(self, role: str, **kw) -> tuple[str, str]:
         return prompts.directed(role, harness_src=self._harness_src, target=self.lg.binary, **kw)
@@ -372,6 +413,30 @@ class DirectedRun:
                 self._sample_once()
             except Exception as exc:  # noqa: BLE001
                 logger.debug("%s: coverage sample failed: %s", self.lg.name, exc)
+            try:
+                self._progress()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("%s: progress line failed: %s", self.lg.name, exc)
+
+    def _progress(self) -> None:
+        """Where the stage is, once a minute.
+
+        A thirteen-minute run printed six lines, four of them in its first
+        minute. Everything it did was in the database and nothing was on the
+        screen, which is how a working stage looks identical to a stalled one.
+        """
+        if time.monotonic() - self._last_progress < PROGRESS_S:
+            return
+        self._last_progress = time.monotonic()
+        vhs = self.store.vhs(self.lg.name)
+        open_vhs = sum(1 for v in vhs if v["status"] in ("pending_verify", "verifying",
+                                                         "pending_poc", "generating_poc"))
+        left = self._left()
+        logger.info("%s: %d/%d functions, %d VH (%d open), %d PoC, %d crash, %dm%02ds left",
+                    self.lg.name, len(self._analysed_fns), len(self._queued_fns), len(vhs), open_vhs,
+                    sum(1 for v in vhs if v["poc_status"] == "crashed"),
+                    self._monitor.new_crashes if self._monitor else 0,
+                    int(max(0.0, left)) // 60, int(max(0.0, left)) % 60)
 
     def _sample_once(self) -> None:
         log, corpus = self.ws.path("fuzz/global/fuzzer.log"), self.ws.path("fuzz/global/corpus")
@@ -471,9 +536,18 @@ class DirectedRun:
             end=fn.get("end_line", 0), call_path=fn.get("call_path") or "(from coverage)",
             reason=fn.get("reason") or "(covered)")
         res = self._session("finder", system=system, task=task, subject=fn["name"], function=fn)
-        if res.status != "skipped":
-            self._analysed_fns.add(fn["name"])
-        for raw in _jsonl(res.out_dir / "vhs.jsonl") if res.session_id else []:
+        if res.status == "skipped":
+            return
+        self._analysed_fns.add(fn["name"])
+        raws = list(_jsonl(res.out_dir / "vhs.jsonl")) if res.session_id else []
+        # 23 functions came back "no bug, and here is why" on libyaml and the
+        # log said nothing at all for thirteen minutes. The verdict per
+        # function is the stage's actual output, so it is the stage's log.
+        scores = ", ".join(f"{float(r.get('finder_score', 0.5)):.2f}" for r in raws)
+        logger.info("%s: finder %s -> %s  (%.0fs, %d turns, %d/%d functions)", self.lg.name, fn["name"],
+                    f"{len(raws)} hypothesis(es) at {scores}" if raws else "no bug",
+                    res.duration_s, res.turns, len(self._analysed_fns), len(self._queued_fns))
+        for raw in raws:
             score = float(raw.get("finder_score", 0.5))
             vh_id = self.store.create_vh(
                 self.lg.name, function_name=raw.get("function_name") or fn["name"],
@@ -513,6 +587,10 @@ class DirectedRun:
             self.store.move_vh(vh_id, "rejected", session=res.session_id,
                                reason=f"the verifier submitted no verdict (session {res.status})")
             return
+        logger.info("%s: verifier %s -> score %.2f, %s  (%.0fs, %d turns)", self.lg.name,
+                    vh["function_name"], score,
+                    "PoC next" if score >= self.cfg.poc_threshold else "rejected",
+                    res.duration_s, res.turns)
         if score >= self.cfg.poc_threshold:
             self.store.move_vh(vh_id, "pending_poc", session=res.session_id, reason=f"verifier score {score}")
             self._enqueue(PRIO_POC, self._poc, vh_id, 0)
@@ -544,6 +622,10 @@ class DirectedRun:
                             pocs_dir=str(pocs_dir))
         self.store.update_vh(vh_id, poc_sessions=[*vh["poc_sessions"], res.session_id])
         crash = self._confirm_poc(vh_id, res, pocs_dir)
+        logger.info("%s: poc %s attempt %d -> %s  (%.0fs, %d turns)", self.lg.name, vh["function_name"],
+                    attempt + 1,
+                    f"reproduced {crash['describe']}" if crash else "no crash reproduced",
+                    res.duration_s, res.turns)
         if crash is not None:
             self.store.update_vh(vh_id, poc_status="crashed", poc_blob=crash["artifact"],
                                  crash_id=crash["crash_id"])
@@ -640,7 +722,7 @@ class DirectedRun:
                 logger.warning("%s: task failed: %s", self.lg.name, fut.exception())
 
         try:
-            while self._left() > 150:
+            while self._left() > self._dispatch_bar():
                 bug_lane_idle = self._bugq.empty() and not any(
                     not f.done() and f not in breaker_futures for f in inflight)
                 if breaker_slots and bug_lane_idle and (
@@ -844,6 +926,12 @@ class DirectedRun:
             "coverage_final": final,
             "elapsed_s": round(time.monotonic() - self._t0, 1),
         }
+        used = report["elapsed_s"]
+        asked = float(self.cfg.duration_seconds)
+        logger.info("%s: stage done in %.0fs of the %.0fs asked (%.0f%%); %d/%d functions, %d VH, "
+                    "%d PoC, %d crash", self.lg.name, used, asked, 100.0 * used / max(1.0, asked),
+                    report["functions_analysed"], report["functions_queued"], report["vhs"],
+                    report["pocs"], report["crashes"])
         (self.ws.root / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         self.store.emit("lg_finished", lg=self.lg.name, **{k: report[k] for k in
                                                             ("vhs", "pocs", "crashes", "functions_analysed")})
