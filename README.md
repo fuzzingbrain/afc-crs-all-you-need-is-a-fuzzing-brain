@@ -21,7 +21,87 @@ a **Suspicious-Point (VH)** reasoning brain: specialized agents partition the
 target, reason about where bugs live, build proofs-of-vulnerability, and propose
 patches — with every finding dynamically verified to eliminate hallucinations.
 
-## Prerequisites
+---
+
+## Two systems in this repository
+
+| | **FBv3** (current) | **FBv2** (the paper) |
+| --- | --- | --- |
+| what it needs | a C/C++ source tree | a target with a fuzz harness already |
+| the harness | **it writes and builds its own** | yours, or OSS-Fuzz's |
+| targets | any C/C++ repo, OSS-Fuzz or not | OSS-Fuzz projects |
+| what it costs | a **Claude/ChatGPT subscription**, no API key | metered API keys |
+| where | [`v3-agentic-research/`](v3-agentic-research) | this directory |
+
+Everything below this section is FBv2. If you want the system that writes the
+harness itself, start here.
+
+## Quick start — FBv3 (agent mode)
+
+Every reasoning step is a session on a subscription CLI you are already logged
+in with. FBv3 never handles a credential: it runs `claude` and `codex` as you,
+and strips every API-key variable out of a session's environment so neither can
+fall back to metered billing.
+
+**1. The agent CLIs**, logged in as yourself. Both is the default (analysis
+roles go to `codex`, bug-touching roles to `claude`, and a role one backend
+refuses is retried on the other); one alone works too:
+
+```bash
+npm i -g @anthropic-ai/claude-code && claude      # then /login  (Claude Pro/Max)
+npm i -g @openai/codex            && codex login  #             (ChatGPT Plus/Pro)
+```
+
+**2. FBv3** (Python 3.11+, and Docker usable without `sudo`):
+
+```bash
+git clone https://github.com/fuzzingbrain/afc-crs-all-you-need-is-a-fuzzing-brain.git
+cd afc-crs-all-you-need-is-a-fuzzing-brain/v3-agentic-research
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e .
+```
+
+**3. Check** — verifies the logins, images and paths, and builds the small
+workspace image once. It starts no agent and no run:
+
+```bash
+fbv3 check --project libyaml --image gcr.io/oss-fuzz/libyaml
+```
+
+**4. Run it** on a repository nothing has ever fuzzed. No image, no task file,
+no existing fuzz target: an agent writes the `build.sh` and the harness, a
+reviewer runs inputs through the candidate, and then the bug hunt goes through
+it. This is the run that found microtar's stack-buffer-overflow, about 27
+minutes:
+
+```bash
+git clone https://github.com/rxi/microtar
+fbv3 run --project microtar --src ./microtar --function mtar_read_header \
+    --duration 900 -o runs/microtar
+
+cat runs/microtar/report.md
+```
+
+On an OSS-Fuzz project instead (`docker pull gcr.io/oss-fuzz/libyaml` first):
+
+```bash
+fbv3 run --project libyaml --image gcr.io/oss-fuzz/libyaml --language c \
+    --discover 1 --duration 900 --sessions 3 -o runs/libyaml
+```
+
+The report is the point: it names the harness the agent wrote, every hypothesis
+the finder raised with the verifier's answer to it -- including the rejected
+ones, which say what was examined and why it was set aside -- and every crash
+with the input that causes it. Nothing is reported that has not crashed a real
+build.
+
+**Full documentation, including the one-subscription setup, the eleven agent
+roles, the harness principles and what it found on repositories it had never
+seen: [`v3-agentic-research/README.md`](v3-agentic-research/README.md).**
+
+---
+
+## Prerequisites (FBv2)
 
 | Requirement | Notes |
 |---|---|
