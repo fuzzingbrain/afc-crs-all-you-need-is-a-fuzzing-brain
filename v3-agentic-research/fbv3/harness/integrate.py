@@ -161,7 +161,7 @@ class IntegrateStage:
         self.ws.path("out/address").mkdir(parents=True, exist_ok=True)
         shutil.copytree(build_out, self.ws.path("out/address"), dirs_exist_ok=True, symlinks=True)
         g = gate(self.ws, self.task, code=sub["harness_code"],
-                 binary_container=f"/ws/out/address/{binary}", harness_names=[binary])
+                 binary_container=f"/ws/out/address/{binary}", harness_names=[binary], authored=False)
         record = {"stage": "gate", "functions": len(rows), "files": len(files),
                   "coverage_out": cov.out_dir, "coverage_binary": cov.binary, "gate": g}
         if g.get("infra"):

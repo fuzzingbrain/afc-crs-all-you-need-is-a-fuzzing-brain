@@ -65,10 +65,11 @@ def _read_json(path: Path) -> dict:
         return {}
 
 
-def gate(ws: Workspace, task: Task, *, code: str, binary_container: str, harness_names: list[str]) -> dict:
+def gate(ws: Workspace, task: Task, *, code: str, binary_container: str, harness_names: list[str],
+         authored: bool = True) -> dict:
     """The deterministic gate on a built candidate: static checks + independent smoke run."""
     hc = task.harness
-    findings = [f.to_dict() for f in static_findings(code, hc.sanitizers, task.language)]
+    findings = [f.to_dict() for f in static_findings(code, hc.sanitizers, task.language, authored)]
     errors = [f for f in findings if f["severity"] == "error"]
     have_sym = (ws.path("out/llvm") / "llvm-symbolizer").is_file()
 

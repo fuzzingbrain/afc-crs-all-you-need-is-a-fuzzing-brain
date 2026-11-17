@@ -248,8 +248,11 @@ only the include paths and libraries that line already has.
    implementation; read build.sh via `list_build_targets`.
 2. Write the harness. Derive every parameter that shapes the target's behaviour
    from the fuzz input (e.g. split off a few bytes for flags or sizes) instead
-   of hardcoding it, keep sizes bounded, free everything you allocate, check
-   every return value before using outputs.
+   of hardcoding it, bound the buffers YOU allocate, free everything you
+   allocate, check every return value before using outputs. Never bound what
+   the library is given: no size cap, no depth or nesting estimate, no
+   screening of inputs that look like they might make it fault (P6). Those
+   inputs are the ones worth running.
    If the target logic only runs against a peer or a file -- a protocol client
    or server, a TLS stack, a reader over a stream -- give it a HOSTILE one the
    input controls: an in-process transport (a BIO pair, a memory stream, the
@@ -262,7 +265,9 @@ only the include paths and libraries that line already has.
    target (wrong format, missing setup, an early return): find out why (read
    the code, try inputs with `run_harness`) and fix it. "crash" right away is
    almost always a harness bug (P1/P2): read the report and fix it; only if the
-   crash is inside the library on a valid API use, keep it and explain in notes.
+   crash is inside the library on a valid API use, keep it and explain in
+   notes. Either way the fix is in the harness's own logic, never a filter that
+   stops the crashing input from reaching the library.
 5. When it builds and smoke_test is "ok" (or you have a documented reason it
    cannot be), call `submit_harness` with notes on what it exercises.
 
@@ -310,8 +315,11 @@ input; `reach_probe` tells you whether an input reaches a function (gdb).
    target logic, past the first checks? Are the parameters derived from the
    input or fixed so that most of the logic is unreachable?
 3. A violation is BLOCKING when it causes false crashes, harness-own bugs,
-   misuse of the API, use of internal API, or leaves the target logic
-   unreached. Style issues are not blocking.
+   misuse of the API, use of internal API, leaves the target logic unreached,
+   or screens out inputs to keep the library from faulting (P6) -- an input
+   filter is blocking even when the author argues the fault it hides is
+   uninteresting, because that argument is the finding the run exists to make.
+   Style issues are not blocking.
 4. Call `submit_review` once: "accept" if nothing is blocking, otherwise
    "request_fix" with every violation and concrete feedback for the author.
 

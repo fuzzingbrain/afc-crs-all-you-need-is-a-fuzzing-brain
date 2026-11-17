@@ -11,6 +11,7 @@ an MSan include the generator prompt forbade, and P3/P4 were never enforced).
         input actually reaches the target logic.
     P5  Under MemorySanitizer, the target's outputs are checked for
         initialisation (only when the task builds with ``memory``).
+    P6  No input is filtered out to keep the library from faulting.
 
 ``static_findings`` checks what can be checked without an agent; the
 reviewer agent checks the rest, dynamically where it can (it runs inputs).
@@ -62,12 +63,24 @@ PRINCIPLES = {
         "reported where it is produced. Include <sanitizer/msan_interface.h> and the calls ONLY inside "
         "`#if defined(__has_feature)` / `#if __has_feature(memory_sanitizer)` so other builds still compile.",
     ),
+    "P6": (
+        "No input is filtered out to keep the library from faulting",
+        "The harness must not reject, clamp or repair an input in order to stop the library from crashing on "
+        "it: no depth or nesting estimate that skips deeply nested input, no upper bound on the input size, "
+        "no screening of values the API documents as acceptable. Those inputs are the point. A guard like "
+        "that does not prevent one crash, it makes a whole bug class unreachable for the entire run -- "
+        "libyaml's composer recurses once per nesting level and overflows the 8MB stack on 200k '[', and a "
+        "generated harness that skipped every input past 1000 nesting levels or 64 KiB turned a real, "
+        "reproducible SIGSEGV into a run that reported no bug. Bounding what the HARNESS ITSELF allocates is "
+        "right; bounding what the LIBRARY is asked to parse is not. If an input makes the library crash, "
+        "that is the finding: keep it and say so in the notes.",
+    ),
 }
 
 
 def principles_text(sanitizers: tuple[str, ...] | list[str]) -> str:
     """The principles that apply to this task, as prompt text."""
-    keys = ["P1", "P2", "P3", "P4"] + (["P5"] if "memory" in sanitizers else [])
+    keys = ["P1", "P2", "P3", "P4"] + (["P5"] if "memory" in sanitizers else []) + ["P6"]
     return "\n".join(f"- {k} — {PRINCIPLES[k][0]}: {PRINCIPLES[k][1]}" for k in keys)
 
 
@@ -83,6 +96,24 @@ class Finding:
 
 
 _INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.M)
+
+# P6, in the two shapes a defensive filter takes. The first says so itself: the
+# guard that hid libyaml's stack overflow was introduced by its own comment,
+# "Rough nesting-depth bound to avoid uninteresting stack exhaustion from
+# unbounded recursion", and the reviewer agreed with it. A harness that
+# announces which fault it is keeping out has named a P6 violation, so the
+# comments are worth reading.
+_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+_AVOIDING = re.compile(
+    r"\b(?:avoid|avoids|avoiding|prevent|prevents|preventing|skip|skips|skipping|reject|rejects|"
+    r"rejecting|guard|guards|bound|bounds|bounding|limit|limits|cap|caps)\b[^.;]{0,100}?"
+    r"(stack (?:exhaustion|overflow)|unbounded recursion|deep(?:ly nested| recursion)|recursion depth|"
+    r"nesting depth|overflow|crash(?:es|ing)?|out-of-memory|\boom\b|timeout|hang)", re.I)
+# The second is silent: an early return on an input larger than some constant.
+# A lower bound ("size < 4", the header the format needs) is not a filter; an
+# upper bound throws away every input the fuzzer grew past it.
+_SIZE_CAP = re.compile(
+    r"\b(?:size|len|length|n|in_len|data_size|datasize|sz)\s*(?:>=?)\s*(\d{3,}|0x[0-9a-fA-F]{2,})")
 _INTERNAL_HEADER = re.compile(r"(^|/)(internal|private|priv)(/|$)|_(int|internal|priv|private)\.h$|\.c$", re.I)
 
 
@@ -91,7 +122,15 @@ def _line_of(source: str, pos: int) -> int:
 
 
 def static_findings(source: str, sanitizers: tuple[str, ...] | list[str] = ("address",),
-                    language: str = "c") -> list[Finding]:
+                    language: str = "c", authored: bool = True) -> list[Finding]:
+    """The findings a checker can reach without an agent.
+
+    ``authored`` is False when the harness is the project's own (integrate
+    mode). A P6 filter there is still worth saying out loud -- assimp's
+    upstream harness drops every input over 1MB "to prevent OOMs and
+    timeouts" -- but it is not a defect the agent introduced or was asked to
+    fix, so it does not fail the gate and send it into a revision round.
+    """
     out: list[Finding] = []
     if not re.search(r"\bLLVMFuzzerTestOneInput\s*\(", source):
         out.append(Finding("P1", "error", "the harness does not define LLVMFuzzerTestOneInput"))
@@ -114,6 +153,21 @@ def static_findings(source: str, sanitizers: tuple[str, ...] | list[str] = ("add
         if "__msan_check_mem_is_initialized" not in source:
             out.append(Finding("P5", "error", "an MSan build is requested but no output is checked with "
                                "__msan_check_mem_is_initialized"))
+    for m in _COMMENT.finditer(source):
+        a = _AVOIDING.search(m.group(0))
+        if a:
+            out.append(Finding("P6", "error" if authored else "warning",
+                               f"the harness says it keeps {a.group(1).lower()} out "
+                               f"({m.group(0).strip()[:90]!r}); that fault is what the run is looking for, "
+                               "and screening its inputs makes it unreachable for the whole run",
+                               _line_of(source, m.start())))
+    for m in _SIZE_CAP.finditer(source):
+        if "return" not in source[m.end():m.end() + 80]:
+            continue
+        out.append(Finding("P6", "warning", f"inputs over {m.group(1)} bytes are returned on without being "
+                           "parsed; the fuzzer's longer inputs are then wasted, and a bug that needs one "
+                           "cannot be found. Bound the harness's own buffers instead, or let the engine's "
+                           "-max_len decide", _line_of(source, m.start())))
     if msan_include and not _guarded(source, msan_include.start()):
         out.append(Finding("P5", "error", "<sanitizer/msan_interface.h> is included without a "
                            "__has_feature(memory_sanitizer) guard; non-MSan builds may break",

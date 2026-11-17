@@ -82,6 +82,57 @@ def test_an_unguarded_msan_include_breaks_other_builds():
     assert of(static_findings(good, ("memory",)), "P5", "error") == []
 
 
+# The guard that cost a run: libyaml's composer recurses once per nesting level
+# and dies on 200k '[', and the generated harness skipped exactly that input --
+# then said why, and the reviewer agreed with it.
+FILTERING = """
+#include <stdint.h>
+#include <yaml.h>
+
+/* Rough nesting-depth bound to avoid uninteresting stack exhaustion from
+ * unbounded recursion in loader/dumper (libyaml has no depth limit). */
+static int too_deep(const uint8_t *d, size_t n) { return n > 1000; }
+
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+  if (size < 3 || size > 65536) return 0;
+  if (too_deep(data, size)) return 0;
+  return 0;
+}
+"""
+
+
+def test_a_harness_that_says_which_fault_it_keeps_out_fails_the_gate():
+    f = of(static_findings(FILTERING), "P6", "error")
+    assert len(f) == 1
+    assert "stack exhaustion" in f[0].message
+    assert f[0].line == 5  # the comment, not the guard it introduces
+
+
+def test_an_upper_bound_on_the_input_is_a_warning():
+    f = of(static_findings(FILTERING), "P6", "warning")
+    assert len(f) == 1 and "65536" in f[0].message
+
+
+def test_the_size_a_format_needs_is_not_a_filter():
+    # "size < 1" is the header the API requires; only an upper bound throws
+    # the fuzzer's longer inputs away.
+    assert of(static_findings(GOOD), "P6") == []
+
+
+def test_a_bound_that_is_not_an_early_return_is_not_a_filter():
+    # Choosing a buffer size from the input is what the prompt asks for.
+    src = GOOD.replace("uLongf dlen = size * 2 + 32;",
+                       "uLongf dlen = size > 100000 ? 100000 : size * 2 + 32;")
+    assert of(static_findings(src), "P6") == []
+
+
+def test_a_filter_in_the_projects_own_harness_is_reported_but_does_not_block():
+    # Integrate mode: assimp's upstream harness drops every input over 1MB
+    # "to prevent OOMs and timeouts". Worth knowing, not the agent's to fix.
+    f = of(static_findings(FILTERING, authored=False), "P6")
+    assert f and not of(f, severity="error")
+
+
 def test_the_prompt_text_matches_the_task_sanitizers():
     text = principles_text(("address",))
     assert "P4" in text and "P5" not in text
